@@ -1,0 +1,19 @@
+[Unit]
+Description=RaPiSys host agent (allowlisted privileged operations)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/rapisys/agent.env
+ExecStart=/usr/bin/node /opt/rapisys/agent/rapisys-agent.cjs
+Restart=on-failure
+RestartSec=3
+# Hardening (the agent needs root for mounts/apt/fan, but we still confine it)
+NoNewPrivileges=no
+ProtectHome=read-only
+PrivateTmp=yes
+RuntimeDirectory=rapisys
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
