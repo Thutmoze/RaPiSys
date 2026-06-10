@@ -1057,7 +1057,7 @@ app.use((req, res, next) => {
 // ===================
 
 app.listen(PORT, () => {
-  console.log(`Pi Dashboard API running on http://localhost:${PORT}`);
+  console.log(`RaPiSys API running on http://localhost:${PORT}`);
   console.log(`Settings config: ${CONFIG.settingsPath}`);
   console.log(`Auth required: ${CONFIG.adminToken ? 'Yes' : 'No (dev mode)'}`);
 });

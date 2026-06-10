@@ -19,7 +19,7 @@ export const KNOWN_SERVICES = {
   1883:  { name: 'MQTT', icon: 'radio', checkType: 'tcp' },
   2049:  { name: 'NFS', icon: 'hard-drive', checkType: 'tcp' },
   3000:  { name: 'Grafana', icon: 'bar-chart', checkType: 'http', path: '/api/health' },
-  3001:  { name: 'Pi Dashboard', icon: 'activity', checkType: 'http', path: '/api/health' },
+  3001:  { name: 'RaPiSys', icon: 'activity', checkType: 'http', path: '/api/health' },
   3306:  { name: 'MySQL', icon: 'database', checkType: 'tcp' },
   4500:  { name: 'IPSec NAT-T', icon: 'shield', checkType: 'interface', interface: 'ipsec0' },
   5432:  { name: 'PostgreSQL', icon: 'database', checkType: 'tcp' },
