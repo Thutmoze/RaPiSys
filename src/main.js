@@ -2221,3 +2221,6 @@ setInterval(() => {
 }, 10000);
 
 // End of file
+
+// RaPiSys: expose toast system for the modules layer
+window.showToast = showToast;
