@@ -1040,6 +1040,20 @@ app.delete('/api/services/config/:index', requireAuth, async (req, res) => {
   }
 });
 
+// ============================================================
+// RaPiSys composition root
+// ------------------------------------------------------------
+// Everything below is additive: legacy routes above are untouched
+// and keep their exact response shapes.
+// ============================================================
+
+import('./rapisys.js')
+  .then(({ initRapisys }) => initRapisys({
+    app, loadSettings, saveSettings, withFileLock, requireAuth,
+  }))
+  .then(() => console.log('[rapisys] modules initialised'))
+  .catch((err) => console.error('[rapisys] init failed (legacy dashboard still works):', err));
+
 // ===================
 // Static Files & SPA
 // ===================
