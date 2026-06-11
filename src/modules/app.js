@@ -126,12 +126,12 @@ const ICONS = {
 const PAGES = [
   { id: 'overview', label: 'Overview' },
   { id: 'hardware', label: 'Hardware' },
-  { id: 'sessions', label: 'Sessions', soon: true },
+  { id: 'sessions', label: 'Sessions' },
   { id: 'network', label: 'Network', soon: true },
   { id: 'reports', label: 'Reports', soon: true },
   { id: 'updates', label: 'Updates', soon: true },
   { id: 'inventory', label: 'Inventory', soon: true },
-  { id: 'alerts', label: 'Alerts', soon: true },
+  { id: 'alerts', label: 'Alerts' },
 ];
 
 const pageRenderers = {}; // id -> { mount(el), unmount() }
@@ -325,6 +325,233 @@ pageRenderers.hardware = (() => {
       clearInterval(timer);
       clearInterval(this._histTimer);
     },
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Sessions page
+// ---------------------------------------------------------------------------
+
+pageRenderers.sessions = (() => {
+  let timer = null;
+
+  const fmtDur = (ms) => {
+    if (ms == null) return '—';
+    const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+    return d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m`;
+  };
+  const fmtTime = (ts) => ts ? new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function refresh(host) {
+    let snap;
+    try { snap = await api('/sessions'); } catch { return; }
+    const now = Date.now();
+
+    const row4 = (cells) => `<div class="sess-row">${cells.map((c) => `<span>${c}</span>`).join('')}</div>`;
+    const sshHtml = snap.ssh.length
+      ? snap.ssh.map((s) => row4([
+          `<b>${esc(s.username)}</b> <span class="sess-tty">${esc(s.meta?.tty || '')}</span>`,
+          esc(s.source), fmtDur(now - s.startedAt),
+          s.idleMs != null ? `idle ${fmtDur(s.idleMs)}` : '—',
+        ])).join('')
+      : '<p class="sess-empty">No active SSH sessions</p>';
+
+    const vncHtml = snap.vnc.length
+      ? snap.vnc.map((s) => row4([
+          `<b>${esc(s.meta?.server || 'VNC')}</b>`, esc(s.source),
+          'connected', `port ${s.meta?.peerPort ?? ''}`,
+        ])).join('')
+      : '<p class="sess-empty">No active VNC connections</p>';
+
+    const ts = snap.tailscale;
+    const tsHtml = !ts.installed
+      ? '<p class="sess-empty">Tailscale not detected on this Pi</p>'
+      : (ts.peers.length ? ts.peers.map((p) => row4([
+          `<span class="sess-dot ${p.online ? 'on' : ''}"></span> <b>${esc(p.username)}</b>`,
+          esc(p.source), esc(p.os),
+          p.online ? 'active now' : `last seen ${fmtTime(p.lastActive)}`,
+        ])).join('') : '<p class="sess-empty">No peers in the tailnet</p>');
+
+    $('[data-sess=ssh]', host).innerHTML = sshHtml;
+    $('[data-sess=vnc]', host).innerHTML = vncHtml;
+    $('[data-sess=ts]', host).innerHTML = tsHtml;
+    $('[data-sess=counts]', host).textContent =
+      `${snap.ssh.length} SSH · ${snap.vnc.length} VNC · ${ts.peers?.filter((p) => p.online).length || 0} Tailscale online`;
+  }
+
+  async function refreshHistory(host) {
+    try {
+      const data = await api('/sessions/history?range=7d');
+      const el2 = $('[data-sess=hist]', host);
+      if (!data.history.length) { el2.innerHTML = '<p class="sess-empty">No login history yet</p>'; return; }
+      el2.innerHTML = data.history.slice(0, 30).map((h) => `
+        <div class="sess-row">
+          <span><b>${esc(h.username)}</b> <span class="sess-kind">${esc(h.kind)}</span></span>
+          <span>${esc(h.source || '')}</span>
+          <span>${fmtTime(h.started_at)}</span>
+          <span>${h.ended_at ? fmtDur(h.ended_at - h.started_at) : '<span class="sess-live">active</span>'}</span>
+        </div>`).join('');
+    } catch { /* keep last */ }
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header">
+            <div class="card-icon cpu-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+            <span class="card-title">Active Sessions</span>
+            <span class="sess-counts" data-sess="counts"></span>
+          </div>
+          <div class="card-body">
+            <h4 class="sess-h">SSH</h4><div data-sess="ssh"></div>
+            <h4 class="sess-h">VNC</h4><div data-sess="vnc"></div>
+            <h4 class="sess-h">Tailscale</h4><div data-sess="ts"></div>
+          </div>
+        </div>
+        <div class="card sess-span">
+          <div class="card-header">
+            <div class="card-icon uptime-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+            <span class="card-title">Login History (7 days)</span>
+          </div>
+          <div class="card-body" data-sess="hist"></div>
+        </div>
+      </div>`;
+      refresh(host); refreshHistory(host);
+      timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
+    },
+    unmount() { clearInterval(timer); },
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Alerts page
+// ---------------------------------------------------------------------------
+
+pageRenderers.alerts = (() => {
+  let timer = null;
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const SEV_CLASS = { info: 'sev-info', warning: 'sev-warning', critical: 'sev-critical' };
+
+  async function refresh(host) {
+    let rules, active, history, metrics;
+    try {
+      [rules, active, history, metrics] = await Promise.all([
+        api('/alerts/rules'), api('/alerts/active'), api('/alerts/history?limit=20'), api('/alerts/metrics'),
+      ]);
+    } catch { return; }
+
+    // active banner
+    const banner = $('[data-al=active]', host);
+    banner.innerHTML = active.active.length
+      ? active.active.map((a) => `<div class="al-banner ${SEV_CLASS[a.severity]}">⚠ <b>${esc(a.name)}</b> — firing since ${new Date(a.since).toLocaleTimeString()}</div>`).join('')
+      : '<div class="al-banner al-ok">✓ No active alerts</div>';
+
+    // rules table
+    $('[data-al=rules]', host).innerHTML = rules.rules.map((r) => `
+      <div class="al-rule ${r.enabled ? '' : 'al-disabled'}">
+        <span class="al-sev ${SEV_CLASS[r.severity]}">${esc(r.severity)}</span>
+        <span class="al-name"><b>${esc(r.name)}</b><br><small>${esc(r.metric)} ${esc(r.op)} ${r.threshold} for ${r.sustain_s}s · ${(r.channels || []).join('+')}</small></span>
+        <span class="al-actions">
+          <button class="action-btn al-btn" data-toggle="${r.id}" data-enabled="${r.enabled}">${r.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="action-btn al-btn al-del" data-del="${r.id}">Delete</button>
+        </span>
+      </div>`).join('') || '<p class="sess-empty">No rules — add one below.</p>';
+
+    // metric datalist for the add form
+    $('#al-metrics', host).innerHTML = metrics.metrics.map((m) => `<option value="${esc(m)}">`).join('');
+
+    // history
+    $('[data-al=hist]', host).innerHTML = history.history.length
+      ? history.history.map((h) => `
+        <div class="sess-row">
+          <span class="al-sev ${SEV_CLASS[h.severity] || ''}">${esc(h.severity || '')}</span>
+          <span><b>${esc(h.name || 'deleted rule')}</b> <small>${esc(h.metric || '')}</small></span>
+          <span>peak ${h.peak_value != null ? Math.round(h.peak_value * 10) / 10 : '—'}</span>
+          <span>${new Date(h.fired_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${h.resolved_at ? '' : ' · <span class="sess-live">ongoing</span>'}</span>
+        </div>`).join('')
+      : '<p class="sess-empty">No incidents recorded</p>';
+
+    // wire row buttons
+    host.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => {
+      const rule = rules.rules.find((r) => r.id == b.dataset.toggle);
+      try {
+        await api(`/alerts/rules/${rule.id}`, { method: 'PUT', body: { ...rule, enabled: !(b.dataset.enabled == 1) } });
+        refresh(host);
+      } catch (err) { toast('error', 'Alerts', err.message); }
+    });
+    host.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+      if (!confirm('Delete this alert rule?')) return;
+      try { await api(`/alerts/rules/${b.dataset.del}`, { method: 'DELETE' }); refresh(host); }
+      catch (err) { toast('error', 'Alerts', err.message); }
+    });
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header">
+            <div class="card-icon temp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
+            <span class="card-title">Alerts</span>
+          </div>
+          <div class="card-body">
+            <div data-al="active"></div>
+            <h4 class="sess-h">Rules</h4>
+            <div data-al="rules"></div>
+            <h4 class="sess-h">Add rule</h4>
+            <div class="al-form wz-form">
+              <label>Name <input data-new="name" placeholder="High CPU temperature" maxlength="80"></label>
+              <div class="al-form-row">
+                <label>Metric <input data-new="metric" list="al-metrics" placeholder="temp.cpu"><datalist id="al-metrics"></datalist></label>
+                <label>Op <select data-new="op"><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option></select></label>
+                <label>Threshold <input data-new="threshold" type="number" step="any" placeholder="80"></label>
+              </div>
+              <div class="al-form-row">
+                <label>Sustain (s) <input data-new="sustain" type="number" value="120"></label>
+                <label>Severity <select data-new="severity"><option>warning</option><option>critical</option><option>info</option></select></label>
+                <label>Cooldown (s) <input data-new="cooldown" type="number" value="900"></label>
+              </div>
+              <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
+              <div class="wz-row"><button class="action-btn" data-new="add">Add rule</button><span data-new="status"></span></div>
+            </div>
+            <p class="hw-hint">Email notifications use the SMTP settings from Setup (Settings → re-run wizard sections coming soon). Rules are evaluated every 30 s.</p>
+          </div>
+        </div>
+        <div class="card sess-span">
+          <div class="card-header">
+            <div class="card-icon uptime-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg></div>
+            <span class="card-title">Incident History</span>
+          </div>
+          <div class="card-body" data-al="hist"></div>
+        </div>
+      </div>`;
+
+      $('[data-new=add]', host).onclick = async () => {
+        const stat = $('[data-new=status]', host);
+        try {
+          await api('/alerts/rules', { method: 'POST', body: {
+            name: $('[data-new=name]', host).value.trim(),
+            metric: $('[data-new=metric]', host).value.trim(),
+            op: $('[data-new=op]', host).value,
+            threshold: Number($('[data-new=threshold]', host).value),
+            sustain_s: Number($('[data-new=sustain]', host).value),
+            severity: $('[data-new=severity]', host).value,
+            cooldown_s: Number($('[data-new=cooldown]', host).value),
+            channels: $('[data-new=email]', host).checked ? ['ui', 'email'] : ['ui'],
+          }});
+          setStatus(stat, true, '✓ rule added');
+          refresh(host);
+        } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
+      };
+
+      refresh(host);
+      timer = setInterval(() => refresh(host), 15000);
+    },
+    unmount() { clearInterval(timer); },
   };
 })();
 
