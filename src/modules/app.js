@@ -34,6 +34,14 @@ async function api(path, opts = {}) {
   return data;
 }
 
+/** Style an inline status span: bold green on success, bold red on error. */
+function setStatus(el, ok, msg) {
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('wz-status-ok', 'wz-status-err');
+  el.classList.add(ok ? 'wz-status-ok' : 'wz-status-err');
+}
+
 function toast(type, title, message) {
   // Reuse the legacy toast system if present.
   if (window.showToast) return window.showToast(type, title, message);
@@ -417,6 +425,7 @@ async function maybeShowWizard() {
         });
         $('[data-nas=mount]', body)?.addEventListener('click', async () => {
           const stat = $('[data-nas=status]', body);
+          stat.classList.remove('wz-status-ok', 'wz-status-err');
           stat.textContent = 'Mounting…';
           try {
             const r = await api('/setup/nas/mount', { method: 'POST', body: {
@@ -429,10 +438,10 @@ async function maybeShowWizard() {
               username: $('[data-nas=user]', body)?.value,
               password: $('[data-nas=pass]', body)?.value,
             }});
-            stat.textContent = `✓ mounted at ${r.mountpoint}`;
+            setStatus(stat, true, `✓ mounted at ${r.mountpoint}`);
             $('[data-st=dir]', body).value = r.mountpoint;
             state.nas = r.mountpoint;
-          } catch (err) { stat.textContent = `✗ ${err.message}`; }
+          } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
         });
         nextBtn.textContent = 'Continue';
       },
@@ -502,17 +511,18 @@ async function maybeShowWizard() {
               from: $('[data-sm=from]', body).value.trim(),
               to: $('[data-sm=to]', body).value.trim(),
             }});
-            stat.textContent = '✓ saved';
+            setStatus(stat, true, '✓ saved');
             $('[data-sm=test]', body).disabled = false;
-          } catch (err) { stat.textContent = `✗ ${err.message}`; }
+          } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
         });
         $('[data-sm=test]', body).addEventListener('click', async () => {
           const stat = $('[data-sm=status]', body);
+          stat.classList.remove('wz-status-ok', 'wz-status-err');
           stat.textContent = 'Sending…';
           try {
             await api('/setup/smtp/test', { method: 'POST', body: { to: $('[data-sm=to]', body).value.trim() } });
-            stat.textContent = '✓ test email sent';
-          } catch (err) { stat.textContent = `✗ ${err.message}`; }
+            setStatus(stat, true, '✓ test email sent');
+          } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
         });
         nextBtn.textContent = 'Continue';
       },

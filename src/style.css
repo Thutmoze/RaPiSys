@@ -4584,3 +4584,7 @@ body.ultra .rapisys-grid { gap: 8px; }
 }
 body.compact .wizard .action-btn { padding: 8px 18px; font-size: 13px; }
 body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }
+
+/* Wizard inline status messages */
+.wz-status-ok { color: #10b981; font-weight: 700; }
+.wz-status-err { color: var(--accent-red, #ef4444); font-weight: 700; }
