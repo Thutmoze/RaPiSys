@@ -49,7 +49,7 @@ The original design language is preserved exactly: same dark glassmorphism, same
 ### Requirements
 
 - Raspberry Pi 5 (any RAM size) — Pi 4 works with hardware features gracefully hidden
-- Raspberry Pi OS **Bookworm** (64-bit)
+- Raspberry Pi OS **Bookworm** or **Trixie** (64-bit)
 - **Docker + Docker Compose v2** ([install guide](https://docs.docker.com/engine/install/debian/))
 - Node.js on the host (for the agent; the installer adds it if missing)
 
@@ -66,7 +66,7 @@ sudo ./deploy.sh install
 
 The installer:
 
-1. Verifies the platform (Pi 5, Bookworm, Docker)
+1. Verifies the platform (Pi 5, Bookworm/Trixie, Docker)
 2. Installs host packages: `cifs-utils`, `nfs-common`, `vnstat`
 3. Generates secrets into `.env` — `ADMIN_TOKEN`, `SECRET_KEY` (credential encryption), `AGENT_SECRET` — and restricts CORS to your LAN address
 4. Installs and starts the **rapisys-agent** systemd service
