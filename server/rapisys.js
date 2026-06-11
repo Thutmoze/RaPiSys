@@ -13,14 +13,21 @@ import { createScheduler } from './core/scheduler.js';
 import { createMetricsRepo } from './repositories/metrics.js';
 import { createEventsRepo } from './repositories/events.js';
 import { createSecretsRepo } from './repositories/secrets.js';
+import { createAlertsRepo } from './repositories/alerts.js';
+import { createSessionsRepo } from './repositories/sessions.js';
 import { createHardwareCollector } from './collectors/hardware.js';
+import { createSessionsCollector } from './collectors/sessions.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
+import { createAlertEngine } from './services/alerting.js';
+import { createSessionTracker } from './services/session-tracker.js';
 import { historyRouter } from './routes/history.js';
 import { deepHealthRouter } from './routes/health.js';
 import { setupRouter } from './routes/setup.js';
 import { hardwareRouter } from './routes/hardware.js';
+import { alertsRouter } from './routes/alerts.js';
+import { sessionsRouter } from './routes/sessions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,11 +52,13 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
     secrets = createSecretsRepo(getDb());
+    alertsRepo = createAlertsRepo(getDb());
+    sessionsRepo = createSessionsRepo(getDb());
   }
   rebuildRepos();
 
@@ -64,7 +73,10 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     listMetrics: (...a) => metricsRepo.listMetrics(...a),
     downsample: (...a) => metricsRepo.downsample(...a),
     purgeOlderThan: (...a) => metricsRepo.purgeOlderThan(...a),
+    latestValues: (...a) => metricsRepo.latestValues(...a),
   };
+  const alertsFacade = new Proxy({}, { get: (_, m) => (...a) => alertsRepo[m](...a) });
+  const sessionsRepoFacade = new Proxy({}, { get: (_, m) => (...a) => sessionsRepo[m](...a) });
   const eventsFacade = {
     add: (...a) => eventsRepo.add(...a),
     recent: (...a) => eventsRepo.recent(...a),
@@ -92,16 +104,30 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     events: eventsFacade,
   });
 
+  const sessions = createSessionsCollector();
+  const alertEngine = createAlertEngine({
+    alertsRepo: alertsFacade, metricsRepo: metricsFacade,
+    eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
+  });
+  alertEngine.seedDefaults();
+  const sessionTracker = createSessionTracker({
+    sessions, sessionsRepo: sessionsRepoFacade, eventsRepo: eventsFacade,
+  });
+
   // ---- scheduler ----------------------------------------------------------------
   const scheduler = createScheduler();
   const sampleMs = (Number(process.env.SAMPLE_INTERVAL_S) || 10) * 1000;
   scheduler.register('metrics-sampler', sampleMs, () => sampler.sampleOnce(), { runNow: true });
   scheduler.register('retention', 3600e3, () => retention.runOnce());
+  scheduler.register('alert-engine', 30e3, () => alertEngine.evaluateOnce());
+  scheduler.register('session-tracker', 60e3, () => sessionTracker.trackOnce(), { runNow: true });
 
   // ---- routes ----------------------------------------------------------------------
   app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
   app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb }));
   app.use('/api/hardware', hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth }));
+  app.use('/api/alerts', alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth }));
+  app.use('/api/sessions', sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth, events: eventsFacade,
