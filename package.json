@@ -9,8 +9,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "express": "^5.2.1",
     "nodemailer": "^8.0.11",
+    "smoothie": "^1.36.1",
     "systeminformation": "^5.30.5"
   },
   "devDependencies": {

@@ -1,3 +1,14 @@
+// RaPiSys: bundle Smoothie Charts + Inter locally (no CDN -> works on
+// offline/air-gapped LANs and avoids a runtime third-party dependency).
+import { SmoothieChart, TimeSeries } from 'smoothie';
+import '@fontsource/inter/300.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+window.SmoothieChart = SmoothieChart;
+window.TimeSeries = TimeSeries;
+
 const API_URL = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
 // Clipboard helper with mobile fallback
