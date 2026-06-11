@@ -4572,7 +4572,8 @@ body.ultra .rapisys-grid { gap: 8px; }
 
 /* Wizard footer/inline buttons: .action-btn upstream is icon-sized — give
    text buttons room to breathe */
-.wizard .action-btn {
+.wizard .action-btn,
+.rapisys-page .wz-form .action-btn {
   width: auto;
   min-width: 110px;
   height: auto;
