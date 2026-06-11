@@ -90,7 +90,10 @@ function drawSeries(canvas, points, { color = '#00d4ff', unit = '' } = {}) {
   points.forEach((p, i) => { const f = i ? 'lineTo' : 'moveTo'; ctx[f](X(p.ts), Y(p.value)); });
   ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.stroke();
   // time labels
-  const fmt = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const spanMs = x1 - x0;
+  const fmt = (t) => spanMs > 12 * 3600e3
+    ? new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.fillText(fmt(x0), 36, h - 4);
   const lastLabel = fmt(x1);
