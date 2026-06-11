@@ -39,10 +39,10 @@ check_platform() {
   else
     warn "Not a Raspberry Pi 5 — continuing, but Pi-5 hardware features may be unavailable"
   fi
-  if grep -q "bookworm" /etc/os-release 2>/dev/null; then
-    ok "Raspberry Pi OS Bookworm"
+  if grep -qE "bookworm|trixie" /etc/os-release 2>/dev/null; then
+    ok "Raspberry Pi OS $(grep VERSION_CODENAME /etc/os-release | cut -d= -f2)"
   else
-    warn "OS is not Bookworm — untested configuration"
+    warn "OS is not Bookworm/Trixie — untested configuration"
   fi
   command -v docker >/dev/null || die "Docker is required: https://docs.docker.com/engine/install/debian/"
   docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin is required"
@@ -114,7 +114,11 @@ AGENT_SOCKET_GROUP=rapisys
 EOF
   chmod 600 "$AGENT_ENV"
 
-  getent group rapisys >/dev/null || groupadd -g 990 rapisys
+  getent group rapisys >/dev/null || groupadd -r rapisys
+  local gid; gid=$(getent group rapisys | cut -d: -f3)
+  sed -i "/^RAPISYS_GID=/d" "${APP_DIR}/.env"
+  echo "RAPISYS_GID=${gid}" >> "${APP_DIR}/.env"
+  ok "rapisys group GID ${gid} recorded in .env"
 
   install -m 0644 "${APP_DIR}/agent/rapisys-agent.service" /etc/systemd/system/rapisys-agent.service
   systemctl daemon-reload
