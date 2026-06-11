@@ -79,6 +79,20 @@ export function createHardwareCollector() {
 
   /** Full hardware snapshot for /api/hardware and the 10 s sampler. */
   async function snapshot() {
+    // Demo mode: realistic fixture (recorded from a Pi 5 with the official
+    // cooler) for screenshots/dev on non-Pi machines. RAPISYS_DEMO=1.
+    if (process.env.RAPISYS_DEMO === '1') {
+      const wob = (base, amp) => Math.round((base + Math.sin(Date.now() / 9000) * amp) * 100) / 100;
+      return {
+        fan: { present: true, rpm: Math.round(wob(2340, 180)), dutyPercent: Math.round(wob(42, 6)), mode: 'auto' },
+        thermal: { cpuTemp: wob(48.2, 1.6), gpuTemp: wob(48.2, 1.6), gpuSharesSensor: true,
+          throttle: { available: true, flags: 0, active: [], occurred: [] } },
+        power: { cpuFreqMhz: 2400, coreVolts: wob(0.72, 0.02), supply5v: wob(5.08, 0.03),
+          watts: wob(4.3, 0.7), undervoltageNow: false, undervoltageOccurred: false,
+          rails: [{ rail: 'VDD_CORE', volts: 0.7203, amps: 3.41 }, { rail: 'EXT5V', volts: 5.0836, amps: 0.61 }] },
+        ts: Date.now(),
+      };
+    }
     const fanDir = findFanDir();
     const fan = fanDir ? {
       present: true,

@@ -24,8 +24,13 @@ export function createSampler({ metricsRepo, eventsRepo, hardware }) {
         { metric: 'cpu.freq', value: stats.cpu?.speed ? stats.cpu.speed * 1000 : null },
         { metric: 'mem.percent', value: stats.memory?.percent },
         { metric: 'load.avg1', value: stats.load?.avgLoad },
-        { metric: 'temp.cpu', value: stats.temperature?.main },
       );
+      // temp: prefer the Pi 5 hardware collector (sysfs/PMIC) — the legacy
+      // collector reports 0 when no sensor is visible, which would pollute
+      // the series. Fall back to it only when it has a real value.
+      const legacyTemp = stats.temperature?.main || null;
+      const hwTemp = hw?.thermal?.cpuTemp ?? null;
+      samples.push({ metric: 'temp.cpu', value: hwTemp ?? legacyTemp });
       // network is { interfaces, stats } from the legacy collector;
       // stats entries carry per-second rates computed from /proc/net/dev deltas.
       for (const iface of stats.network?.stats || []) {
