@@ -387,6 +387,12 @@ async function maybeShowWizard() {
                 <option value="2.0">2.0</option>
                 <option value="1.0">1.0 (My Book World Edition II ⚠️)</option>
               </select></label>
+              <label data-nfs style="display:none">NFS version <select data-nas="nfsvers">
+                <option value="4.1">4.1 (default)</option>
+                <option value="4">4</option>
+                <option value="3">3 (older NAS, incl. WD EX2)</option>
+                <option value="4.2">4.2</option>
+              </select></label>
               <label data-smb>Username <input data-nas="user"></label>
               <label data-smb>Password <input data-nas="pass" type="password"></label>
               <p class="wz-warn" data-smb1 hidden>SMB1 is insecure — only use it on a trusted LAN/VLAN. Required by the WD My Book World Edition II.</p>
@@ -405,7 +411,9 @@ async function maybeShowWizard() {
           $('[data-smb1]', body).hidden = versSel.value !== '1.0';
         });
         $('[data-nas=proto]', body)?.addEventListener('change', (e) => {
-          body.querySelectorAll('[data-smb]').forEach((n) => { n.style.display = e.target.value === 'cifs' ? '' : 'none'; });
+          const cifs = e.target.value === 'cifs';
+          body.querySelectorAll('[data-smb]').forEach((n) => { n.style.display = cifs ? '' : 'none'; });
+          body.querySelectorAll('[data-nfs]').forEach((n) => { n.style.display = cifs ? 'none' : ''; });
         });
         $('[data-nas=mount]', body)?.addEventListener('click', async () => {
           const stat = $('[data-nas=status]', body);
@@ -417,6 +425,7 @@ async function maybeShowWizard() {
               host: $('[data-nas=host]', body).value.trim(),
               share: $('[data-nas=share]', body).value.trim(),
               smbVersion: $('[data-nas=vers]', body)?.value,
+              nfsVersion: $('[data-nas=nfsvers]', body)?.value,
               username: $('[data-nas=user]', body)?.value,
               password: $('[data-nas=pass]', body)?.value,
             }});

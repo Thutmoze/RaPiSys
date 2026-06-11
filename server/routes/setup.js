@@ -53,14 +53,20 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
 
   // -- step 2a: mount a NAS through the host agent ----------------------------
   r.post('/nas/mount', async (req, res) => {
-    const { label, proto, host, share, username, password, smbVersion, readOnly } = req.body || {};
+    const { label, proto, host, share, username, password, smbVersion, nfsVersion, readOnly } = req.body || {};
     try {
       const mountpoint = `/mnt/rapisys/${String(label || 'nas').replace(/[^A-Za-z0-9_-]/g, '')}`;
       const options = [];
       if (proto === 'cifs') {
-        options.push(`vers=${smbVersion || '3.0'}`, 'iocharset=utf8', 'uid=1000', 'gid=1000', 'soft');
+        // Only accept known SMB dialects; never let an NFS value leak in.
+        const SMB_VERS = ['1.0', '2.0', '2.1', '3.0', '3.1.1'];
+        const v = SMB_VERS.includes(smbVersion) ? smbVersion : '3.0';
+        options.push(`vers=${v}`, 'iocharset=utf8', 'uid=1000', 'gid=1000', 'soft');
       } else {
-        options.push(`vers=${smbVersion || '4.1'}`, 'soft', 'timeo=100', 'retrans=2', 'noatime');
+        // NFS has its own version space (WD EX2 Ultra speaks v3; default 4.1).
+        const NFS_VERS = ['3', '4', '4.1', '4.2'];
+        const v = NFS_VERS.includes(nfsVersion) ? nfsVersion : '4.1';
+        options.push(`vers=${v}`, 'soft', 'timeo=100', 'retrans=2', 'noatime');
       }
       options.push(readOnly ? 'ro' : 'rw');
       const result = await agentCall('nas.mount',
