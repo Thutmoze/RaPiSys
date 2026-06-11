@@ -154,6 +154,14 @@ const OPS = {
     return { ok: true, percent: p };
   },
 
+  // ---- Tailscale (read-only status; binary lives on the host) -------------
+  async 'ts.status'() {
+    const r = await run('tailscale', ['status', '--json'], 8000)
+      .catch(() => ({ code: 127, stdout: '' }));
+    if (r.code !== 0 || !r.stdout.trim()) throw new Error('tailscale not installed or not running');
+    return { output: r.stdout };
+  },
+
   // ---- NAS mounts (systemd .mount/.automount units, never fstab) ----------
   async 'nas.status'({ mountpoint }) {
     assert(mountpoint.startsWith(MOUNT_BASE), `mountpoint must be under ${MOUNT_BASE}`);
