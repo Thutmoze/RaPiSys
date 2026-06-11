@@ -143,7 +143,11 @@ health_gate() {
 
 start_app() {
   log "Building and starting RaPiSys…"
-  mkdir -p "$DATA_DIR"
+  # data dir must be writable by the container user (uid 990, host rapisys group)
+  local dgid; dgid=$(getent group rapisys | cut -d: -f3 || echo 990)
+  install -d -m 0775 -o 990 -g "${dgid}" "$DATA_DIR"
+  local dgid; dgid=$(getent group rapisys | cut -d: -f3 || echo 990)
+  install -d -m 0775 -o 990 -g "${dgid}" "$DATA_DIR"
   (cd "$APP_DIR" && $COMPOSE up -d --build)
   health_gate "$HEALTH_URL" 120 || die "app failed health check — docker logs rapisys"
   health_gate "$DEEP_URL" 60 || warn "deep health not green yet (agent/scheduler still settling)"
