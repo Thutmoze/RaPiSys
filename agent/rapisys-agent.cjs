@@ -156,9 +156,12 @@ const OPS = {
 
   // ---- Login sessions via systemd-logind (Trixie dropped utmp) ------------
   async 'sessions.list'() {
-    const ls = await run('loginctl', ['list-sessions', '-o', 'json'], 5000);
-    let ids = [];
-    try { ids = JSON.parse(ls.stdout).map((s) => String(s.session)); } catch { /* no sessions / old systemd */ }
+    // --no-legend table is stable across systemd versions; `-o json` is not
+    // supported for list-sessions on all builds (silently prints the table).
+    const ls = await run('loginctl', ['list-sessions', '--no-legend'], 5000);
+    const ids = ls.stdout.split('\n')
+      .map((l) => l.trim().split(/\s+/)[0])
+      .filter((x) => /^\d+$/.test(x));
     const sessions = [];
     for (const id of ids.slice(0, 50)) {
       const det = await run('loginctl', ['show-session', id,
