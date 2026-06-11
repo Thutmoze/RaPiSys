@@ -66,8 +66,10 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
         const gid = Number(process.env.RAPISYS_GID) || 990;
         options.push(`vers=${v}`, 'iocharset=utf8', `uid=990`, `gid=${gid}`,
           'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino');
-        // Old SMB1-only firmware (WD My Book World) needs legacy NTLM auth.
-        if (v === '1.0') options.push('sec=ntlm');
+        // No forced sec= option: legacy NTLM was removed from the kernel
+        // CIFS driver in Linux 6.7 (sec=ntlm => EINVAL on modern kernels).
+        // The default NTLMSSP negotiation works against old Samba (WD My
+        // Book World) when credentials are supplied.
       } else {
         // NFS has its own version space (WD EX2 Ultra speaks v3; default 4.1).
         const NFS_VERS = ['3', '4', '4.1', '4.2'];
