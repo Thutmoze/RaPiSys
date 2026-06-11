@@ -64,9 +64,20 @@ export function createMetricsRepo(db) {
     return agg.length;
   }
 
+  /** Latest raw value per metric (used by the alert engine). */
+  function latestValues(maxAgeMs = 120000) {
+    const rows = db.prepare(
+      `SELECT metric, value, MAX(ts) AS ts FROM metrics
+       WHERE res = '10s' AND ts > ? GROUP BY metric`
+    ).all(Date.now() - maxAgeMs);
+    const out = {};
+    for (const r of rows) out[r.metric] = { value: r.value, ts: r.ts };
+    return out;
+  }
+
   function purgeOlderThan(ts) {
     return db.prepare(`DELETE FROM metrics WHERE ts < ?`).run(ts);
   }
 
-  return { writeBatch, query, listMetrics, downsample, purgeOlderThan };
+  return { writeBatch, query, listMetrics, downsample, purgeOlderThan, latestValues };
 }
