@@ -75,11 +75,32 @@ function idleMsOf(tty) {
 export function createSessionsCollector() {
 
   async function ssh() {
+    const conns = await ssEstablished(':22');
+
+    // Primary source: systemd-logind via the host agent. Debian 13 (Trixie)
+    // removed utmp entirely, so `who`-style parsing returns nothing there.
+    if (agentConfigured()) {
+      try {
+        const { sessions } = await agentCall('sessions.list', {}, null, 8000);
+        return sessions
+          .filter((s) => s.type === 'tty' || s.remote)
+          .map((s) => ({
+            kind: 'ssh',
+            key: `ssh:${s.user}:${s.tty || s.id}`,
+            username: s.user,
+            source: s.remote ? (s.host || conns[0]?.peerIp || '') : 'local console',
+            startedAt: s.startedAt,
+            idleMs: s.tty ? idleMsOf(s.tty) : null,
+            meta: { tty: s.tty, pid: s.pid, sessionId: s.id },
+          }));
+      } catch { /* fall back to utmp below */ }
+    }
+
+    // Fallback: classic utmp (Bookworm and older).
     let utmpSessions = [];
     for (const p of [`${HOST_ROOT}/run/utmp`, `${HOST_ROOT}/var/run/utmp`, '/run/utmp']) {
       try { utmpSessions = parseUtmp(fs.readFileSync(p)); break; } catch { /* next */ }
     }
-    const conns = await ssEstablished(':22');
     return utmpSessions
       .filter((s) => s.tty.startsWith('pts/') || s.tty.startsWith('tty'))
       .map((s) => ({
@@ -126,7 +147,10 @@ export function createSessionsCollector() {
       const peers = Object.values(st.Peer || {}).map((p) => ({
         kind: 'tailscale',
         key: `ts:${p.ID}`,
-        username: p.HostName || p.DNSName || 'peer',
+        // Some clients (iOS) report HostName "localhost" — prefer the
+        // tailnet DNS name's first label in that case.
+        username: (p.HostName && p.HostName !== 'localhost')
+          ? p.HostName : ((p.DNSName || '').split('.')[0] || p.HostName || 'peer'),
         source: (p.TailscaleIPs || [])[0] || '',
         online: !!p.Online,
         lastActive: p.LastSeen && p.LastSeen !== '0001-01-01T00:00:00Z' ? Date.parse(p.LastSeen) : null,

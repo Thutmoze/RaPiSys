@@ -154,6 +154,36 @@ const OPS = {
     return { ok: true, percent: p };
   },
 
+  // ---- Login sessions via systemd-logind (Trixie dropped utmp) ------------
+  async 'sessions.list'() {
+    const ls = await run('loginctl', ['list-sessions', '-o', 'json'], 5000);
+    let ids = [];
+    try { ids = JSON.parse(ls.stdout).map((s) => String(s.session)); } catch { /* no sessions / old systemd */ }
+    const sessions = [];
+    for (const id of ids.slice(0, 50)) {
+      const det = await run('loginctl', ['show-session', id,
+        '-p', 'Name', '-p', 'RemoteHost', '-p', 'Remote', '-p', 'TTY',
+        '-p', 'Timestamp', '-p', 'Class', '-p', 'Type', '-p', 'Leader'], 3000);
+      const p = Object.fromEntries(det.stdout.trim().split('\n')
+        .map((l) => { const i = l.indexOf('='); return [l.slice(0, i), l.slice(i + 1)]; }));
+      if (p.Class !== 'user') continue;
+      // Timestamp: "Thu 2026-06-11 16:34:41 +03" -> ISO-ish for Date.parse
+      let startedAt = null;
+      const m = (p.Timestamp || '').match(/(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2,4}|\w+)$/);
+      if (m) {
+        const tz = /^[+-]/.test(m[3]) ? (m[3].length === 3 ? m[3] + ':00' : m[3].slice(0, 3) + ':' + m[3].slice(3)) : 'Z';
+        const t = Date.parse(`${m[1]}T${m[2]}${tz}`);
+        if (!Number.isNaN(t)) startedAt = t;
+      }
+      sessions.push({
+        id, user: p.Name || '', remote: p.Remote === 'yes',
+        host: p.RemoteHost || '', tty: p.TTY || '', type: p.Type || '',
+        startedAt, pid: Number(p.Leader) || null,
+      });
+    }
+    return { sessions };
+  },
+
   // ---- Tailscale (read-only status; binary lives on the host) -------------
   async 'ts.status'() {
     const r = await run('tailscale', ['status', '--json'], 8000)
