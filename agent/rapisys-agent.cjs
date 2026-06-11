@@ -232,9 +232,9 @@ WantedBy=multi-user.target
     await run('systemctl', ['daemon-reload']);
     await run('systemctl', ['reset-failed', `${unit}.mount`]).catch(() => {});
     await run('systemctl', ['enable', '--now', `${unit}.automount`]);
-    // Start the mount and FAIL LOUDLY if it doesn't come up — a silent
-    // failure here leaves an autofs trap dir that breaks the write test.
-    const started = await run('systemctl', ['start', `${unit}.mount`], 45000);
+    // RESTART (not start): if the share is already mounted with stale
+    // options, plain start is a no-op and new options never apply.
+    const started = await run('systemctl', ['restart', `${unit}.mount`], 45000);
     if (started.code !== 0) {
       const st = await run('journalctl', ['-u', `${unit}.mount`, '-n', '10', '--no-pager', '-o', 'cat']);
       const detail = (st.stdout.match(/mount error[^\n]*|mount\.cifs[^\n]*|mount\.nfs[^\n]*|Server[^\n]*/g) || [])
