@@ -61,7 +61,13 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
         // Only accept known SMB dialects; never let an NFS value leak in.
         const SMB_VERS = ['1.0', '2.0', '2.1', '3.0', '3.1.1'];
         const v = SMB_VERS.includes(smbVersion) ? smbVersion : '3.0';
-        options.push(`vers=${v}`, 'iocharset=utf8', 'uid=1000', 'gid=1000', 'soft');
+        // Files must belong to the CONTAINER user (uid 990) and the host
+        // rapisys group, or the DB write-probe fails with EACCES.
+        const gid = Number(process.env.RAPISYS_GID) || 990;
+        options.push(`vers=${v}`, 'iocharset=utf8', `uid=990`, `gid=${gid}`,
+          'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino');
+        // Old SMB1-only firmware (WD My Book World) needs legacy NTLM auth.
+        if (v === '1.0') options.push('sec=ntlm');
       } else {
         // NFS has its own version space (WD EX2 Ultra speaks v3; default 4.1).
         const NFS_VERS = ['3', '4', '4.1', '4.2'];

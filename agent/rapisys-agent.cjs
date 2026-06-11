@@ -75,8 +75,10 @@ const HOST_RE = /^[A-Za-z0-9._-]{1,253}$/;
 const SHARE_RE = /^[A-Za-z0-9 _./-]{1,128}$/;
 const MOUNT_BASE = '/mnt/rapisys';
 const ALLOWED_CIFS_OPTS = new Set(['vers=1.0', 'vers=2.0', 'vers=2.1', 'vers=3.0', 'vers=3.1.1',
-  'ro', 'rw', 'noperm', 'iocharset=utf8', 'uid=1000', 'gid=1000', 'file_mode=0664', 'dir_mode=0775',
-  'nofail', '_netdev', 'soft', 'noserverino']);
+  'ro', 'rw', 'noperm', 'iocharset=utf8', 'file_mode=0664', 'dir_mode=0775',
+  'nofail', '_netdev', 'soft', 'noserverino', 'sec=ntlm', 'sec=ntlmssp', 'sec=ntlmv2']);
+// uid=/gid= carry dynamic numeric ids — validated by pattern, not enumeration.
+const UIDGID_RE = /^(uid|gid)=\d{1,6}$/;
 const ALLOWED_NFS_OPTS = new Set(['ro', 'rw', 'vers=3', 'vers=4', 'vers=4.1', 'vers=4.2',
   'nofail', '_netdev', 'soft', 'timeo=100', 'retrans=2', 'noatime']);
 
@@ -179,7 +181,9 @@ const OPS = {
     assert(mountpoint === path.posix.normalize(mountpoint) && mountpoint.startsWith(MOUNT_BASE + '/'),
       `mountpoint must be under ${MOUNT_BASE}`);
     const allowed = proto === 'cifs' ? ALLOWED_CIFS_OPTS : ALLOWED_NFS_OPTS;
-    for (const o of options) assert(allowed.has(o), `mount option not allowed: ${o}`);
+    for (const o of options) {
+      assert(allowed.has(o) || (proto === 'cifs' && UIDGID_RE.test(o)), `mount option not allowed: ${o}`);
+    }
 
     fs.mkdirSync(mountpoint, { recursive: true });
     const what = proto === 'cifs'
@@ -226,9 +230,18 @@ WantedBy=multi-user.target
     fs.writeFileSync(`/etc/systemd/system/${unit}.mount`, mountUnit);
     fs.writeFileSync(`/etc/systemd/system/${unit}.automount`, autoUnit);
     await run('systemctl', ['daemon-reload']);
+    await run('systemctl', ['reset-failed', `${unit}.mount`]).catch(() => {});
     await run('systemctl', ['enable', '--now', `${unit}.automount`]);
-    // Touch the mount to trigger it, then report status.
-    await run('systemctl', ['start', `${unit}.mount`], 45000);
+    // Start the mount and FAIL LOUDLY if it doesn't come up — a silent
+    // failure here leaves an autofs trap dir that breaks the write test.
+    const started = await run('systemctl', ['start', `${unit}.mount`], 45000);
+    if (started.code !== 0) {
+      const st = await run('journalctl', ['-u', `${unit}.mount`, '-n', '10', '--no-pager', '-o', 'cat']);
+      const detail = (st.stdout.match(/mount error[^\n]*|mount\.cifs[^\n]*|mount\.nfs[^\n]*|Server[^\n]*/g) || [])
+        .slice(-2).join(' — ');
+      await run('systemctl', ['disable', '--now', `${unit}.automount`]).catch(() => {});
+      throw new Error(`mount failed: ${detail || 'see journalctl -u ' + unit + '.mount'}`);
+    }
     return OPS['nas.status']({ mountpoint });
   },
 
