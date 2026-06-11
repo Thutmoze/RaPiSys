@@ -4588,3 +4588,21 @@ body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }
 /* Wizard inline status messages */
 .wz-status-ok { color: #10b981; font-weight: 700; }
 .wz-status-err { color: var(--accent-red, #ef4444); font-weight: 700; }
+
+/* Form action buttons (Mount share, Save, Send test): the bare .action-btn
+   is nearly invisible on the dark glass — give these a clear cyan identity */
+.wz-form .action-btn {
+  background: rgba(0, 212, 255, 0.12);
+  border: 1px solid rgba(0, 212, 255, 0.45);
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+.wz-form .action-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  box-shadow: var(--glow-cyan);
+}
+.wz-form .action-btn:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+  cursor: not-allowed;
+}
