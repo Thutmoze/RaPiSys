@@ -4569,3 +4569,18 @@ body.ultra .nav-label { display: none; }
 body.ultra .hw-big { font-size: 22px; }
 body.ultra .hw-row { padding: 3px 0; font-size: 11px; }
 body.ultra .rapisys-grid { gap: 8px; }
+
+/* Wizard footer/inline buttons: .action-btn upstream is icon-sized — give
+   text buttons room to breathe */
+.wizard .action-btn {
+  width: auto;
+  min-width: 110px;
+  height: auto;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+}
+body.compact .wizard .action-btn { padding: 8px 18px; font-size: 13px; }
+body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }

@@ -73,6 +73,7 @@ gen_env() {
   log "Generating secrets…"
   local env_file="${APP_DIR}/.env"
   touch "$env_file" && chmod 600 "$env_file"
+  chown "${SUDO_USER:-root}":"${SUDO_USER:-root}" "$env_file"
 
   ensure_var() { # name generator
     if ! grep -q "^$1=..*" "$env_file" 2>/dev/null; then
