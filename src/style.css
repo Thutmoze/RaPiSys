@@ -4682,3 +4682,8 @@ body.ultra .sess-h { margin: 10px 0 4px; }
 body.compact .wz-mode { padding: 10px; }
 body.ultra .wz-mode { padding: 8px; }
 body.ultra .wz-qr img { width: 120px; height: 120px; }
+
+/* The hidden attribute is UA-level display:none — our .wz-form display:flex
+   was overriding it, leaking not-yet-active wizard panels (e.g. the QR step
+   before account creation). Make hidden always win. */
+.wizard [hidden], .rapisys-page [hidden] { display: none !important; }
