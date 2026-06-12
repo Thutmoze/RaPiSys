@@ -113,6 +113,21 @@ const VC_ALLOWED = new Set([
 // Operation allowlist — THE ONLY THINGS THIS AGENT WILL EVER DO
 // ---------------------------------------------------------------------------
 
+/** CPU thermal zone directory (governs the Pi 5 fan curve), or null. */
+function findCpuThermalZone() {
+  try {
+    for (const z of fs.readdirSync('/sys/class/thermal')) {
+      if (!z.startsWith('thermal_zone')) continue;
+      const dir = `/sys/class/thermal/${z}`;
+      try {
+        const type = fs.readFileSync(path.join(dir, 'type'), 'utf-8').trim();
+        if (/cpu|soc/i.test(type)) return dir;
+      } catch { /* next */ }
+    }
+  } catch { /* no thermal */ }
+  return null;
+}
+
 const OPS = {
   async 'ping'() {
     return { pong: true, version: '1.0.0', pid: process.pid };
@@ -130,18 +145,38 @@ const OPS = {
     const dir = findFanSysfs();
     if (!dir) return { present: false };
     const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf-8').trim(); } catch { return null; } };
+    // Truthful mode: the thermal zone decides auto vs manual on Pi 5.
+    let mode = read('pwm1_enable');
+    const zone = findCpuThermalZone();
+    if (zone) {
+      try {
+        mode = fs.readFileSync(path.join(zone, 'mode'), 'utf-8').trim() === 'enabled' ? '2' : '1';
+      } catch { /* keep pwm1_enable value */ }
+    }
     return {
       present: true,
       rpm: parseInt(read('fan1_input') || '0', 10),
       pwm: parseInt(read('pwm1') || '0', 10),          // 0–255
-      mode: read('pwm1_enable'),                       // 0=off 1=manual 2=auto
+      mode,                                            // '2'=auto '1'=manual
     };
   },
   async 'fan.setMode'({ mode }) {
     assert(['auto', 'manual'].includes(mode), 'mode must be auto|manual');
     const dir = findFanSysfs();
     assert(dir, 'no active cooler detected');
-    fs.writeFileSync(path.join(dir, 'pwm1_enable'), mode === 'auto' ? '2' : '1');
+    // Pi 5 reality: the pwm-fan driver has NO automatic mode — the fan
+    // curve is the THERMAL SUBSYSTEM's job. Auto/manual is controlled by
+    // the thermal zone's mode file: 'enabled' = governor drives the fan
+    // (auto), 'disabled' = governor hands off (manual). pwm1_enable is
+    // only touched as a best-effort for other coolers.
+    const zone = findCpuThermalZone();
+    if (mode === 'auto') {
+      if (zone) fs.writeFileSync(path.join(zone, 'mode'), 'enabled');
+      try { fs.writeFileSync(path.join(dir, 'pwm1_enable'), '2'); } catch { /* pwm-fan: no auto */ }
+    } else {
+      if (zone) fs.writeFileSync(path.join(zone, 'mode'), 'disabled');
+      try { fs.writeFileSync(path.join(dir, 'pwm1_enable'), '1'); } catch { /* tolerated */ }
+    }
     return { ok: true, mode };
   },
   async 'fan.setDuty'({ percent }) {
@@ -149,8 +184,11 @@ const OPS = {
     assert(Number.isFinite(p) && p >= 0 && p <= 100, 'percent must be 0–100');
     const dir = findFanSysfs();
     assert(dir, 'no active cooler detected');
-    // Manual duty requires manual mode.
-    fs.writeFileSync(path.join(dir, 'pwm1_enable'), '1');
+    // Manual duty: take the governor off the fan first, or it overrides
+    // our pwm on the next trip-point change.
+    const zone = findCpuThermalZone();
+    if (zone) fs.writeFileSync(path.join(zone, 'mode'), 'disabled');
+    try { fs.writeFileSync(path.join(dir, 'pwm1_enable'), '1'); } catch { /* tolerated */ }
     fs.writeFileSync(path.join(dir, 'pwm1'), String(Math.round((p / 100) * 255)));
     return { ok: true, percent: p };
   },
