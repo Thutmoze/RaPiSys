@@ -270,21 +270,17 @@ TimeoutSec=30
 [Install]
 WantedBy=multi-user.target
 `;
-    const autoUnit = `[Unit]
-Description=RaPiSys NAS automount ${label}
-
-[Automount]
-Where=${mountpoint}
-TimeoutIdleSec=600
-
-[Install]
-WantedBy=multi-user.target
-`;
     fs.writeFileSync(`/etc/systemd/system/${unit}.mount`, mountUnit);
-    fs.writeFileSync(`/etc/systemd/system/${unit}.automount`, autoUnit);
+    // No .automount indirection anymore: autofs traps cannot trigger
+    // across mount namespaces — the container saw ELOOP instead of the
+    // share until something host-side touched the path. A DB directory
+    // is hot anyway, so we enable the .mount directly (boots via its
+    // own [Install] section) and remove any automount from older code.
+    try { fs.unlinkSync(`/etc/systemd/system/${unit}.automount`); } catch { /* none */ }
+    await run('systemctl', ['disable', '--now', `${unit}.automount`]).catch(() => {});
     await run('systemctl', ['daemon-reload']);
     await run('systemctl', ['reset-failed', `${unit}.mount`]).catch(() => {});
-    await run('systemctl', ['enable', '--now', `${unit}.automount`]);
+    await run('systemctl', ['enable', `${unit}.mount`]).catch(() => {});
     // RESTART (not start): if the share is already mounted with stale
     // options, plain start is a no-op and new options never apply.
     const started = await run('systemctl', ['restart', `${unit}.mount`], 45000);
@@ -292,7 +288,7 @@ WantedBy=multi-user.target
       const st = await run('journalctl', ['-u', `${unit}.mount`, '-n', '10', '--no-pager', '-o', 'cat']);
       const detail = (st.stdout.match(/mount error[^\n]*|mount\.cifs[^\n]*|mount\.nfs[^\n]*|Server[^\n]*/g) || [])
         .slice(-2).join(' — ');
-      await run('systemctl', ['disable', '--now', `${unit}.automount`]).catch(() => {});
+      await run('systemctl', ['disable', '--now', `${unit}.mount`]).catch(() => {});
       throw new Error(`mount failed: ${detail || 'see journalctl -u ' + unit + '.mount'}`);
     }
     return OPS['nas.status']({ mountpoint });
