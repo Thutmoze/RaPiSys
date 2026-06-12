@@ -130,7 +130,13 @@ export function openDatabase({ dbPath, fallbackPath, migrationsDir }) {
     // Safe pragmas per storage medium (see header comment).
     const journalMode = network ? 'TRUNCATE' : 'WAL';
     db.pragma(`journal_mode = ${journalMode}`);
-    db.pragma('synchronous = NORMAL');
+    // Network shares (esp. SMB1 NAS boxes) have high write/fsync latency,
+    // and better-sqlite3 is synchronous — slow commits freeze the whole
+    // event loop. Metrics data is reconstructible, so on network storage
+    // we trade fsync guarantees for responsiveness and lean on a large
+    // page cache to keep reads off the wire.
+    db.pragma(`synchronous = ${network ? 'OFF' : 'NORMAL'}`);
+    db.pragma(`cache_size = ${network ? -16000 : -4000}`);  // KB, negative = KiB
     db.pragma('busy_timeout = 10000');
     db.pragma('foreign_keys = ON');
     migrate(db, dir);

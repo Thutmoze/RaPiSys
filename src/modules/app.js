@@ -664,6 +664,9 @@ async function maybeShowWizard() {
   try { status = await api('/setup/status'); } catch { return; }
   if (status.completed) return;
 
+  // Freeze the animated dashboard underneath: continuous canvas repaints
+  // beneath a backdrop-filter make every wizard interaction janky.
+  document.body.classList.add('wizard-open');
   const wiz = el('div', 'wizard-overlay');
   wiz.innerHTML = `
     <div class="wizard card">
@@ -965,6 +968,7 @@ async function maybeShowWizard() {
       async next() {
         await api('/setup/complete', { method: 'POST', body: {} });
         wiz.remove();
+        document.body.classList.remove('wizard-open');
         toast('success', 'Welcome to RaPiSys', 'Setup complete');
         return false;
       },
