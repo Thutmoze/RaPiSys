@@ -27,7 +27,9 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **Pi 5 hardware** | Fan RPM, duty cycle, auto/manual control · CPU/SoC temperature with historical charts · throttle & undervoltage detection with a persistent event log · PMIC power telemetry (core voltage, 5 V rail, board watts) |
 | **History engine** | 10 s sampling into SQLite · tiered downsampling (10 s → 1 m → 10 m → 1 h) · configurable retention (7–3650 days) · DB relocatable to a NAS with automatic network-FS-safe journaling and local fallback |
 | **First-run wizard** | Guided setup for NAS mounting (SMB/CIFS incl. SMB1 legacy NAS, NFS), database location, retention policy, SMTP — all from the browser |
-| **Email alerts** | Authenticated SMTP (STARTTLS/465) · password encrypted at rest (AES-256-GCM) and write-only via API · test-send button |
+| **Email alerts** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · authenticated SMTP (STARTTLS/465) · password encrypted at rest (AES-256-GCM) and write-only via API · test-send button |
+| **Sessions** | Live SSH (via systemd-logind, utmp fallback), RealVNC and Tailscale sessions · login history and durations recorded server-side |
+| **Two operating modes** | **Monitor only** — read-only like upstream, Pi-control features disabled outright · **Full control** — fan/NAS/updates/reboot from the UI, gated behind a **local admin account with mandatory TOTP MFA** (Google Authenticator, Authy, 1Password… — fully offline, no cloud) |
 | **Host agent** | Tiny root systemd service with a *fixed allowlist* of operations, HMAC-authenticated over a Unix socket — lets the web container run **non-root with all capabilities dropped** |
 | **DevOps** | One-command install · snapshot-based upgrades with automatic rollback · deep health checks |
 | **Self-contained** | No CDN dependencies at runtime — works on offline/air-gapped LANs |
@@ -39,6 +41,10 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | First-run wizard | Hardware page |
 |---|---|
 | ![Wizard](docs/screenshots/wizard.png) | ![Hardware](docs/screenshots/hardware.png) |
+
+| Operating mode & MFA enrolment | Admin sign-in (new browsers) |
+|---|---|
+| ![Mode & MFA](docs/screenshots/wizard-mfa.png) | ![Login](docs/screenshots/login.png) |
 
 > Captured from the actual app (demo fixture data on the Hardware page, since the build machine has no Pi 5 cooler).
 
@@ -76,12 +82,15 @@ The installer:
 Then open **`http://<your-pi>:3001`** — the **setup wizard** appears on first visit:
 
 1. **Welcome** — environment check (agent reachable, encryption key present)
-2. **Storage** — optionally mount your NAS (WD My Cloud EX2 Ultra → SMB 3.0; WD My Book World Edition II → SMB 1.0, with a security warning) and point the database at it. On a network share RaPiSys automatically switches to a NAS-safe journal mode; if the NAS is offline at boot it falls back to local storage and shows a warning instead of crashing.
-3. **Retention** — 7 / 30 / 90 / 180 / 365 days or custom
-4. **Email** — SMTP for alerts, with a *Send test email* button
-5. **Done** — history is already recording in the background
+2. **Mode** — choose what this dashboard may do:
+   - **Monitor only**: read-only, exactly like the original Pi-Dashboard. No account needed; Pi-control endpoints are disabled server-side.
+   - **Full control**: enables fan control, NAS management, updates and reboot. You register a **local administrator** (username + password) and enrol **two-factor authentication** by scanning a QR code with any TOTP app. Verification happens on the spot, and the wizard browser is signed in automatically.
+3. **Storage** — optionally mount your NAS (WD My Cloud EX2 Ultra → SMB 3.0; WD My Book World Edition II → SMB 1.0, with a security warning) and point the database at it. On a network share RaPiSys automatically switches to a NAS-safe journal mode; if the NAS is offline at boot it falls back to local storage and shows a warning instead of crashing.
+4. **Retention** — 7 / 30 / 90 / 180 / 365 days or custom
+5. **Email** — SMTP for alerts, with a *Send test email* button
+6. **Done** — history is already recording in the background
 
-Your admin token is printed at the end of the install and stored in `.env`. Paste it in the dashboard settings to unlock protected actions (fan control, configuration changes).
+**How auth works day-to-day (full-control mode):** every browser starts read-only. The first time you touch an admin action — change the fan, edit a rule, save settings — a sign-in dialog asks for username, password and the 6-digit code from your authenticator; the session then persists in that browser for 30 days (revocable by signing out via the lock icon in the navigation rail). The `ADMIN_TOKEN` printed at install remains valid as an `X-Admin-Token` header for scripts and automation only.
 
 ### Manual build (without deploy.sh)
 
@@ -172,7 +181,9 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 | `GET /api/history/metrics` · `/api/history/events` | available series, event log |
 | `GET /api/health/deep` | db/agent/scheduler/disk health (deploy gate) |
 | `GET /api/hardware` · `POST /api/hardware/fan` | Pi 5 snapshot, fan control 🔒 |
-| `/api/setup/*` | wizard: status, NAS mount, storage, retention, SMTP, complete |
+| `/api/setup/*` | wizard: status, mode, NAS mount, storage, retention, SMTP, complete |
+| `/api/auth/*` | register + MFA enrolment (wizard-only), login, logout, whoami |
+| `/api/alerts/*` · `/api/sessions/*` | alert rules/active/history · live sessions + login history |
 
 🔒 = requires `X-Admin-Token`.
 
@@ -190,7 +201,10 @@ RAPISYS_DEMO=1 node server/index.js
 
 ## Security notes
 
-- Always set `ADMIN_TOKEN` in production (deploy.sh generates one).
+- **Full-control mode** gates Pi-control behind a local admin with mandatory TOTP MFA: passwords are scrypt-hashed, the TOTP secret is AES-256-GCM encrypted at rest, browser sessions are random 256-bit values stored only as SHA-256 hashes (30-day sliding expiry), and logins are rate-limited (10 attempts / 15 min / IP) with every attempt audit-logged.
+- **Monitor-only mode** disables Pi-control endpoints entirely — there is nothing to log into and nothing a LAN guest can change on the Pi.
+- Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall).
+- `ADMIN_TOKEN` (deploy.sh generates one) is for API automation.
 - SMTP/NAS credentials are AES-256-GCM-encrypted with `SECRET_KEY`; the API never returns them.
 - NAS credentials additionally live only in root-only files on the host (`/etc/rapisys/creds/*.cred`, 0600).
 - SMB1 (needed by the WD My Book World Edition II) is insecure by nature — the wizard warns and we recommend isolating such devices on a trusted VLAN.
