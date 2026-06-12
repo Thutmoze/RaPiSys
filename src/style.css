@@ -5,6 +5,10 @@
 }
 
 :root {
+  /* Tells the browser to render NATIVE widgets (select popups, scrollbars,
+     date pickers) in dark mode: without this, dropdown lists first paint
+     as light UA-styled popups — the white flash on wizard selects. */
+  color-scheme: dark;
   --bg-primary: #0a0a0a;
   --bg-secondary: #111111;
   --bg-card: rgba(17, 17, 17, 0.8);
@@ -4690,3 +4694,11 @@ body.ultra .wz-qr img { width: 120px; height: 120px; }
    was overriding it, leaking not-yet-active wizard panels (e.g. the QR step
    before account creation). Make hidden always win. */
 .wizard [hidden], .rapisys-page [hidden] { display: none !important; }
+
+
+/* Native select popups: explicit dark option styling for browsers that
+   honor it (Chromium does); pairs with color-scheme above. */
+select, select option {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+}
