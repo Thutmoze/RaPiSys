@@ -160,6 +160,8 @@ async function saveServices(services) {
 // ===================
 
 function requireAuth(req, res, next) {
+  // RaPiSys: delegate to the session/mode-aware middleware when loaded.
+  if (globalThis.__rapisysAuth) return globalThis.__rapisysAuth(req, res, next);
   // If no admin token configured, allow all (dev mode)
   if (!CONFIG.adminToken) {
     return next();

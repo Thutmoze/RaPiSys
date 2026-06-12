@@ -129,6 +129,19 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
     }
   });
 
+  // -- step 2: operating mode ----------------------------------------------------
+  r.post('/mode', async (req, res) => {
+    const mode = req.body?.mode === 'full' ? 'full' : 'monitor';
+    await withFileLock(async () => {
+      const settings = await loadSettings();
+      settings.rapisys = settings.rapisys || {};
+      settings.rapisys.mode = mode;
+      await saveSettings(settings);
+    });
+    events.add('setup.mode', 'info', { mode });
+    res.json({ ok: true, mode });
+  });
+
   // -- step 3: retention -------------------------------------------------------
   r.post('/retention', async (req, res) => {
     const days = Number(req.body?.days);

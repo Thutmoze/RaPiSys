@@ -186,8 +186,8 @@ cmd_install() {
   local ip; ip=$(hostname -I | awk '{print $1}')
   echo
   log "RaPiSys is up:  http://${ip}:3001"
-  log "Admin token:    ${ADMIN_TOKEN}   (also in ${APP_DIR}/.env)"
-  log "First visit opens the setup wizard (NAS, retention, email)."
+  log "API token:      ${ADMIN_TOKEN}   (for scripts/automation; in ${APP_DIR}/.env)"
+  log "First visit opens the setup wizard (mode & admin account, NAS, retention, email)."
 }
 
 cmd_upgrade() {

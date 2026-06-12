@@ -22,12 +22,14 @@ import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
 import { createAlertEngine } from './services/alerting.js';
 import { createSessionTracker } from './services/session-tracker.js';
+import { createAuth } from './services/auth.js';
 import { historyRouter } from './routes/history.js';
 import { deepHealthRouter } from './routes/health.js';
 import { setupRouter } from './routes/setup.js';
 import { hardwareRouter } from './routes/hardware.js';
 import { alertsRouter } from './routes/alerts.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { authRouter } from './routes/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -114,6 +116,13 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     sessions, sessionsRepo: sessionsRepoFacade, eventsRepo: eventsFacade,
   });
 
+  // ---- authentication / operating mode ---------------------------------------
+  const auth = createAuth({ getDb, loadSettings, eventsRepo: eventsFacade });
+  // Take over the LEGACY requireAuth as well: in full mode the session
+  // cookie (or admin token) authenticates the original settings endpoints;
+  // in monitor mode they stay open like stock pi-dashboard.
+  globalThis.__rapisysAuth = auth.requireConfig;
+
   // ---- scheduler ----------------------------------------------------------------
   const scheduler = createScheduler();
   const sampleMs = (Number(process.env.SAMPLE_INTERVAL_S) || 10) * 1000;
@@ -121,16 +130,18 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('retention', 3600e3, () => retention.runOnce());
   scheduler.register('alert-engine', 30e3, () => alertEngine.evaluateOnce());
   scheduler.register('session-tracker', 60e3, () => sessionTracker.trackOnce(), { runNow: true });
+  scheduler.register('auth-session-purge', 6 * 3600e3, () => auth.purgeExpired());
 
   // ---- routes ----------------------------------------------------------------------
   app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
   app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb }));
-  app.use('/api/hardware', hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth }));
-  app.use('/api/alerts', alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth }));
+  app.use('/api/hardware', hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
+  app.use('/api/auth', authRouter({ auth, loadSettings }));
+  app.use('/api/alerts', alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
   app.use('/api/sessions', sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
-    secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth, events: eventsFacade,
+    secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,
   }));
 
   console.log(`[rapisys] db=${handle.meta.path} engine=${handle.meta.engine} `
