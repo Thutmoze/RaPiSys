@@ -54,7 +54,7 @@ function showLogin() {
         <div class="wz-form">
           <label>Username <input data-lg="user" autocomplete="username"></label>
           <label>Password <input data-lg="pass" type="password" autocomplete="current-password"></label>
-          <label>Authenticator code <input data-lg="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></label>
+          <label data-lg="codewrap">Authenticator code <input data-lg="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></label>
           <div class="wz-row">
             <button class="action-btn wz-primary" data-lg="go">Sign in</button>
             <button class="action-btn" data-lg="cancel">Cancel</button>
@@ -63,6 +63,10 @@ function showLogin() {
         </div>
       </div>`;
     document.body.appendChild(ov);
+    // MFA is per-admin choice: hide the code field when it's disabled.
+    api('/auth/me').then((me) => {
+      if (me.mfaEnabled === false) $('[data-lg=codewrap]', ov).hidden = true;
+    }).catch(() => {});
     const done = (ok) => { ov.remove(); loginPromise = null; resolve(ok); };
     $('[data-lg=cancel]', ov).onclick = () => done(false);
     const submit = async () => {
@@ -721,6 +725,7 @@ async function maybeShowWizard() {
               <label>Username <input data-adm="user" autocomplete="off" maxlength="32" placeholder="admin"></label>
               <label>Password <input data-adm="pass" type="password" autocomplete="new-password" placeholder="min. 8 characters"></label>
               <label>Confirm password <input data-adm="pass2" type="password" autocomplete="new-password"></label>
+              <label class="wz-inline"><input type="checkbox" data-adm="mfa" checked> Protect with two-factor authentication (recommended)</label>
               <div class="wz-row">
                 <button class="action-btn" data-adm="create">Create account</button>
                 <span data-adm="status1"></span>
@@ -753,11 +758,19 @@ async function maybeShowWizard() {
           try {
             const r = await api('/auth/register', { method: 'POST', body: {
               username: $('[data-adm=user]', body).value.trim(), password: pass,
+              mfa: $('[data-adm=mfa]', body).checked,
             }});
-            $('[data-adm=qr]', body).src = r.qrDataUrl;
-            $('[data-adm=secret]', body).textContent = r.secret;
             $('[data-adm=step1]', body).hidden = true;
-            $('[data-adm=step2]', body).hidden = false;
+            if (r.mfa === false) {
+              // MFA declined — account is active and this browser signed in.
+              state.adminReady = true;
+              $('[data-adm=done]', body).hidden = false;
+              refreshAuthBadge();
+            } else {
+              $('[data-adm=qr]', body).src = r.qrDataUrl;
+              $('[data-adm=secret]', body).textContent = r.secret;
+              $('[data-adm=step2]', body).hidden = false;
+            }
           } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
         });
 

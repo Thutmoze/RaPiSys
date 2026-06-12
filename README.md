@@ -29,7 +29,7 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **First-run wizard** | Guided setup for NAS mounting (SMB/CIFS incl. SMB1 legacy NAS, NFS), database location, retention policy, SMTP — all from the browser |
 | **Email alerts** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · authenticated SMTP (STARTTLS/465) · password encrypted at rest (AES-256-GCM) and write-only via API · test-send button |
 | **Sessions** | Live SSH (via systemd-logind, utmp fallback), RealVNC and Tailscale sessions · login history and durations recorded server-side |
-| **Two operating modes** | **Monitor only** — read-only like upstream, Pi-control features disabled outright · **Full control** — fan/NAS/updates/reboot from the UI, gated behind a **local admin account with mandatory TOTP MFA** (Google Authenticator, Authy, 1Password… — fully offline, no cloud) |
+| **Two operating modes** | **Monitor only** — read-only like upstream, Pi-control features disabled outright · **Full control** — fan/NAS/updates/reboot from the UI, gated behind a **local admin account with optional TOTP MFA** (recommended, on by default) (Google Authenticator, Authy, 1Password… — fully offline, no cloud) |
 | **Host agent** | Tiny root systemd service with a *fixed allowlist* of operations, HMAC-authenticated over a Unix socket — lets the web container run **non-root with all capabilities dropped** |
 | **DevOps** | One-command install · snapshot-based upgrades with automatic rollback · deep health checks |
 | **Self-contained** | No CDN dependencies at runtime — works on offline/air-gapped LANs |
@@ -84,7 +84,7 @@ Then open **`http://<your-pi>:3001`** — the **setup wizard** appears on first 
 1. **Welcome** — environment check (agent reachable, encryption key present)
 2. **Mode** — choose what this dashboard may do:
    - **Monitor only**: read-only, exactly like the original Pi-Dashboard. No account needed; Pi-control endpoints are disabled server-side.
-   - **Full control**: enables fan control, NAS management, updates and reboot. You register a **local administrator** (username + password) and enrol **two-factor authentication** by scanning a QR code with any TOTP app. Verification happens on the spot, and the wizard browser is signed in automatically.
+   - **Full control**: enables fan control, NAS management, updates and reboot. You register a **local administrator** (username + password) and — recommended, on by default but your choice — enrol **two-factor authentication** by scanning a QR code with any TOTP app. Verification happens on the spot, and the wizard browser is signed in automatically.
 3. **Storage** — optionally mount your NAS (WD My Cloud EX2 Ultra → SMB 3.0; WD My Book World Edition II → SMB 1.0, with a security warning) and point the database at it. On a network share RaPiSys automatically switches to a NAS-safe journal mode; if the NAS is offline at boot it falls back to local storage and shows a warning instead of crashing.
 4. **Retention** — 7 / 30 / 90 / 180 / 365 days or custom
 5. **Email** — SMTP for alerts, with a *Send test email* button
@@ -201,7 +201,7 @@ RAPISYS_DEMO=1 node server/index.js
 
 ## Security notes
 
-- **Full-control mode** gates Pi-control behind a local admin with mandatory TOTP MFA: passwords are scrypt-hashed, the TOTP secret is AES-256-GCM encrypted at rest, browser sessions are random 256-bit values stored only as SHA-256 hashes (30-day sliding expiry), and logins are rate-limited (10 attempts / 15 min / IP) with every attempt audit-logged.
+- **Full-control mode** gates Pi-control behind a local admin with optional (default-on) TOTP MFA: passwords are scrypt-hashed, the TOTP secret is AES-256-GCM encrypted at rest, browser sessions are random 256-bit values stored only as SHA-256 hashes (30-day sliding expiry), and logins are rate-limited (10 attempts / 15 min / IP) with every attempt audit-logged.
 - **Monitor-only mode** disables Pi-control endpoints entirely — there is nothing to log into and nothing a LAN guest can change on the Pi.
 - Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall).
 - `ADMIN_TOKEN` (deploy.sh generates one) is for API automation.

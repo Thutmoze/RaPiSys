@@ -45,27 +45,36 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     return getDb().prepare(`SELECT * FROM admin_user WHERE id = 1`).get() || null;
   }
 
-  function register(username, password) {
-    if (!hasSecretKey()) throw new Error('SECRET_KEY not set — cannot store MFA secret securely');
+  /**
+   * Create (or replace, during the wizard) the admin account.
+   * MFA is the admin's choice: when enabled the account activates only
+   * after one valid TOTP code; when disabled it is active immediately.
+   */
+  function register(username, password, { mfa = true } = {}) {
+    if (mfa && !hasSecretKey()) throw new Error('SECRET_KEY not set — cannot store MFA secret securely');
     if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username || '')) {
       throw new Error('username must be 3-32 chars (letters, digits, _ . -)');
     }
     if (String(password || '').length < 8) throw new Error('password must be at least 8 characters');
     const salt = crypto.randomBytes(32);
     const hash = scryptHash(password, salt);
-    const secret = generateSecret();
-    const enc = encrypt(secret);
-    const encJson = JSON.stringify({
-      ct: enc.ciphertext.toString('base64'), iv: enc.iv.toString('base64'), tag: enc.tag.toString('base64'),
-    });
+    let encJson = null, secret = null;
+    if (mfa) {
+      secret = generateSecret();
+      const enc = encrypt(secret);
+      encJson = JSON.stringify({
+        ct: enc.ciphertext.toString('base64'), iv: enc.iv.toString('base64'), tag: enc.tag.toString('base64'),
+      });
+    }
     getDb().prepare(
-      `INSERT INTO admin_user (id, username, pass_salt, pass_hash, totp_secret_enc, mfa_confirmed, created_at)
-       VALUES (1, ?, ?, ?, ?, 0, ?)
+      `INSERT INTO admin_user (id, username, pass_salt, pass_hash, totp_secret_enc, mfa_confirmed, mfa_enabled, created_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET username=excluded.username, pass_salt=excluded.pass_salt,
          pass_hash=excluded.pass_hash, totp_secret_enc=excluded.totp_secret_enc,
-         mfa_confirmed=0, created_at=excluded.created_at`
-    ).run(username, salt, hash, encJson, Date.now());
-    return { secret, otpauth: otpauthUri(secret, username) };
+         mfa_confirmed=excluded.mfa_confirmed, mfa_enabled=excluded.mfa_enabled,
+         created_at=excluded.created_at`
+    ).run(username, salt, hash, encJson, mfa ? 0 : 1, mfa ? 1 : 0, Date.now());
+    return mfa ? { mfa: true, secret, otpauth: otpauthUri(secret, username) } : { mfa: false };
   }
 
   function decryptSecret(admin) {
@@ -124,7 +133,8 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     if (rateLimited(ip)) throw new Error('too many attempts — try again in 15 minutes');
     noteAttempt(ip);
     const admin = getAdmin();
-    if (!admin || !admin.mfa_confirmed) throw new Error('no admin account configured');
+    const active = admin && (admin.mfa_enabled ? admin.mfa_confirmed : true);
+    if (!active) throw new Error('no admin account configured');
     const userOk = crypto.timingSafeEqual(
       crypto.createHash('sha256').update(String(username || '')).digest(),
       crypto.createHash('sha256').update(admin.username).digest());
@@ -132,9 +142,11 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
       eventsRepo.add('auth.login_failed', 'warning', { ip, reason: 'credentials' });
       throw new Error('invalid username or password');
     }
-    if (!verifyTotp(decryptSecret(admin), code)) {
-      eventsRepo.add('auth.login_failed', 'warning', { ip, reason: 'mfa' });
-      throw new Error('invalid authentication code');
+    if (admin.mfa_enabled) {
+      if (!verifyTotp(decryptSecret(admin), code)) {
+        eventsRepo.add('auth.login_failed', 'warning', { ip, reason: 'mfa' });
+        throw new Error('invalid authentication code');
+      }
     }
     eventsRepo.add('auth.login', 'info', { ip, username: admin.username });
     return createSession(ip, ua);

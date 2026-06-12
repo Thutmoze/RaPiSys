@@ -51,6 +51,14 @@ describe('auth service', () => {
     auth.destroySession(token);
     expect(auth.validateSession(token)).toBe(false);
   });
+  it('register without MFA: active immediately, login needs no code', () => {
+    const { auth } = fixture();
+    const r = auth.register('nomfa_user', 'longpassword', { mfa: false });
+    expect(r.mfa).toBe(false);
+    const token = auth.login('nomfa_user', 'longpassword', undefined, 'ip', '');
+    expect(auth.validateSession(token)).toBe(true);
+    expect(() => auth.login('nomfa_user', 'WRONG', undefined, 'ip', '')).toThrow();
+  });
   it('rejects bad credentials and bad codes', () => {
     const { auth } = fixture();
     const { secret } = auth.register('user_1', 'longpassword');

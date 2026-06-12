@@ -19,10 +19,17 @@ export function authRouter({ auth, loadSettings }) {
   r.post('/register', async (req, res) => {
     if (!await setupOpen()) return res.status(403).json({ error: 'setup already completed' });
     try {
-      const { username, password } = req.body || {};
-      const { secret, otpauth } = auth.register(username, password);
-      const qrDataUrl = await QRCode.toDataURL(otpauth, { margin: 1, width: 220 });
-      res.json({ ok: true, secret, otpauth, qrDataUrl });
+      const { username, password, mfa } = req.body || {};
+      const r = auth.register(username, password, { mfa: mfa !== false });
+      if (!r.mfa) {
+        // MFA declined: account active now — sign the wizard browser in.
+        const token = auth.createSessionDirect(req.ip, req.headers['user-agent']);
+        res.setHeader('Set-Cookie',
+          `${auth.COOKIE_NAME}=${token}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax`);
+        return res.json({ ok: true, mfa: false });
+      }
+      const qrDataUrl = await QRCode.toDataURL(r.otpauth, { margin: 1, width: 220 });
+      res.json({ ok: true, mfa: true, secret: r.secret, otpauth: r.otpauth, qrDataUrl });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -69,7 +76,8 @@ export function authRouter({ auth, loadSettings }) {
     res.json({
       mode: await auth.getMode(),
       authenticated: auth.isAuthenticated(req),
-      adminConfigured: !!auth.getAdmin()?.mfa_confirmed,
+      adminConfigured: (() => { const ad = auth.getAdmin(); return !!ad && (ad.mfa_enabled ? !!ad.mfa_confirmed : true); })(),
+      mfaEnabled: !!auth.getAdmin()?.mfa_enabled,
       username: auth.isAuthenticated(req) ? (auth.getAdmin()?.username || null) : null,
     });
   });
