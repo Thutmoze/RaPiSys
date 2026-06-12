@@ -421,10 +421,10 @@ pageRenderers.hardware = (() => {
             <div class="hw-row"><span>Duty cycle</span><span data-hw="duty">—</span></div>
             <div class="hw-bar"><div class="hw-bar-fill" data-hw="dutybar"></div></div>
             <div class="hw-row"><span>Mode</span><span class="hw-mode" data-hw="mode">—</span></div>
-            <div class="hw-controls">
-              <button class="action-btn" data-fan="auto">Auto</button>
+            <div class="hw-controls hw-fan-controls">
+              <button class="action-btn hw-fan-btn" data-fan="auto">Auto</button>
               <input type="range" min="0" max="100" value="50" data-fan="slider" aria-label="Manual fan duty">
-              <button class="action-btn" data-fan="apply">Set duty</button>
+              <button class="action-btn hw-fan-btn" data-fan="apply">Set <span data-fan="pct">50</span>%</button>
             </div>
             <p class="hw-hint">Manual control requires the RaPiSys host agent.</p>
           </div>
@@ -465,6 +465,9 @@ pageRenderers.hardware = (() => {
       $('[data-hw=range]', host).value = range;
       $('[data-hw=range]', host).addEventListener('change', (e) => {
         range = e.target.value; localStorage.setItem('hwRange', range); refreshHistory(host);
+      });
+      $('[data-fan=slider]', host).addEventListener('input', (e) => {
+        $('[data-fan=pct]', host).textContent = e.target.value;
       });
       $('[data-fan=auto]', host).addEventListener('click', () => setFan({ mode: 'auto' }));
       $('[data-fan=apply]', host).addEventListener('click', () =>

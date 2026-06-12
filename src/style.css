@@ -4747,3 +4747,15 @@ select, select option {
 .rsel-item.sel { color: var(--accent-cyan); background: rgba(0, 212, 255, 0.06); }
 body.compact .rsel-btn { padding: 8px 10px; }
 body.ultra .rsel-btn { padding: 6px 9px; font-size: 12px; }
+
+/* Fan control row: properly sized buttons, live duty preview on Set */
+.hw-fan-controls { display: flex; align-items: center; gap: 10px; }
+.hw-fan-controls input[type=range] { flex: 1; accent-color: var(--accent-cyan); }
+.hw-fan-btn {
+  flex: none; white-space: nowrap; min-width: 78px; padding: 9px 14px;
+  font-size: 12px; font-weight: 600; border-radius: var(--radius-sm);
+  background: var(--bg-secondary); color: var(--accent-cyan);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+}
+.hw-fan-btn:hover { border-color: var(--accent-cyan); box-shadow: var(--glow-cyan); }
+body.ultra .hw-fan-btn { min-width: 64px; padding: 6px 10px; font-size: 11px; }
