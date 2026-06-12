@@ -162,10 +162,13 @@ export async function discoverServices() {
       const processName = processMatch ? processMatch[1] : null;
       
       let service = null;
-      if (processName && KNOWN_PROCESSES[processName]) {
-        service = { ...KNOWN_PROCESSES[processName], port };
-      } else if (KNOWN_SERVICES[port]) {
+      // A specific well-known port beats a generic process name: many
+      // unrelated services run under 'node' or 'python', but :3001 is
+      // unambiguously RaPiSys, :5900 VNC, etc.
+      if (KNOWN_SERVICES[port]) {
         service = { ...KNOWN_SERVICES[port], port };
+      } else if (processName && KNOWN_PROCESSES[processName]) {
+        service = { ...KNOWN_PROCESSES[processName], port };
       } else if (port < 10000) {
         service = {
           name: processName ? `${processName}` : `Port ${port}`,
