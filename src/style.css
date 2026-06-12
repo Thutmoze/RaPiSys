@@ -4717,3 +4717,33 @@ select, select option {
   border-radius: 50%; animation: wz-spin 0.7s linear infinite;
 }
 @keyframes wz-spin { to { transform: rotate(360deg); } }
+
+/* Custom dropdowns (.rsel): fully theme-controlled, no native popup */
+.rsel { position: relative; width: 100%; }
+.rsel select { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+.rsel-btn {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 10px 12px; font: inherit; font-size: 13px; text-align: left;
+  background: var(--bg-secondary); color: var(--text-primary);
+  border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+  cursor: pointer; transition: var(--transition);
+}
+.rsel-btn:hover, .rsel-btn.open { border-color: rgba(0, 212, 255, 0.45); }
+.rsel-btn.open svg { transform: rotate(180deg); }
+.rsel-btn svg { transition: transform 0.15s ease; color: var(--text-muted); flex: none; }
+.rsel-list {
+  position: absolute; z-index: 7000; top: calc(100% + 4px); left: 0; right: 0;
+  max-height: 240px; overflow-y: auto;
+  background: #101014; border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+  padding: 4px;
+}
+.rsel-item {
+  display: block; width: 100%; text-align: left; padding: 9px 10px;
+  font: inherit; font-size: 13px; color: var(--text-secondary);
+  background: none; border: 0; border-radius: 8px; cursor: pointer;
+}
+.rsel-item:hover { background: rgba(0, 212, 255, 0.08); color: var(--text-primary); }
+.rsel-item.sel { color: var(--accent-cyan); background: rgba(0, 212, 255, 0.06); }
+body.compact .rsel-btn { padding: 8px 10px; }
+body.ultra .rsel-btn { padding: 6px 9px; font-size: 12px; }

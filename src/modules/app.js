@@ -39,6 +39,58 @@ async function api(path, opts = {}, retried = false) {
 }
 
 // ---------------------------------------------------------------------------
+// Custom dropdowns: native <select> popups are OS/browser-rendered and
+// refuse dark theming in several browsers (white flash). We render our
+// own popup and keep the hidden native select as the source of truth so
+// existing form code (select.value, change events) works unchanged.
+// ---------------------------------------------------------------------------
+
+function enhanceSelects(root) {
+  root.querySelectorAll('select:not([data-rsel])').forEach((sel) => {
+    sel.dataset.rsel = '1';
+    const wrap = el('div', 'rsel');
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);                    // stays in DOM, hidden by CSS
+
+    const btn = el('button', 'rsel-btn');
+    btn.type = 'button';
+    const labelOf = () => sel.options[sel.selectedIndex]?.text ?? '';
+    btn.innerHTML = `<span class="rsel-label"></span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>`;
+    const labEl = btn.querySelector('.rsel-label');
+    labEl.textContent = labelOf();
+    wrap.appendChild(btn);
+
+    const list = el('div', 'rsel-list');
+    list.hidden = true;
+    wrap.appendChild(list);
+
+    function renderList() {
+      list.innerHTML = '';
+      [...sel.options].forEach((o, i) => {
+        const item = el('button', 'rsel-item' + (i === sel.selectedIndex ? ' sel' : ''));
+        item.type = 'button';
+        item.textContent = o.text;
+        item.onclick = () => {
+          sel.selectedIndex = i;
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          labEl.textContent = labelOf();
+          close();
+        };
+        list.appendChild(item);
+      });
+    }
+    const close = () => { list.hidden = true; btn.classList.remove('open'); };
+    btn.onclick = () => {
+      if (list.hidden) { renderList(); list.hidden = false; btn.classList.add('open'); }
+      else close();
+    };
+    document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) close(); });
+    wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    sel.addEventListener('change', () => { labEl.textContent = labelOf(); });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Login modal (full-control mode): username + password + authenticator code
 // ---------------------------------------------------------------------------
 
@@ -279,6 +331,7 @@ function route() {
     document.body.appendChild(host);
     const renderer = pageRenderers[page] || comingSoonPage(page);
     renderer.mount(host);
+    enhanceSelects(host);
     activeRenderer = renderer;
   }
   activePage = page;
@@ -981,6 +1034,7 @@ async function maybeShowWizard() {
     wiz.querySelectorAll('.wz-step').forEach((s, idx) => s.classList.toggle('active', idx === step));
     backBtn.style.visibility = step === 0 ? 'hidden' : 'visible';
     await steps[step].render();
+    enhanceSelects(body);
   }
   backBtn.addEventListener('click', () => show(Math.max(0, step - 1)));
   nextBtn.addEventListener('click', async () => {
