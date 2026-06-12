@@ -4699,6 +4699,9 @@ body.ultra .wz-qr img { width: 120px; height: 120px; }
 /* Native select popups: explicit dark option styling for browsers that
    honor it (Chromium does); pairs with color-scheme above. */
 select, select option {
+  color-scheme: dark;            /* element-level: some Chromium builds
+                                    ignore the root-level declaration for
+                                    the popup itself */
   background-color: var(--bg-secondary);
   color: var(--text-primary);
 }
