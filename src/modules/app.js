@@ -39,6 +39,33 @@ async function api(path, opts = {}, retried = false) {
 }
 
 // ---------------------------------------------------------------------------
+// App-native confirm dialog (replaces window.confirm's browser chrome)
+// ---------------------------------------------------------------------------
+
+function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm' } = {}) {
+  return new Promise((resolve) => {
+    const ov = el('div', 'wizard-overlay rconfirm-overlay');
+    ov.innerHTML = `
+      <div class="wizard card rconfirm">
+        <p class="rconfirm-msg"></p>
+        <div class="wz-row rconfirm-row">
+          <button class="action-btn ${danger ? 'rconfirm-danger' : 'wz-primary'}" data-rc="ok"></button>
+          <button class="action-btn" data-rc="cancel">Cancel</button>
+        </div>
+      </div>`;
+    ov.querySelector('.rconfirm-msg').textContent = message;
+    ov.querySelector('[data-rc=ok]').textContent = confirmLabel;
+    document.body.appendChild(ov);
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.querySelector('[data-rc=ok]').onclick = () => done(true);
+    ov.querySelector('[data-rc=cancel]').onclick = () => done(false);
+    ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(false); });
+    ov.addEventListener('click', (e) => { if (e.target === ov) done(false); });
+    setTimeout(() => ov.querySelector('[data-rc=cancel]').focus(), 40);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Custom dropdowns: native <select> popups are OS/browser-rendered and
 // refuse dark theming in several browsers (white flash). We render our
 // own popup and keep the hidden native select as the source of truth so
@@ -60,13 +87,22 @@ function enhanceSelects(root) {
     labEl.textContent = labelOf();
     wrap.appendChild(btn);
 
+    // The list is PORTALED to <body>: glass cards each create a stacking
+    // context, so an absolutely-positioned list inside one card paints
+    // BELOW the next card no matter its z-index.
     const list = el('div', 'rsel-list');
     list.hidden = true;
-    wrap.appendChild(list);
+    const filter = el('input', 'rsel-filter');
+    filter.placeholder = 'Type to filter…';
+    const items = el('div', 'rsel-items');
+    list.appendChild(filter); list.appendChild(items);
+    document.body.appendChild(list);
 
-    function renderList() {
-      list.innerHTML = '';
+    function renderItems(q = '') {
+      items.innerHTML = '';
+      const needle = q.trim().toLowerCase();
       [...sel.options].forEach((o, i) => {
+        if (needle && !o.text.toLowerCase().includes(needle)) return;
         const item = el('button', 'rsel-item' + (i === sel.selectedIndex ? ' sel' : ''));
         item.type = 'button';
         item.textContent = o.text;
@@ -76,16 +112,31 @@ function enhanceSelects(root) {
           labEl.textContent = labelOf();
           close();
         };
-        list.appendChild(item);
+        items.appendChild(item);
       });
+      if (!items.children.length) items.innerHTML = '<div class="rsel-none">No matches</div>';
     }
-    const close = () => { list.hidden = true; btn.classList.remove('open'); };
+    function position() {
+      const r = btn.getBoundingClientRect();
+      list.style.left = `${r.left}px`;
+      list.style.width = `${r.width}px`;
+      const below = window.innerHeight - r.bottom;
+      if (below < 260 && r.top > 260) { list.style.top = ''; list.style.bottom = `${window.innerHeight - r.top + 4}px`; }
+      else { list.style.bottom = ''; list.style.top = `${r.bottom + 4}px`; }
+    }
+    const close = () => { list.hidden = true; btn.classList.remove('open'); filter.value = ''; };
     btn.onclick = () => {
-      if (list.hidden) { renderList(); list.hidden = false; btn.classList.add('open'); }
-      else close();
+      if (list.hidden) {
+        renderItems(); position(); list.hidden = false; btn.classList.add('open');
+        filter.style.display = sel.options.length > 8 ? '' : 'none';
+        if (sel.options.length > 8) setTimeout(() => filter.focus(), 30);
+      } else close();
     };
-    document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) close(); });
-    wrap.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    filter.addEventListener('input', () => renderItems(filter.value));
+    document.addEventListener('click', (e) => { if (!wrap.contains(e.target) && !list.contains(e.target)) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    window.addEventListener('scroll', () => { if (!list.hidden) position(); }, true);
+    window.addEventListener('resize', () => { if (!list.hidden) position(); });
     sel.addEventListener('change', () => { labEl.textContent = labelOf(); });
   });
 }
@@ -295,7 +346,7 @@ function buildNav() {
       return;
     }
     if (me.authenticated) {
-      if (confirm('Sign out of the admin session?')) {
+      if (await rapisysConfirm('Sign out of the admin session?', { confirmLabel: 'Sign out' })) {
         await api('/auth/logout', { method: 'POST', body: {} }).catch(() => {});
         refreshAuthBadge();
       }
@@ -425,7 +476,7 @@ pageRenderers.hardware = (() => {
             <div class="hw-controls hw-fan-controls">
               <button class="action-btn hw-fan-btn" data-fan="auto">Auto</button>
               <input type="range" min="0" max="100" value="50" data-fan="slider" aria-label="Manual fan duty">
-              <button class="action-btn hw-fan-btn" data-fan="apply">Set <span data-fan="pct">50</span>%</button>
+              <button class="action-btn hw-fan-btn" data-fan="apply">Set <span data-fan="pct">50</span> %</button>
             </div>
             <p class="hw-hint">Manual control requires the RaPiSys host agent.</p>
           </div>
@@ -470,7 +521,11 @@ pageRenderers.hardware = (() => {
       $('[data-fan=slider]', host).addEventListener('input', (e) => {
         $('[data-fan=pct]', host).textContent = e.target.value;
       });
-      $('[data-fan=auto]', host).addEventListener('click', () => setFan({ mode: 'auto' }));
+      $('[data-fan=auto]', host).addEventListener('click', async () => {
+        await setFan({ mode: 'auto' });
+        slider.dataset.touched = 0;        // mirror the governor immediately
+        refreshLive(host);
+      });
       $('[data-fan=apply]', host).addEventListener('click', () =>
         setFan({ dutyPercent: Number($('[data-fan=slider]', host).value) }));
 
@@ -536,7 +591,8 @@ pageRenderers.sessions = (() => {
     $('[data-sess=vnc]', host).innerHTML = vncHtml;
     $('[data-sess=ts]', host).innerHTML = tsHtml;
     host.querySelectorAll('[data-kick]').forEach((b) => b.onclick = async () => {
-      if (!confirm(`Disconnect ${b.dataset.who}? Their session ends immediately.`)) return;
+      if (!await rapisysConfirm(`Disconnect ${b.dataset.who}? Their session ends immediately.`,
+        { danger: true, confirmLabel: 'Disconnect' })) return;
       try {
         await api(`/sessions/${b.dataset.kick}/terminate`, { method: 'POST', body: {} });
         toast('success', 'Sessions', `Disconnected ${b.dataset.who}`);
@@ -655,7 +711,7 @@ pageRenderers.alerts = (() => {
       } catch (err) { toast('error', 'Alerts', err.message); }
     });
     host.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
-      if (!confirm('Delete this alert rule?')) return;
+      if (!await rapisysConfirm('Delete this alert rule?', { danger: true, confirmLabel: 'Delete' })) return;
       try { await api(`/alerts/rules/${b.dataset.del}`, { method: 'DELETE' }); refresh(host); }
       catch (err) { toast('error', 'Alerts', err.message); }
     });

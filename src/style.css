@@ -4782,3 +4782,24 @@ body.ultra .hw-fan-btn { min-width: 64px; padding: 6px 10px; font-size: 11px; }
 .sess-kick:hover { border-color: var(--accent-red, #ef4444);
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.3); }
 body.ultra .al-btn, body.ultra .sess-kick { padding: 4px 9px; font-size: 10px; }
+
+/* App-native confirm dialog */
+.rconfirm { max-width: 400px; }
+.rconfirm-msg { font-size: 14px; color: var(--text-primary); line-height: 1.55; margin: 0 0 16px; }
+.rconfirm-danger {
+  background: rgba(239, 68, 68, 0.12) !important;
+  color: var(--accent-red, #ef4444) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+}
+.rconfirm-danger:hover { box-shadow: 0 0 14px rgba(239, 68, 68, 0.35); }
+
+/* Portaled dropdown list (fixed, above every card stacking context) */
+.rsel-list { position: fixed; z-index: 9000; }
+.rsel-filter {
+  width: 100%; padding: 8px 10px; margin-bottom: 4px; font: inherit; font-size: 12px;
+  background: var(--bg-secondary); color: var(--text-primary);
+  border: 1px solid var(--border-color); border-radius: 8px; outline: none;
+}
+.rsel-filter:focus { border-color: rgba(0, 212, 255, 0.45); }
+.rsel-items { max-height: 200px; overflow-y: auto; }
+.rsel-none { padding: 10px; font-size: 12px; color: var(--text-muted); }
