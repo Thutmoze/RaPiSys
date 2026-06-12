@@ -226,7 +226,18 @@ const OPS = {
       assert(allowed.has(o) || (proto === 'cifs' && UIDGID_RE.test(o)), `mount option not allowed: ${o}`);
     }
 
-    fs.mkdirSync(mountpoint, { recursive: true });
+    // A stale .automount from a previous install leaves a dead autofs trap
+    // at the mountpoint (ENODEV/ENOTCONN on any access). Clear it first.
+    try {
+      fs.mkdirSync(mountpoint, { recursive: true });
+    } catch (err) {
+      if (!['ENODEV', 'ENOTCONN', 'EEXIST'].includes(err.code)) throw err;
+      const unit = unitNameFor(mountpoint);
+      await run('systemctl', ['disable', '--now', `${unit}.automount`]).catch(() => {});
+      await run('systemctl', ['stop', `${unit}.mount`]).catch(() => {});
+      await run('umount', ['-l', mountpoint]).catch(() => {});
+      fs.mkdirSync(mountpoint, { recursive: true });
+    }
     const what = proto === 'cifs'
       ? `//${host}/${share.replace(/^\//, '')}`
       : `${host}:${share.startsWith('/') ? share : '/' + share}`;

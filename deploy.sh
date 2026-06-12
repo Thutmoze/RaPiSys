@@ -233,7 +233,16 @@ cmd_uninstall() {
   log "Stopping RaPiSys…"
   (cd "$APP_DIR" && $COMPOSE down) || true
   systemctl disable --now rapisys-agent 2>/dev/null || true
-  rm -f /etc/systemd/system/rapisys-agent.service && systemctl daemon-reload
+  rm -f /etc/systemd/system/rapisys-agent.service
+  # remove NAS mount units created by the agent (dead automount traps
+  # otherwise break the next install's mount step with ENODEV)
+  for u in /etc/systemd/system/mnt-rapisys-*.automount /etc/systemd/system/mnt-rapisys-*.mount; do
+    [[ -e "$u" ]] || continue
+    systemctl disable --now "$(basename "$u")" 2>/dev/null || true
+    rm -f "$u"
+  done
+  umount -l /mnt/rapisys/* 2>/dev/null || true
+  systemctl daemon-reload
   if [[ "${1:-}" == "--purge" ]]; then
     rm -rf "$DATA_DIR" /etc/rapisys /opt/rapisys /var/lib/rapisys
     warn "data purged"
