@@ -226,6 +226,13 @@ const OPS = {
     return { sessions };
   },
 
+  async 'sessions.terminate'({ id }) {
+    assert(/^\d{1,8}$/.test(String(id)), 'invalid session id');
+    const r = await run('loginctl', ['terminate-session', String(id)], 5000);
+    assert(r.code === 0, `terminate failed: ${r.stderr || r.stdout || 'unknown'}`);
+    return { ok: true, id: String(id) };
+  },
+
   // ---- Tailscale (read-only status; binary lives on the host) -------------
   async 'ts.status'() {
     const r = await run('tailscale', ['status', '--json'], 8000)

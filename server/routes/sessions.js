@@ -1,8 +1,9 @@
 /** RaPiSys — /api/sessions: live sessions + login history. */
 
 import express from 'express';
+import { agentCall } from '../core/agent-client.js';
 
-export function sessionsRouter({ sessions, sessionsRepo, requireAuth }) {
+export function sessionsRouter({ sessions, sessionsRepo, requireAuth, requireControl }) {
   const r = express.Router();
 
   // Who is logged in, from which IP, on which device — sensitive data.
@@ -23,6 +24,14 @@ export function sessionsRouter({ sessions, sessionsRepo, requireAuth }) {
       history: sessionsRepo.history({ from, to: Number(req.query.to) || now, kind: req.query.kind || null }),
       perDay: sessionsRepo.loginsPerDay(30),
     });
+  });
+
+  // Disconnecting a user is Pi control: 403 in monitor mode, admin in full.
+  r.post('/:id/terminate', requireControl, async (req, res) => {
+    try {
+      const out = await agentCall('sessions.terminate', { id: req.params.id }, null, 6000);
+      res.json(out);
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   return r;
