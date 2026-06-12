@@ -706,7 +706,13 @@ async function maybeShowWizard() {
     },
     // 1 — Operating mode (+ admin registration with MFA for full control)
     {
-      render() {
+      async render() {
+        // Recover server-side state: a reload mid-wizard must not forget an
+        // already-registered admin (the flag lived only in page memory).
+        try {
+          const me = await api('/auth/me');
+          if (me.adminConfigured) { state.adminReady = true; state.mode = 'full'; }
+        } catch { /* older server */ }
         body.innerHTML = `
           <p class="wz-lead">How much should this dashboard be able to do?</p>
           <div class="wz-modes">
@@ -965,11 +971,11 @@ async function maybeShowWizard() {
     },
   ];
 
-  function show(i) {
+  async function show(i) {
     step = i;
     wiz.querySelectorAll('.wz-step').forEach((s, idx) => s.classList.toggle('active', idx === step));
     backBtn.style.visibility = step === 0 ? 'hidden' : 'visible';
-    steps[step].render();
+    await steps[step].render();
   }
   backBtn.addEventListener('click', () => show(Math.max(0, step - 1)));
   nextBtn.addEventListener('click', async () => {
