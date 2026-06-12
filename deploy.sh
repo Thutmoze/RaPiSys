@@ -119,6 +119,12 @@ EOF
   local gid; gid=$(getent group rapisys | cut -d: -f3)
   sed -i "/^RAPISYS_GID=/d" "${APP_DIR}/.env"
   echo "RAPISYS_GID=${gid}" >> "${APP_DIR}/.env"
+  # Docker socket group: the non-root container needs it to read
+  # /var/run/docker.sock for the Containers card.
+  local dgid
+  dgid=$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 998)
+  sed -i "/^DOCKER_GID=/d" "${APP_DIR}/.env"
+  echo "DOCKER_GID=${dgid}" >> "${APP_DIR}/.env"
   ok "rapisys group GID ${gid} recorded in .env"
 
   install -m 0644 "${APP_DIR}/agent/rapisys-agent.service" /etc/systemd/system/rapisys-agent.service

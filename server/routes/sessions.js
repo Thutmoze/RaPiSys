@@ -2,8 +2,13 @@
 
 import express from 'express';
 
-export function sessionsRouter({ sessions, sessionsRepo }) {
+export function sessionsRouter({ sessions, sessionsRepo, requireAuth }) {
   const r = express.Router();
+
+  // Who is logged in, from which IP, on which device — sensitive data.
+  // In full-control mode this requires the admin session (in monitor
+  // mode, where no account exists, it stays LAN-open like the rest).
+  r.use(requireAuth);
 
   r.get('/', async (req, res) => {
     try { res.json(await sessions.snapshot()); }

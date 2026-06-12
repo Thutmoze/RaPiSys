@@ -202,6 +202,7 @@ RAPISYS_DEMO=1 node server/index.js
 ## Security notes
 
 - **Full-control mode** gates Pi-control behind a local admin with optional (default-on) TOTP MFA: passwords are scrypt-hashed, the TOTP secret is AES-256-GCM encrypted at rest, browser sessions are random 256-bit values stored only as SHA-256 hashes (30-day sliding expiry), and logins are rate-limited (10 attempts / 15 min / IP) with every attempt audit-logged.
+- In full-control mode, the **Sessions** page (who is logged in, source IPs, Tailscale devices) requires the admin session — unauthenticated browsers get the sign-in dialog.
 - **Monitor-only mode** disables Pi-control endpoints entirely — there is nothing to log into and nothing a LAN guest can change on the Pi.
 - Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall).
 - `ADMIN_TOKEN` (deploy.sh generates one) is for API automation.
