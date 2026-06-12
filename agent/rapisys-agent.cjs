@@ -76,7 +76,8 @@ const SHARE_RE = /^[A-Za-z0-9 _./-]{1,128}$/;
 const MOUNT_BASE = '/mnt/rapisys';
 const ALLOWED_CIFS_OPTS = new Set(['vers=1.0', 'vers=2.0', 'vers=2.1', 'vers=3.0', 'vers=3.1.1',
   'ro', 'rw', 'noperm', 'iocharset=utf8', 'file_mode=0664', 'dir_mode=0775',
-  'nofail', '_netdev', 'soft', 'noserverino', 'sec=ntlm', 'sec=ntlmssp', 'sec=ntlmv2']);
+  'nofail', '_netdev', 'soft', 'noserverino', 'nounix',
+  'sec=ntlm', 'sec=ntlmssp', 'sec=ntlmv2']);
 // uid=/gid= carry dynamic numeric ids — validated by pattern, not enumeration.
 const UIDGID_RE = /^(uid|gid)=\d{1,6}$/;
 const ALLOWED_NFS_OPTS = new Set(['ro', 'rw', 'vers=3', 'vers=4', 'vers=4.1', 'vers=4.2',

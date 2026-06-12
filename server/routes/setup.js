@@ -64,8 +64,13 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
         // Files must belong to the CONTAINER user (uid 990) and the host
         // rapisys group, or the DB write-probe fails with EACCES.
         const gid = Number(process.env.RAPISYS_GID) || 990;
+        // noperm: the client kernel must not enforce server-side ownership
+        // against our container uid — the NAS already enforces the SMB
+        // credentials. nounix (SMB1): old Samba negotiates unix extensions,
+        // which would override our uid=/gid=/file_mode= mapping entirely.
         options.push(`vers=${v}`, 'iocharset=utf8', `uid=990`, `gid=${gid}`,
-          'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino');
+          'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino', 'noperm');
+        if (v === '1.0') options.push('nounix');
         // No forced sec= option: legacy NTLM was removed from the kernel
         // CIFS driver in Linux 6.7 (sec=ntlm => EINVAL on modern kernels).
         // The default NTLMSSP negotiation works against old Samba (WD My
