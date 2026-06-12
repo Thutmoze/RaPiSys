@@ -248,7 +248,7 @@ const ICONS = {
   sessions: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
   network: '<path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>',
   reports: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>',
-  updates: '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>',
+  updates: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   inventory: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/>',
   alerts: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
 };
@@ -368,6 +368,7 @@ pageRenderers.hardware = (() => {
     const dutyBar = $('[data-hw=dutybar]', host);
     if (dutyBar) dutyBar.style.width = `${hw.fan.present ? hw.fan.dutyPercent : 0}%`;
     set('[data-hw=duty]', hw.fan.present ? `${hw.fan.dutyPercent}%` : '—');
+    if (hw.fan.present) pageRenderers.hardware._syncSlider?.(hw.fan.dutyPercent);
 
     // Thermal
     set('[data-hw=temp]', hw.thermal.cpuTemp !== null ? `${hw.thermal.cpuTemp.toFixed(1)}°C` : '—');
@@ -509,7 +510,9 @@ pageRenderers.sessions = (() => {
       ? snap.ssh.map((s) => row4([
           `<b>${esc(s.username)}</b> <span class="sess-tty">${esc(s.meta?.tty || '')}</span>`,
           esc(s.source), fmtDur(now - s.startedAt),
-          s.idleMs != null ? `idle ${fmtDur(s.idleMs)}` : '—',
+          s.meta?.sessionId
+            ? `<button class="action-btn sess-kick" data-kick="${esc(s.meta.sessionId)}" data-who="${esc(s.username)}@${esc(s.source)}">Disconnect</button>`
+            : (s.idleMs != null ? `idle ${fmtDur(s.idleMs)}` : '—'),
         ])).join('')
       : '<p class="sess-empty">No active SSH sessions</p>';
 
@@ -532,6 +535,14 @@ pageRenderers.sessions = (() => {
     $('[data-sess=ssh]', host).innerHTML = sshHtml;
     $('[data-sess=vnc]', host).innerHTML = vncHtml;
     $('[data-sess=ts]', host).innerHTML = tsHtml;
+    host.querySelectorAll('[data-kick]').forEach((b) => b.onclick = async () => {
+      if (!confirm(`Disconnect ${b.dataset.who}? Their session ends immediately.`)) return;
+      try {
+        await api(`/sessions/${b.dataset.kick}/terminate`, { method: 'POST', body: {} });
+        toast('success', 'Sessions', `Disconnected ${b.dataset.who}`);
+        refresh(host);
+      } catch (err) { toast('error', 'Sessions', err.message); }
+    });
     $('[data-sess=counts]', host).textContent =
       `${snap.ssh.length} SSH · ${snap.vnc.length} VNC · ${ts.peers?.filter((p) => p.online).length || 0} Tailscale online`;
   }
@@ -616,8 +627,13 @@ pageRenderers.alerts = (() => {
         </span>
       </div>`).join('') || '<p class="sess-empty">No rules — add one below.</p>';
 
-    // metric datalist for the add form
-    $('#al-metrics', host).innerHTML = metrics.metrics.map((m) => `<option value="${esc(m)}">`).join('');
+    // metric dropdown: populate from the live metric list, preserving the
+    // current choice (options are read live by the custom dropdown on open)
+    const msel = $('[data-new=metric]', host);
+    const keep = msel.value;
+    msel.innerHTML = '<option value="">Choose a metric…</option>'
+      + metrics.metrics.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+    if (keep) msel.value = keep;
 
     // history
     $('[data-al=hist]', host).innerHTML = history.history.length
@@ -662,7 +678,7 @@ pageRenderers.alerts = (() => {
             <div class="al-form wz-form">
               <label>Name <input data-new="name" placeholder="High CPU temperature" maxlength="80"></label>
               <div class="al-form-row">
-                <label>Metric <input data-new="metric" list="al-metrics" placeholder="temp.cpu"><datalist id="al-metrics"></datalist></label>
+                <label>Metric <select data-new="metric"><option value="">Choose a metric…</option></select></label>
                 <label>Op <select data-new="op"><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option></select></label>
                 <label>Threshold <input data-new="threshold" type="number" step="any" placeholder="80"></label>
               </div>
