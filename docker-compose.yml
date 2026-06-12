@@ -37,8 +37,12 @@ services:
       # RaPiSys host agent socket (created by deploy.sh / systemd)
       - /run/rapisys:/run/rapisys
 
-      # NAS mounts managed by the agent (DB can live here)
-      - /mnt/rapisys:/mnt/rapisys
+      # NAS mounts managed by the agent (DB can live here).
+      # rslave propagation is ESSENTIAL: the agent mounts shares on the
+      # host while the container is running — with the default private
+      # propagation those mounts never appear (or appear as dead stale
+      # entries -> ELOOP/ENODEV) inside the container.
+      - /mnt/rapisys:/mnt/rapisys:rslave
 
     # Host namespaces for full system visibility
     pid: host
