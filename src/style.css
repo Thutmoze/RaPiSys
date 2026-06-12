@@ -4702,3 +4702,15 @@ select, select option {
   background-color: var(--bg-secondary);
   color: var(--text-primary);
 }
+
+/* Busy state for wizard navigation: unmistakable working feedback */
+.wz-busy, .action-btn:disabled {
+  opacity: 0.55; cursor: progress !important; pointer-events: none;
+}
+.wz-busy::after {
+  content: ''; display: inline-block; width: 11px; height: 11px;
+  margin-left: 8px; vertical-align: -1px;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: wz-spin 0.7s linear infinite;
+}
+@keyframes wz-spin { to { transform: rotate(360deg); } }

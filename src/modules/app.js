@@ -874,6 +874,7 @@ async function maybeShowWizard() {
         });
         nextBtn.textContent = 'Continue';
       },
+      busyLabel: 'Relocating database…',
       async next() {
         const dir = $('[data-st=dir]', body).value.trim();
         if (!dir) return true; // keep local default
@@ -983,13 +984,22 @@ async function maybeShowWizard() {
   }
   backBtn.addEventListener('click', () => show(Math.max(0, step - 1)));
   nextBtn.addEventListener('click', async () => {
+    // Slow steps (DB relocation onto a NAS can take a while over SMB1)
+    // need visible progress, or people understandably click again.
+    const label = nextBtn.textContent;
     nextBtn.disabled = true;
+    nextBtn.classList.add('wz-busy');
+    nextBtn.textContent = steps[step].busyLabel || 'Working…';
     try {
       const advance = await steps[step].next();
       if (advance && step < steps.length - 1) show(step + 1);
     } catch (err) {
       toast('error', 'Setup', err.message);
-    } finally { nextBtn.disabled = false; }
+    } finally {
+      nextBtn.disabled = false;
+      nextBtn.classList.remove('wz-busy');
+      if (nextBtn.textContent === (steps[step].busyLabel || 'Working…')) nextBtn.textContent = label;
+    }
   });
   show(0);
 }
