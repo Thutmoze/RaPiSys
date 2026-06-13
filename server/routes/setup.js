@@ -70,7 +70,14 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
         // which would override our uid=/gid=/file_mode= mapping entirely.
         options.push(`vers=${v}`, 'iocharset=utf8', `uid=990`, `gid=${gid}`,
           'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino', 'noperm');
-        if (v === '1.0') options.push('nounix');
+        if (v === '1.0') {
+          // SMB1 / old Samba (WD My Book) can't honor POSIX byte-range
+          // locks, so SQLite's lock attempts fail as "database is locked".
+          // nobrl disables client byte-range locking; nounix stops the
+          // unix-extensions uid override. Safe here: RaPiSys is the only
+          // writer to its DB directory.
+          options.push('nounix', 'nobrl');
+        }
         // No forced sec= option: legacy NTLM was removed from the kernel
         // CIFS driver in Linux 6.7 (sec=ntlm => EINVAL on modern kernels).
         // The default NTLMSSP negotiation works against old Samba (WD My
