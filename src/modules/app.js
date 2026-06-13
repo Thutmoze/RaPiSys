@@ -1435,7 +1435,7 @@ pageRenderers.inventory = (() => {
     total = data.total;
     const rows = data.rows;
     const head = kind === 'package'
-      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th class="inv-actions">Action</th>'
+      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th>Installed</th><th class="inv-actions">Action</th>'
       : kind === 'service'
       ? '<th>Service</th><th>Status</th><th>Description</th><th class="inv-actions">Action</th>'
       : '<th>Container</th><th>Image</th><th>Status</th><th class="inv-actions">Action</th>';
@@ -1451,7 +1451,7 @@ pageRenderers.inventory = (() => {
             const btn = ess
               ? `<span class="inv-protected" title="Essential/required — protected">protected</span>`
               : `<button class="inv-act inv-act-danger" data-act="pkg-remove" data-name="${esc(r.name)}" title="Uninstall">${trash}</button>`;
-            return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td>${esc(r.version)}</td><td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-actions">${btn}</td></tr>`;
+            return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td>${esc(r.version)}</td><td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td><td class="inv-actions">${btn}</td></tr>`;
           }
           if (kind === 'service') {
             const running = /active\/running/.test(r.status);
@@ -1580,7 +1580,14 @@ pageRenderers.updates = (() => {
     try { data = await api('/updates'); } catch { return; }
     updates = data.updates || [];
     firmware = await api('/updates/firmware').catch(() => null);
-    render(host);
+    // Only paint the full table once we actually have data or a real scan;
+    // an empty cached list on first visit keeps the friendly prompt.
+    if (updates.length || data.available) render(host);
+    else {
+      $('[data-up=chips]', host).innerHTML = '<span class="up-chip">no cached results</span>';
+      $('[data-up=actions]', host).innerHTML = '<button class="net-toggle" data-up="refresh">Check for updates</button>';
+      wireActions(host);
+    }
   }
 
   function render(host) {
@@ -1745,6 +1752,12 @@ pageRenderers.updates = (() => {
           <div class="card-body" data-up="history"></div>
         </div>
       </div>`;
+      // Draw the action toolbar immediately so "Check for updates" is always
+      // available, even before (or without) a cached upgrade list.
+      $('[data-up=chips]', host).innerHTML = '<span class="up-chip">checking…</span>';
+      $('[data-up=actions]', host).innerHTML = '<button class="net-toggle" data-up="refresh">Check for updates</button>';
+      wireActions(host);
+      $('[data-up=table]', host).innerHTML = '<p class="sess-empty">Click \u201cCheck for updates\u201d to scan for available updates.</p>';
       load(host); loadHistory(host);
     },
     unmount() { streaming = false; },
