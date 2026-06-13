@@ -1464,7 +1464,7 @@ pageRenderers.inventory = (() => {
       </table>` : '<p class="sess-empty">No matches.</p>';
 
     // action handlers
-    host.querySelectorAll('[data-act=pkg-remove]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name));
+    host.querySelectorAll('[data-act=pkg-remove]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name, b));
     host.querySelectorAll('[data-act=svc-toggle]').forEach((b) => b.onclick = () => svcToggle(host, b.dataset.name, b.dataset.action));
     host.querySelectorAll('[data-act=ctr-remove]').forEach((b) => b.onclick = () => ctrRemove(host, b.dataset.name));
 
@@ -1498,11 +1498,17 @@ pageRenderers.inventory = (() => {
     enhanceSelects(host);
   }
 
-  async function pkgRemove(host, name) {
+  async function pkgRemove(host, name, btn) {
+    // Computing the cascade (apt-get -s remove) takes a moment — show a
+    // spinner on the button so the click feels responsive, not frozen.
+    const original = btn ? btn.innerHTML : null;
+    if (btn) { btn.disabled = true; btn.classList.add('inv-act-busy'); btn.innerHTML = '<span class="inv-spinner"></span>'; }
+    const restore = () => { if (btn) { btn.disabled = false; btn.classList.remove('inv-act-busy'); btn.innerHTML = original; } };
     // simulate first to show the full cascade
     let sim;
     try { sim = await api('/inventory/package/simulate', { method: 'POST', body: { name } }); }
-    catch (e) { toast('error', 'Inventory', e.message); return; }
+    catch (e) { toast('error', 'Inventory', e.message); restore(); return; }
+    restore();
     if (!sim.allowed) { toast('error', 'Cannot remove', sim.reason || 'protected'); return; }
     const others = (sim.removed || []).filter((p) => p !== name);
     const msg = `Uninstall <b>${esc(name)}</b>?`
