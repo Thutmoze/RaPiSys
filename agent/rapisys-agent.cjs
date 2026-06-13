@@ -46,9 +46,9 @@ if (SECRET.length < 32) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function run(cmd, args, timeoutMs = 30000) {
+function run(cmd, args, timeoutMs = 30000, opts = {}) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, cwd: opts.cwd }, (err, stdout, stderr) => {
       if (err && err.killed) return reject(new Error(`${cmd} timed out`));
       // Many tools (apt, rpi-eeprom-update) use nonzero codes informatively;
       // callers inspect output, so resolve with everything.
@@ -681,31 +681,59 @@ WantedBy=multi-user.target
     }
     return { updates };
   },
-  async 'apt.changelog'({ pkg }) {
+  async 'apt.changelog'({ pkg, candidate = false }) {
     assert(PKG_RE.test(pkg), 'invalid package name');
-    // The local changelog (installed under /usr/share/doc) is the reliable
-    // source: `apt changelog` fetches over the network and frequently fails
-    // on Trixie / rpt1-repackaged packages. Read the gzipped local copy.
-    const docDir = `/usr/share/doc/${pkg}`;
-    const candidates = ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog'];
-    let text = '';
-    try {
-      for (const f of candidates) {
-        const p = path.join(docDir, f);
-        if (!fs.existsSync(p)) continue;
-        const buf = fs.readFileSync(p);
-        text = f.endsWith('.gz') ? require('zlib').gunzipSync(buf).toString('utf-8') : buf.toString('utf-8');
-        break;
+    const zlib = require('zlib');
+    const readGz = (p) => { try { const b = fs.readFileSync(p); return p.endsWith('.gz') ? zlib.gunzipSync(b).toString('utf-8') : b.toString('utf-8'); } catch { return ''; } };
+    const localChangelog = () => {
+      for (const f of ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog']) {
+        const p = `/usr/share/doc/${pkg}/${f}`;
+        if (fs.existsSync(p)) return readGz(p);
       }
-    } catch { /* fall through */ }
-    if (!text) {
-      // last resort: network fetch (may fail, that's fine)
-      const r = await run('apt', ['changelog', pkg], 15000).catch(() => ({ stdout: '' }));
-      text = r.stdout || '';
+      return '';
+    };
+
+    // For upgradable packages we want the CANDIDATE version's notes (what's
+    // NEW), which the installed local changelog can't contain. `apt changelog`
+    // fails on Trixie/rpt1, so download the candidate .deb and extract its
+    // bundled changelog instead.
+    let candidateText = '';
+    let candidateVersion = null;
+    if (candidate) {
+      const tmp = `/tmp/rapisys-changelog-${pkg}-${Date.now()}`;
+      try {
+        fs.mkdirSync(tmp, { recursive: true });
+        const dl = await run('apt-get', ['download', pkg], 30000, { cwd: tmp }).catch(() => ({ code: 1 }));
+        if (dl.code === 0) {
+          const deb = fs.readdirSync(tmp).find((f) => f.endsWith('.deb'));
+          if (deb) {
+            const m = deb.match(/_([^_]+)_/); candidateVersion = m ? m[1] : null;
+            // extract the doc tree from the .deb, then read its changelog
+            await run('dpkg-deb', ['-x', path.join(tmp, deb), path.join(tmp, 'x')], 15000).catch(() => {});
+            const docDir = path.join(tmp, 'x', 'usr', 'share', 'doc', pkg);
+            if (fs.existsSync(docDir)) {
+              for (const f of ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog']) {
+                const p = path.join(docDir, f);
+                if (fs.existsSync(p)) { candidateText = readGz(p); break; }
+              }
+            }
+          }
+        }
+      } catch { /* fall through to local */ }
+      finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } }
     }
-    if (!text) return { changelog: 'No changelog available (none installed locally and network fetch failed).' };
-    // Trim to the most recent entries so the UI stays snappy.
-    return { changelog: text.split('\n').slice(0, 120).join('\n') };
+
+    const text = candidateText || localChangelog();
+    if (!text) {
+      const r = await run('apt', ['changelog', pkg], 12000).catch(() => ({ stdout: '' }));
+      if (r.stdout) return { changelog: r.stdout.split('\n').slice(0, 120).join('\n'), source: 'network' };
+      return { changelog: 'No changelog available.', source: 'none' };
+    }
+    return {
+      changelog: text.split('\n').slice(0, 150).join('\n'),
+      source: candidateText ? 'candidate' : 'installed',
+      candidateVersion,
+    };
   },
   async 'apt.upgrade'({ packages, simulate = false, full = false }, send) {
     let args;

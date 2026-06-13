@@ -25,9 +25,9 @@ export function createUpdatesCollector() {
     } catch (err) { return { available: false, error: err.message, updates: [] }; }
   }
 
-  async function changelog(pkg) {
+  async function changelog(pkg, candidate = true) {
     if (!agentConfigured()) return { changelog: 'agent unavailable' };
-    return agentCall('apt.changelog', { pkg }, null, 25000);
+    return agentCall('apt.changelog', { pkg, candidate }, null, 45000);
   }
 
   async function firmware() {

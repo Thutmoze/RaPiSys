@@ -27,7 +27,9 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
 
   // Changelog for a package.
   r.get('/changelog/:pkg', async (req, res) => {
-    res.json(await updates.changelog(req.params.pkg));
+    // candidate=1 (default) extracts the NEW version's notes from its .deb
+    const candidate = req.query.candidate !== '0';
+    res.json(await updates.changelog(req.params.pkg, candidate));
   });
 
   // Update history.

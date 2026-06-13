@@ -1632,7 +1632,7 @@ pageRenderers.updates = (() => {
             <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>
-          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log"><pre>${esc(logCache[u.package] || 'Loading changelog…')}</pre></div></td></tr>` : ''}`).join('')}</tbody>
+          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log"><pre>${esc(logCache[u.package] || 'Fetching new version changelog… (downloading package metadata)')}</pre></div></td></tr>` : ''}`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
   }
@@ -1679,9 +1679,15 @@ pageRenderers.updates = (() => {
     expandedLog = pkg;
     render(host);
     if (logCache[pkg] === undefined) {
-      try { const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`); logCache[pkg] = r.changelog || 'No changelog available.'; }
+      try {
+        const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`);
+        const header = r.source === 'candidate' && r.candidateVersion
+          ? `▼ Changes in ${r.candidateVersion} (new version)\n${'─'.repeat(40)}\n`
+          : r.source === 'installed' ? `(showing installed version's changelog — new notes unavailable)\n${'─'.repeat(40)}\n` : '';
+        logCache[pkg] = header + (r.changelog || 'No changelog available.');
+      }
       catch (e) { logCache[pkg] = 'Error: ' + e.message; }
-      if (expandedLog === pkg) render(host);   // still open → paint it
+      if (expandedLog === pkg) render(host);
     }
   }
 
