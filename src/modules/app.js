@@ -1106,9 +1106,14 @@ pageRenderers.network = (() => {
       if (!await rapisysConfirm('Enable DNS query logging? This adds a dnsmasq config and restarts dnsmasq.', { confirmLabel: 'Enable' })) return;
       try { await api('/network/dns/logging', { method: 'POST', body: { enabled: true } }); toast('success', 'DNS', 'Query logging enabled'); setTimeout(() => refreshSlow(host), 1500); }
       catch (err) {
-        // Surface the (often informative) reason inline, not just a toast.
+        // Keep the button; show the reason as a small note beneath it.
+        toast('error', 'DNS', 'Could not enable per-domain logging');
         const cta = $('[data-net=dns] .net-dns-cta', host);
-        if (cta) cta.innerHTML = `<p class="net-dns-note">${esc(err.message)}</p>`;
+        if (cta && !cta.querySelector('.net-dns-note')) {
+          const note = el('p', 'net-dns-note');
+          note.textContent = err.message;
+          cta.appendChild(note);
+        }
       }
     };
     if (dnsOff) dnsOff.onclick = async () => {
