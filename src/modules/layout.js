@@ -13,6 +13,7 @@
  */
 import { GridStack } from 'gridstack';
 import 'gridstack/dist/gridstack.min.css';
+import { SUMMARY_WIDGETS, buildSummaryCard } from './summary-widgets.js';
 
 export const OVERVIEW_WIDGETS = [
   { id: 'cpu',        sel: '.cpu-card',          title: 'CPU Usage',     group: 'stats',   home: '.stats-grid' },
@@ -25,6 +26,11 @@ export const OVERVIEW_WIDGETS = [
   { id: 'network',    sel: '.network-section',   title: 'Network',       group: 'section', home: 'main.dashboard' },
   { id: 'processes',  sel: '.processes-section', title: 'Processes',     group: 'section', home: 'main.dashboard' },
   { id: 'disk',       sel: '.disk-section',      title: 'Disk',          group: 'section', home: 'main.dashboard' },
+  // Summary widgets (compact, opt-in via the editor). Each has a stable id and
+  // selector pointing at its parked card; they default to a 3-col stat size.
+  ...SUMMARY_WIDGETS.map((s) => ({
+    id: s.id, sel: `[data-sw-id="${s.id}"]`, title: s.title, group: 'stats', home: '#sw-parking', summary: true,
+  })),
 ];
 const WById = Object.fromEntries(OVERVIEW_WIDGETS.map((w) => [w.id, w]));
 
@@ -211,8 +217,21 @@ function teardownGrid() {
 
 // --- public entry ----------------------------------------------------------
 
+let summaryBuilt = false;
+function ensureSummaryCards() {
+  if (summaryBuilt) return;
+  let park = document.getElementById('sw-parking');
+  if (!park) { park = document.createElement('div'); park.id = 'sw-parking'; park.style.display = 'none'; document.body.appendChild(park); }
+  for (const def of SUMMARY_WIDGETS) {
+    if (park.querySelector(`[data-sw-id="${def.id}"]`)) continue;
+    park.appendChild(buildSummaryCard(def));
+  }
+  summaryBuilt = true;
+}
+
 let rendered = false;
 export async function initOverviewLayout() {
+  ensureSummaryCards();
   ensureEditButton();
   if (rendered) return;
   savedLayout = await fetchLayout();

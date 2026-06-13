@@ -5316,3 +5316,26 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   color: var(--text-primary); border-radius: 4px;
 }
 .gs-size-x { color: var(--text-muted); font-size: 11px; }
+
+/* Overview summary widgets (compact glanceable cards) */
+.sw-card .card-header { position: relative; }
+.sw-open {
+  position: absolute; right: 0; top: 0; background: none; border: none;
+  color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 6px;
+}
+.sw-open svg { width: 16px; height: 16px; }
+.sw-open:hover { color: var(--accent-cyan); background: var(--bg-secondary); }
+.sw-body { display: flex; flex-direction: column; gap: 14px; }
+.sw-main { display: flex; align-items: baseline; gap: 8px; }
+.sw-value { font-size: 34px; font-weight: 700; color: var(--text-primary); line-height: 1; }
+.sw-value.sw-ok { color: #10b981; }
+.sw-value.sw-warn { color: #f59e0b; }
+.sw-value.sw-crit { color: #ef4444; }
+.sw-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.sw-row { display: flex; gap: 18px; flex-wrap: wrap; }
+.sw-stat { display: flex; flex-direction: column; gap: 2px; }
+.sw-stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.sw-stat-val { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
+.sw-stat-val.sw-ok { color: #10b981; }
+.sw-stat-val.sw-warn { color: #f59e0b; }
+.sw-stat-val.sw-crit { color: #ef4444; }
