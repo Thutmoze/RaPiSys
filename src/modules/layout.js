@@ -192,15 +192,10 @@ function buildGrid({ editable }) {
     disableResize: !editable,
     disableDrag: !editable,
     handle: '.gs-edit-bar',
-    // responsive: collapse to fewer columns on narrow screens so resized
-    // widgets stack cleanly on mobile instead of overflowing.
-    columnOpts: {
-      breakpointForWindow: true,
-      breakpoints: [
-        { w: 700, c: 1 },     // phones → single column
-        { w: 1100, c: 6 },    // tablets → 6 columns
-      ],
-    },
+    // NOTE: no responsive column breakpoints. GridStack's 12→N column remap
+    // strips gs-w and collapses items to zero width on load (saved layouts are
+    // authored in 12 columns). We keep a fixed 12-col grid; narrow screens just
+    // get a denser grid rather than a broken one.
   }, gridEl);
 
   // GridStack can measure the grid element before the browser has finished
