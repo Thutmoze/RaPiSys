@@ -5317,11 +5317,23 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 }
 .gs-size-x { color: var(--text-muted); font-size: 11px; }
 
-/* Overview summary widgets (compact glanceable cards) */
-.sw-card .card-header { position: relative; }
+/* Overview summary widgets (compact glanceable cards) — match the existing
+   .card-icon format: 40x40 tinted square, 22px glyph, 14px title. */
+.sw-card .card-header { position: relative; align-items: center; }
+.sw-icon { background: rgba(0, 212, 255, 0.1); color: var(--accent-cyan); }
+/* per-widget accent tints (consistent with the app's cyan/purple/green/amber) */
+.sw-card[data-sw-id="sum-sessions"]  .sw-icon { background: rgba(0,212,255,0.1);  color: var(--accent-cyan); }
+.sw-card[data-sw-id="sum-updates"]   .sw-icon { background: rgba(168,85,247,0.12); color: var(--accent-purple); }
+.sw-card[data-sw-id="sum-alerts"]    .sw-icon { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.sw-card[data-sw-id="sum-health"]    .sw-icon { background: rgba(16,185,129,0.12); color: #10b981; }
+.sw-card[data-sw-id="sum-cooling"]   .sw-icon { background: rgba(0,212,255,0.1);  color: var(--accent-cyan); }
+.sw-card[data-sw-id="sum-power"]     .sw-icon { background: rgba(245,158,11,0.12); color: #f59e0b; }
+.sw-card[data-sw-id="sum-protocols"] .sw-icon { background: rgba(168,85,247,0.12); color: var(--accent-purple); }
+.sw-card[data-sw-id="sum-domains"]   .sw-icon { background: rgba(16,185,129,0.12); color: #10b981; }
 .sw-open {
-  position: absolute; right: 0; top: 0; background: none; border: none;
-  color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 6px;
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  padding: 4px; border-radius: 6px; margin-left: auto;
 }
 .sw-open svg { width: 16px; height: 16px; }
 .sw-open:hover { color: var(--accent-cyan); background: var(--bg-secondary); }
@@ -5340,9 +5352,14 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sw-stat-val.sw-warn { color: #f59e0b; }
 .sw-stat-val.sw-crit { color: #ef4444; }
 
-/* Click a process row to reveal its full command (truncated by default) */
+/* Click a process row to reveal its full command (truncated by default).
+   The row is a CSS grid, so we let the expanded command span all columns on a
+   new line instead of fighting the fixed column width. */
 .process-row { cursor: pointer; }
+.process-row.process-expanded { grid-template-areas: none; }
 .process-row.process-expanded .process-cmd {
+  grid-column: 1 / -1;
   overflow: visible; white-space: normal; word-break: break-all; max-width: none;
-  color: var(--text-secondary);
+  color: var(--text-secondary); order: 99; padding-top: 6px;
+  border-top: 1px solid var(--border-color); margin-top: 4px;
 }

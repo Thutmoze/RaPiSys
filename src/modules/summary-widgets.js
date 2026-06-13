@@ -50,8 +50,9 @@ export const SUMMARY_WIDGETS = [
   {
     id: 'sum-health', title: 'Health Score', icon: iconHeart, nav: '#/reports',
     async load(elv) {
-      const d = await getJSON('/api/reports/daily');
-      const score = d?.payload?.health?.score ?? d?.health?.score ?? d?.score;
+      const d = await getJSON('/api/reports/daily?days=1');
+      const day = (d.days || [])[0] || (d.days || [])[(d.days || []).length - 1];
+      const score = day?.payload?.health?.score ?? day?.health?.score;
       if (score == null) { setBig(elv, '—', 'no data yet'); return; }
       const tone = score >= 80 ? 'ok' : score >= 50 ? 'warn' : 'crit';
       setBig(elv, Math.round(score), 'out of 100', tone);
@@ -83,21 +84,23 @@ export const SUMMARY_WIDGETS = [
     id: 'sum-protocols', title: 'Protocols', icon: iconShuffle, nav: '#/network',
     async load(elv) {
       const d = await getJSON('/api/network/protocols');
-      const list = (d.protocols || d.share || d || []).slice ? (d.protocols || d.share || []) : [];
-      const top = (Array.isArray(list) ? list : []).slice(0, 3);
-      if (!top.length) { setBig(elv, '—', 'no data'); return; }
-      setBig(elv, top[0].proto || top[0].name || '—', (top[0].percent ?? top[0].pct ?? '') + (top[0].percent != null ? '%' : ''));
-      setRow(elv, top.slice(1).map((p) => [p.proto || p.name, (p.percent ?? p.pct ?? '') + '%']));
+      const top = (d.shares || []).slice(0, 3);
+      if (!top.length) { setBig(elv, '—', 'no connections'); return; }
+      setBig(elv, top[0].service || '—', Math.round(top[0].pct ?? 0) + '%');
+      setRow(elv, top.slice(1).map((p) => [p.service, Math.round(p.pct ?? 0) + '%']));
     },
   },
   {
     id: 'sum-domains', title: 'Top Domains', icon: iconGlobe, nav: '#/network',
     async load(elv) {
-      const d = await getJSON('/api/network/dns').catch(() => getJSON('/api/network/connections'));
-      const doms = d.domains || d.top || [];
-      if (!doms.length) { setBig(elv, '—', 'no DNS data'); return; }
-      setBig(elv, doms.length, 'domains seen');
-      setRow(elv, doms.slice(0, 3).map((x) => [x.domain || x.name || x.host, x.queries ?? x.count ?? '']));
+      const d = await getJSON('/api/network');
+      const doms = d.dns?.domains || [];
+      if (!doms.length) {
+        setBig(elv, '—', 'DNS logging off');
+        return;
+      }
+      setBig(elv, doms.length, 'domains');
+      setRow(elv, doms.slice(0, 3).map((x) => [x.domain, x.queries ?? '']));
     },
   },
 ];
