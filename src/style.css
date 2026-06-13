@@ -4880,3 +4880,35 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-proto-row { grid-template-columns: 1fr 80px 36px; }
 .net-bar-empty { background: var(--bg-secondary) !important; opacity: 0.25; min-height: 2px; }
 .net-dns-note { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 4px 0 0; }
+
+/* Network v2: clickable colored interfaces, period filter, protocol drill-down */
+.net-hint { font-size: 11px; color: var(--text-muted); margin: 8px 0 4px; }
+.net-iface { display: grid; grid-template-columns: auto auto auto 1fr auto; gap: 10px;
+  align-items: center; width: 100%; text-align: left; padding: 8px 6px; font: inherit;
+  font-size: 12px; background: none; border: 1px solid transparent; border-radius: 8px;
+  cursor: pointer; transition: var(--transition); }
+.net-iface:hover { background: var(--bg-secondary); }
+.net-iface-off { opacity: 0.4; }
+.net-iface-dot { width: 9px; height: 9px; border-radius: 50%; }
+.net-iface-name { font-weight: 700; }
+.net-iface-kind { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+.net-iface-rates { color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
+.net-iface-total { color: var(--text-muted); text-align: right; }
+.net-period { font-size: 12px; padding: 5px 10px; margin-left: auto; }
+
+.net-proto-block { border-bottom: 1px solid var(--border-color); }
+.net-proto-row { display: grid; grid-template-columns: 90px 1fr 42px; gap: 8px; align-items: center;
+  width: 100%; padding: 8px 0; font: inherit; font-size: 12px; background: none; border: none;
+  cursor: pointer; text-align: left; color: var(--text-secondary); }
+.net-proto-static { cursor: default; }
+.net-proto-row:hover:not(.net-proto-static) { color: var(--text-primary); }
+.net-proto-name { font-weight: 600; }
+.net-proto-bar { height: 7px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden; }
+.net-proto-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); }
+.net-proto-n { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.net-conns { padding: 4px 0 10px; }
+.net-conn { display: flex; justify-content: space-between; gap: 10px; font-size: 11px;
+  padding: 4px 8px; color: var(--text-muted); }
+.net-conn b, .net-conn span:first-child { color: var(--text-secondary); }
+.net-conn-peer { font-variant-numeric: tabular-nums; word-break: break-all; text-align: right; }
+.net-conn small { opacity: 0.6; }

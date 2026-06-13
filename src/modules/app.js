@@ -954,8 +954,17 @@ pageRenderers.settings = (() => {
 // ---------------------------------------------------------------------------
 
 pageRenderers.network = (() => {
-  let timer = null, chart = null, chartSeries = null;
+  let liveTimer = null, slowTimer = null, chart = null;
+  const series = {};            // iface -> { rx: TimeSeries, tx: TimeSeries }
+  const selected = new Set();   // multi-select focus (empty = show all)
+  let nethogsLive = false, nethogsTimer = null;
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // Distinct colors per interface, reused for both the line and its label.
+  const PALETTE = ['#00d4ff', '#a855f7', '#10b981', '#f97316', '#eab308', '#ec4899', '#38bdf8', '#84cc16'];
+  const ifaceColors = {};
+  let colorIdx = 0;
+  const colorFor = (iface) => (ifaceColors[iface] ||= PALETTE[colorIdx++ % PALETTE.length]);
 
   const fmtRate = (bps) => {
     const bits = bps * 8;
@@ -972,154 +981,185 @@ pageRenderers.network = (() => {
     if (b >= 1e3) return `${(b / 1e3).toFixed(0)} KB`;
     return `${b} B`;
   };
+  const KIND_LABEL = { wired: 'Ethernet', wifi: 'Wi-Fi', vpn: 'VPN', bridge: 'Bridge', other: '' };
+
+  function ensureSeries(iface) {
+    if (series[iface] || typeof TimeSeries === 'undefined') return;
+    series[iface] = { rx: new TimeSeries(), tx: new TimeSeries() };
+    const col = colorFor(iface);
+    chart.addTimeSeries(series[iface].rx, { strokeStyle: col, lineWidth: 2 });
+    // tx drawn dashed-lighter via a translucent fill of the same hue
+    chart.addTimeSeries(series[iface].tx, { strokeStyle: col + '88', lineWidth: 1 });
+  }
+
+  function applyFocus() {
+    // dim unselected: when selection non-empty, hide others' series by
+    // setting them to transparent; selected (or all) drawn normally.
+    for (const [iface, s] of Object.entries(series)) {
+      const on = selected.size === 0 || selected.has(iface);
+      const col = colorFor(iface);
+      s.rx.options = { strokeStyle: on ? col : col + '18', lineWidth: on ? 2 : 1 };
+      s.tx.options = { strokeStyle: on ? col + '88' : col + '10', lineWidth: 1 };
+    }
+  }
 
   async function refreshLive(host) {
     let t;
     try { t = await api('/network/throughput'); } catch { return; }
-    const ifaces = Object.entries(t.interfaces);
-    // headline = busiest interface
+    const ifaces = Object.entries(t.interfaces)
+      .sort((a, b) => (b[1].rxRate + b[1].txRate) - (a[1].rxRate + a[1].txRate));
     let totalRx = 0, totalTx = 0;
-    ifaces.forEach(([, v]) => { totalRx += v.rxRate; totalTx += v.txRate; });
+    const now = Date.now();
+    for (const [name, v] of ifaces) {
+      ensureSeries(name);
+      if (series[name]) {
+        series[name].rx.append(now, v.rxRate * 8 / 1e6);
+        series[name].tx.append(now, v.txRate * 8 / 1e6);
+      }
+      if (selected.size === 0 || selected.has(name)) { totalRx += v.rxRate; totalTx += v.txRate; }
+    }
     $('[data-net=down]', host).textContent = fmtRate(totalRx);
     $('[data-net=up]', host).textContent = fmtRate(totalTx);
-    if (chartSeries) { chartSeries.rx.append(Date.now(), totalRx * 8 / 1e6); chartSeries.tx.append(Date.now(), totalTx * 8 / 1e6); }
 
-    $('[data-net=ifaces]', host).innerHTML = ifaces.length
-      ? ifaces.map(([name, v]) => `
-        <div class="net-iface">
-          <span class="net-iface-name">${esc(name)}</span>
+    $('[data-net=ifaces]', host).innerHTML = ifaces.map(([name, v]) => {
+      const col = colorFor(name);
+      const on = selected.size === 0 || selected.has(name);
+      return `
+        <button class="net-iface ${on ? '' : 'net-iface-off'}" data-iface="${esc(name)}">
+          <span class="net-iface-dot" style="background:${col}"></span>
+          <span class="net-iface-name" style="color:${col}">${esc(name)}</span>
+          <span class="net-iface-kind">${KIND_LABEL[v.kind] || ''}</span>
           <span class="net-iface-rates">▼ ${fmtRate(v.rxRate)} &nbsp; ▲ ${fmtRate(v.txRate)}</span>
-          <span class="net-iface-total">${fmtBytes(v.rxBytes + v.txBytes)} total</span>
-        </div>`).join('')
-      : '<p class="sess-empty">No active interfaces</p>';
+          <span class="net-iface-total">${fmtBytes(v.rxBytes + v.txBytes)}</span>
+        </button>`;
+    }).join('') || '<p class="sess-empty">No interfaces</p>';
+
+    $('[data-net=ifaces]', host).querySelectorAll('[data-iface]').forEach((b) => b.onclick = () => {
+      const n = b.dataset.iface;
+      if (selected.has(n)) selected.delete(n); else selected.add(n);
+      applyFocus(); refreshLive(host);
+    });
   }
 
-  async function refreshSlow(host) {
-    let snap;
-    try { snap = await api('/network'); } catch { return; }
-
-    // vnStat history
-    const vn = snap.vnstat;
+  // ---- bandwidth history with period filter ----
+  let histPeriod = 'days';
+  async function refreshHistory(host) {
+    let vn;
+    try { vn = await api('/network/history'); } catch { return; }
     const vh = $('[data-net=history]', host);
-    if (!vn.available) {
-      vh.innerHTML = '<p class="sess-empty">vnStat not installed — run deploy.sh or <code>apt install vnstat</code> for bandwidth history.</p>';
-    } else if (!vn.interfaces.length) {
-      vh.innerHTML = '<p class="sess-empty">vnStat is collecting — history appears after a few minutes.</p>';
-    } else {
-      vh.innerHTML = vn.interfaces.map((i) => {
-        const today = i.today ? fmtBytes((i.today.rx || 0) + (i.today.tx || 0)) : '—';
-        const total = i.total ? fmtBytes((i.total.rx || 0) + (i.total.tx || 0)) : '—';
-        const days = i.days.slice(-14);
-        const max = Math.max(1, ...days.map((d) => (d.rx || 0) + (d.tx || 0)));
-        const bars = days.map((d) => {
-          const tot = (d.rx || 0) + (d.tx || 0);
-          const h = Math.round((tot / max) * 40);
-          const lbl = d.date ? `${d.date.month}/${d.date.day}` : '';
-          return `<div class="net-bar" style="height:${Math.max(2, h)}px" title="${lbl}: ${fmtBytes(tot)}"></div>`;
-        }).join('');
-        // pad with empty slots so a few days don't stretch full-width
-        const pad = Math.max(0, 14 - days.length);
-        return `
-          <div class="net-hist-iface">
-            <div class="net-hist-head"><b>${esc(i.name)}</b><span>today ${today} · total ${total}</span></div>
-            <div class="net-bars">${bars}${'<div class="net-bar net-bar-empty"></div>'.repeat(pad)}</div>
-          </div>`;
+    if (!vn.available) { vh.innerHTML = '<p class="sess-empty">vnStat unavailable.</p>'; return; }
+    if (!vn.interfaces.length) { vh.innerHTML = '<p class="sess-empty">vnStat is collecting — history appears shortly.</p>'; return; }
+
+    const KEY = { fiveminute: 'fiveminutes', minute: 'fiveminutes', hour: 'hours', day: 'days', week: 'days', month: 'months' };
+    vh.innerHTML = vn.interfaces.map((i) => {
+      let buckets = histPeriod === 'hour' ? i.hours
+        : histPeriod === 'month' ? i.months
+        : i.days;
+      if (histPeriod === 'week') buckets = (i.days || []).slice(-7);
+      buckets = (buckets || []).slice(-30);
+      const max = Math.max(1, ...buckets.map((d) => (d.rx || 0) + (d.tx || 0)));
+      const col = colorFor(i.name);
+      const bars = buckets.map((d) => {
+        const tot = (d.rx || 0) + (d.tx || 0);
+        const h = Math.round((tot / max) * 40);
+        const lbl = d.date ? `${d.date.month || ''}/${d.date.day || ''}` : (d.time ? `${d.time.hour}:00` : '');
+        return `<div class="net-bar" style="height:${Math.max(2, h)}px;background:${col}" title="${lbl}: ${fmtBytes(tot)}"></div>`;
       }).join('');
-    }
+      const pad = Math.max(0, 14 - buckets.length);
+      const today = i.today ? fmtBytes((i.today.rx || 0) + (i.today.tx || 0)) : '—';
+      const total = i.total ? fmtBytes((i.total.rx || 0) + (i.total.tx || 0)) : '—';
+      return `<div class="net-hist-iface">
+        <div class="net-hist-head"><b style="color:${col}">${esc(i.name)}</b><span>today ${today} · total ${total}</span></div>
+        <div class="net-bars">${bars}${'<div class="net-bar net-bar-empty"></div>'.repeat(pad)}</div>
+      </div>`;
+    }).join('');
+  }
 
-    // protocols
-    const proto = snap.protocols;
-    const ports = Object.entries(proto.byPort).sort((a, b) => b[1] - a[1]).slice(0, 6);
-    const maxP = Math.max(1, ...ports.map(([, n]) => n));
-    $('[data-net=proto]', host).innerHTML = `
-      <div class="net-proto-summary">TCP ${proto.tcp} · UDP ${proto.udp}</div>
-      ${ports.length ? ports.map(([name, n]) => `
-        <div class="net-proto-row">
-          <span>${esc(name)}</span>
-          <span class="net-proto-bar"><span style="width:${(n / maxP) * 100}%"></span></span>
-          <span class="net-proto-n">${n}</span>
-        </div>`).join('') : '<p class="sess-empty">No classified connections</p>'}`;
+  // ---- protocols as % with connection drill-down ----
+  let expandedSvc = null;
+  async function refreshProtocols(host) {
+    let p;
+    try { p = await api('/network/protocols'); } catch { return; }
+    const max = Math.max(1, ...p.shares.map((s) => s.pct));
+    $('[data-net=proto]', host).innerHTML = `<div class="net-proto-summary">${p.total} active connections</div>`
+      + (p.shares.length ? p.shares.map((s) => `
+        <div class="net-proto-block">
+          <button class="net-proto-row" data-svc="${esc(s.service)}">
+            <span class="net-proto-name">${esc(s.service)}</span>
+            <span class="net-proto-bar"><span style="width:${(s.pct / max) * 100}%"></span></span>
+            <span class="net-proto-n">${s.pct.toFixed(0)}%</span>
+          </button>
+          ${expandedSvc === s.service ? `<div class="net-conns">${
+            s.conns.map((c) => `<div class="net-conn">
+              <span>${esc(c.comm || '?')}${c.pid ? ` <small>${c.pid}</small>` : ''}</span>
+              <span class="net-conn-peer">:${c.localPort ?? '?'} → ${esc(c.peer)}:${c.peerPort ?? '?'}</span>
+            </div>`).join('')
+          }</div>` : ''}
+        </div>`).join('') : '<p class="sess-empty">No active connections</p>');
 
-    // top processes — socket counts by default; bandwidth after a nethogs sample
-    if (!pageRenderers.network._nethogs) {
-      $('[data-net=procs]', host).innerHTML = (snap.processes.length
-        ? snap.processes.map((p) => `
-          <div class="net-proc-row">
-            <span><b>${esc(p.comm)}</b> <small>pid ${p.pid}</small></span>
-            <span>${p.sockets} socket${p.sockets > 1 ? 's' : ''}</span>
-          </div>`).join('')
-        : '<p class="sess-empty">No socket-owning processes visible</p>')
-        + `<div class="net-dns-cta"><button class="net-toggle" data-net="nethogs">Measure bandwidth per process (nethogs)</button></div>`;
-      const nh = $('[data-net=nethogs]', host);
-      if (nh) nh.onclick = async () => {
-        if (!await rapisysConfirm('Sample per-process bandwidth with nethogs? Installs nethogs on first use and runs a brief packet capture (~5s, some CPU).', { confirmLabel: 'Measure' })) return;
-        nh.textContent = 'Measuring (~5s)…'; nh.disabled = true;
-        try {
-          const r = await api('/network/nethogs', { method: 'POST', body: { seconds: 5 } });
-          pageRenderers.network._nethogs = r.processes || [];
-          refreshSlow(host);
-        } catch (err) { toast('error', 'Network', err.message); nh.textContent = 'Measure bandwidth per process (nethogs)'; nh.disabled = false; }
-      };
-    } else {
-      const list = pageRenderers.network._nethogs;
-      $('[data-net=procs]', host).innerHTML = (list.length
-        ? list.map((p) => `
-          <div class="net-proc-row">
+    $('[data-net=proto]', host).querySelectorAll('[data-svc]').forEach((b) => b.onclick = () => {
+      expandedSvc = expandedSvc === b.dataset.svc ? null : b.dataset.svc;
+      refreshProtocols(host);
+    });
+  }
+
+  // ---- top processes: live nethogs while page is open ----
+  async function refreshProcsLive(host) {
+    try {
+      const r = await api('/network/nethogs', { method: 'POST', body: { seconds: 3 } });
+      const list = r.processes || [];
+      $('[data-net=procs]', host).innerHTML = list.length
+        ? list.map((p) => `<div class="net-proc-row">
             <span><b>${esc(p.comm)}</b> <small>pid ${p.pid}</small></span>
             <span>▼ ${p.recvKBs.toFixed(1)} ▲ ${p.sentKBs.toFixed(1)} KB/s</span>
           </div>`).join('')
-        : '<p class="sess-empty">No per-process traffic during the sample window</p>')
-        + `<div class="net-dns-cta"><button class="net-toggle" data-net="nethogs2">Sample again</button> <button class="net-toggle" data-net="nethogsback">back to sockets</button></div>`;
-      const again = $('[data-net=nethogs2]', host), back = $('[data-net=nethogsback]', host);
-      if (again) again.onclick = async () => {
-        again.textContent = 'Measuring…'; again.disabled = true;
-        try { const r = await api('/network/nethogs', { method: 'POST', body: { seconds: 5 } }); pageRenderers.network._nethogs = r.processes || []; refreshSlow(host); }
-        catch (err) { toast('error', 'Network', err.message); }
+        : '<p class="sess-empty">No per-process traffic right now</p>';
+    } catch (err) {
+      // nethogs not installed yet — offer one-time enable
+      $('[data-net=procs]', host).innerHTML = `<p class="sess-empty">Live per-process bandwidth needs nethogs.</p>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="nhinstall">Enable real-time process bandwidth</button></div>`;
+      const ib = $('[data-net=nhinstall]', host);
+      if (ib) ib.onclick = async () => {
+        if (!await rapisysConfirm('Install nethogs and start real-time per-process bandwidth? Runs a continuous lightweight packet capture while this page is open.', { confirmLabel: 'Enable' })) return;
+        ib.textContent = 'Installing…'; ib.disabled = true;
+        nethogsLive = true; startProcs(host);
       };
-      if (back) back.onclick = () => { pageRenderers.network._nethogs = null; refreshSlow(host); };
     }
+  }
+  function startProcs(host) {
+    nethogsLive = true;
+    globalThis.__netPageActive = true;
+    refreshProcsLive(host);
+    clearInterval(nethogsTimer);
+    nethogsTimer = setInterval(() => refreshProcsLive(host), 4000);
+  }
 
-    // DNS
+  // ---- DNS: the Pi's own queries ----
+  async function refreshDns(host) {
+    let snap;
+    try { snap = await api('/network'); } catch { return; }
     const d = snap.dns;
-    let dnsHtml;
-    if (d.source === 'dnsmasq' && d.loggingEnabled) {
-      const max = Math.max(1, ...(d.domains || []).map((x) => x.queries));
-      dnsHtml = `<div class="net-proto-summary">${(d.totalQueries || 0).toLocaleString()} queries logged · <button class="net-toggle" data-net="dnsoff">disable logging</button></div>`
-        + ((d.domains || []).length ? d.domains.map((x) => `
-          <div class="net-proto-row">
+    let html;
+    if (d.domains?.length) {
+      const max = Math.max(1, ...d.domains.map((x) => x.queries));
+      const label = d.ownQueries ? `Queries initiated by this Pi (${d.source})` : `${(d.totalQueries || 0).toLocaleString()} queries logged`;
+      html = `<div class="net-proto-summary">${label}</div>`
+        + d.domains.map((x) => `<div class="net-proto-row net-proto-static">
             <span class="net-domain">${esc(x.domain)}</span>
             <span class="net-proto-bar"><span style="width:${(x.queries / max) * 100}%"></span></span>
             <span class="net-proto-n">${x.queries}</span>
-          </div>`).join('') : '<p class="sess-empty">No queries logged yet</p>');
+          </div>`).join('');
+      if (d.source === 'dnsmasq') html += `<div class="net-dns-cta"><button class="net-toggle" data-net="dnsoff">disable logging</button></div>`;
     } else if (d.source === 'resolved') {
-      dnsHtml = `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
-         <div class="set-kv"><span>Cache hits</span><b>${(d.cacheHits ?? 0).toLocaleString()}</b></div>
-         <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>
-         <div class="net-dns-cta"><button class="net-toggle" data-net="dnson">Enable per-domain logging (dnsmasq)</button></div>`;
+      html = `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
+        <div class="set-kv"><span>Cache hits</span><b>${(d.cacheHits ?? 0).toLocaleString()}</b></div>
+        <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>`;
     } else {
-      dnsHtml = `<p class="sess-empty">No resolver stats. Enable dnsmasq query logging for top-domain analytics.</p>
-        <div class="net-dns-cta"><button class="net-toggle" data-net="dnson">Enable per-domain logging (dnsmasq)</button></div>`;
+      html = '<p class="sess-empty">No DNS data available from this Pi\u2019s resolver.</p>';
     }
-    $('[data-net=dns]', host).innerHTML = dnsHtml;
-    const dnsOn = $('[data-net=dnson]', host), dnsOff = $('[data-net=dnsoff]', host);
-    if (dnsOn) dnsOn.onclick = async () => {
-      if (!await rapisysConfirm('Enable DNS query logging? This adds a dnsmasq config and restarts dnsmasq.', { confirmLabel: 'Enable' })) return;
-      try { await api('/network/dns/logging', { method: 'POST', body: { enabled: true } }); toast('success', 'DNS', 'Query logging enabled'); setTimeout(() => refreshSlow(host), 1500); }
-      catch (err) {
-        // Keep the button; show the reason as a small note beneath it.
-        toast('error', 'DNS', 'Could not enable per-domain logging');
-        const cta = $('[data-net=dns] .net-dns-cta', host);
-        if (cta && !cta.querySelector('.net-dns-note')) {
-          const note = el('p', 'net-dns-note');
-          note.textContent = err.message;
-          cta.appendChild(note);
-        }
-      }
-    };
-    if (dnsOff) dnsOff.onclick = async () => {
-      try { await api('/network/dns/logging', { method: 'POST', body: { enabled: false } }); toast('success', 'DNS', 'Query logging disabled'); setTimeout(() => refreshSlow(host), 1500); }
-      catch (err) { toast('error', 'DNS', err.message); }
-    };
+    $('[data-net=dns]', host).innerHTML = html;
+    const off = $('[data-net=dnsoff]', host);
+    if (off) off.onclick = async () => { try { await api('/network/dns/logging', { method: 'POST', body: { enabled: false } }); setTimeout(() => refreshDns(host), 1200); } catch (e) { toast('error', 'DNS', e.message); } };
   }
 
   function initChart(host) {
@@ -1127,12 +1167,8 @@ pageRenderers.network = (() => {
     if (!canvas || typeof SmoothieChart === 'undefined') return;
     chart = new SmoothieChart({
       millisPerPixel: 60, grid: { fillStyle: 'transparent', strokeStyle: 'rgba(255,255,255,0.05)', millisPerLine: 10000, verticalSections: 4 },
-      labels: { fillStyle: '#8b8b9e', fontSize: 11 }, responsive: true,
-      tooltip: false, minValue: 0,
+      labels: { fillStyle: '#8b8b9e', fontSize: 11 }, responsive: true, tooltip: false, minValue: 0,
     });
-    chartSeries = { rx: new TimeSeries(), tx: new TimeSeries() };
-    chart.addTimeSeries(chartSeries.rx, { strokeStyle: '#00d4ff', fillStyle: 'rgba(0,212,255,0.12)', lineWidth: 2 });
-    chart.addTimeSeries(chartSeries.tx, { strokeStyle: '#a855f7', fillStyle: 'rgba(168,85,247,0.10)', lineWidth: 2 });
     chart.streamTo(canvas, 1000);
   }
 
@@ -1142,38 +1178,49 @@ pageRenderers.network = (() => {
       <div class="rapisys-grid">
         <div class="card sess-span">
           <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><span class="card-title">Live Throughput</span>
-            <span class="net-headline" data-net="counts"><span class="net-dl">▼ <b data-net="down">—</b></span> <span class="net-ul">▲ <b data-net="up">—</b></span></span>
+            <span class="net-headline"><span class="net-dl">▼ <b data-net="down">—</b></span> <span class="net-ul">▲ <b data-net="up">—</b></span></span>
           </div>
           <div class="card-body">
             <canvas data-net="chart" class="net-chart"></canvas>
+            <p class="net-hint">Click an interface to focus (multi-select); others dim.</p>
             <div class="net-ifaces" data-net="ifaces"></div>
           </div>
         </div>
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg></div><span class="card-title">Bandwidth History (14 days)</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg></div><span class="card-title">Bandwidth History</span>
+            <select class="net-period" data-net="period">
+              <option value="hour">Hourly</option><option value="day" selected>Daily</option>
+              <option value="week">Weekly</option><option value="month">Monthly</option>
+            </select>
+          </div>
           <div class="card-body" data-net="history"></div>
         </div>
         <div class="card">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div><span class="card-title">Protocols</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20" opacity="0.3"/><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 6 15.7"/></svg></div><span class="card-title">Protocols (% of connections)</span></div>
           <div class="card-body" data-net="proto"></div>
         </div>
         <div class="card">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><span class="card-title">Top Processes</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><span class="card-title">Top Processes (live)</span></div>
           <div class="card-body" data-net="procs"></div>
         </div>
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><path d="M12 7v5l3 3"/></svg></div><span class="card-title">DNS</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></div><span class="card-title">DNS — Pi Queries</span></div>
           <div class="card-body" data-net="dns"></div>
         </div>
       </div>`;
       initChart(host);
-      refreshLive(host); refreshSlow(host);
-      timer = setInterval(() => { refreshLive(host); }, 1000);
-      this._slow = setInterval(() => refreshSlow(host), 15000);
+      $('[data-net=period]', host).addEventListener('change', (e) => { histPeriod = e.target.value; refreshHistory(host); });
+      enhanceSelects(host);
+      refreshLive(host); refreshHistory(host); refreshProtocols(host); refreshDns(host);
+      startProcs(host);
+      liveTimer = setInterval(() => refreshLive(host), 1000);
+      slowTimer = setInterval(() => { refreshProtocols(host); refreshHistory(host); refreshDns(host); }, 15000);
     },
     unmount() {
-      clearInterval(timer); clearInterval(this._slow);
-      if (chart) { chart.stop(); chart = null; chartSeries = null; }
+      clearInterval(liveTimer); clearInterval(slowTimer); clearInterval(nethogsTimer);
+      globalThis.__netPageActive = false;
+      if (chart) { chart.stop(); chart = null; }
+      for (const k of Object.keys(series)) delete series[k];
     },
   };
 })();
