@@ -180,6 +180,11 @@ function buildGrid({ editable }) {
   [...dashboard.children].forEach((c) => { if (c !== gridEl) c.style.display = 'none'; });
   dashboard.appendChild(gridEl);
 
+  // Widen the container BEFORE GridStack measures, so its column math uses the
+  // full available width (not the 1400px reading cap) — otherwise right-edge
+  // widgets get laid out past the viewport.
+  document.body.classList.add('layout-grid-active');
+
   const g = GridStack.init({
     column: COLS, cellHeight: CELL, margin: MARGIN,
     float: true,
@@ -197,7 +202,11 @@ function buildGrid({ editable }) {
       ],
     },
   }, gridEl);
-  document.body.classList.add('layout-grid-active');
+  // force a column/layout recompute now that the container is full-width
+  requestAnimationFrame(() => {
+    try { g.onParentResize?.(); } catch { /* */ }
+    window.dispatchEvent(new Event('resize'));
+  });
   return g;
 }
 

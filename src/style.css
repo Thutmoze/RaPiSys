@@ -5305,7 +5305,11 @@ body.layout-editing .gs-hide-btn:hover { color: #ef4444; background: rgba(239,68
 
 /* When a grid layout is active (saved or editing), use the full viewport width
    instead of the 1400px reading cap — the grid manages its own columns. */
-body.layout-grid-active .container { max-width: none; }
+body.layout-grid-active .container { max-width: none; overflow-x: hidden; }
+/* keep the grid within the container's content box so right-edge widgets
+   (Power, Active Cooling) aren't clipped by the viewport */
+body.layout-grid-active main.dashboard { width: 100%; max-width: 100%; overflow-x: hidden; }
+.rapisys-grid.grid-stack { width: 100%; max-width: 100%; }
 
 /* Edit-bar W×H size inputs */
 .gs-size-ctrl { display: none; align-items: center; gap: 3px; }
