@@ -1583,6 +1583,10 @@ pageRenderers.updates = (() => {
     rocket: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0zM12 15l-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8zM9 12H4s.5-3 2-4 5 0 5 0M12 15v5s3-.5 4-2 0-5 0-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
   };
+  // Escape, then wrap CVE ids and security markers in a red span so they pop.
+  const hlSec = (s) => esc(s)
+    .replace(/(CVE-\d{4}-\d+)/g, '<span class="up-cve">$1</span>')
+    .replace(/(trixie-security|-security;|urgency=(?:high|critical|emergency))/gi, '<span class="up-sec-mark">$1</span>');
   const ACTION_BTN = (act, icon, label, cls = '', disabled = false) =>
     `<button class="up-btn ${cls} ${disabled ? 'up-btn-dim' : ''}" data-up="${act}"${disabled ? ' disabled' : ''}>${icon}<span>${label}</span></button>`;
 
@@ -1655,8 +1659,8 @@ pageRenderers.updates = (() => {
             if (c.needsFull) return `<div class="up-needfull"><p>This package is large, so the new-version changelog needs a full download. The notes below are for the <b>installed</b> version.</p><button class="net-toggle up-dl-btn" data-dlfull="${esc(u.package)}">${ICN.download}<span>Download new changelog</span></button><pre class="up-log-text" style="margin-top:10px">${esc(c.rest || '')}</pre></div>`;
             if (c.plain) return `<pre class="up-log-text">${esc(c.plain)}</pre>`;
             return `${c.head ? `<div class="up-log-head">${esc(c.head)}</div>` : ''}`
-              + `${c.newBlock ? `<pre class="up-log-new">${esc(c.newBlock)}</pre>` : ''}`
-              + `${c.rest ? `<div class="up-log-older"><button class="up-link up-older-toggle" data-older="${esc(u.package)}">${oldExpanded.has(u.package) ? '▾ Hide older versions' : '▸ Show older versions'}</button>${oldExpanded.has(u.package) ? `<pre class="up-log-text">${esc(c.rest)}</pre>` : ''}</div>` : ''}`;
+              + `${c.newBlock ? `<pre class="up-log-new">${hlSec(c.newBlock)}</pre>` : ''}`
+              + `${c.rest ? `<div class="up-log-older"><button class="up-link up-older-toggle" data-older="${esc(u.package)}">${oldExpanded.has(u.package) ? '▾ Hide older versions' : '▸ Show older versions'}</button>${oldExpanded.has(u.package) ? `<pre class="up-log-text">${hlSec(c.rest)}</pre>` : ''}</div>` : ''}`;
           })()}</div></td></tr>` : ''}`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
@@ -1683,7 +1687,6 @@ pageRenderers.updates = (() => {
             eta = remain >= 60 ? `~${Math.floor(remain / 60)}m ${remain % 60}s left` : `~${remain}s left`;
           }
         }
-        $('[data-up=chips]', host).innerHTML = `<span class="up-chip up-checking"><span class="up-spinner-sm"></span>${esc(label)}</span>`;
         $('[data-up=table]', host).innerHTML = total > 0
           ? `<div class="up-scan-status">
                <div class="up-progbar"><span style="width:${pct}%"></span></div>
