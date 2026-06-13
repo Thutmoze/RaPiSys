@@ -132,8 +132,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   reports.backfill(14);
   const inventory = createInventoryCollector();
   const inventoryRepoFacade = new Proxy({}, { get: (_, m) => (...a) => inventoryRepo[m](...a) });
-  const updates = createUpdatesCollector();
   const updatesRepoFacade = new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) });
+  const updates = createUpdatesCollector({ updatesRepo: updatesRepoFacade });
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
     eventsRepo: eventsFacade, mailer, getSettings: loadSettings,

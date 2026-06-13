@@ -8,10 +8,9 @@ import express from 'express';
 export function updatesRouter({ updates, updatesRepo, requireControl, events }) {
   const r = express.Router();
 
-  // Cached list of upgradable packages (security/kernel tagged).
-  r.get('/', async (req, res) => {
-    try { res.json(await updates.list()); }
-    catch (err) { res.status(500).json({ error: err.message }); }
+  // Cached list (instant) — does NOT trigger a scan. Use /refresh to re-check.
+  r.get('/', (req, res) => {
+    res.json(updates.cached());
   });
 
   // apt-get update + fresh list.

@@ -1585,19 +1585,31 @@ pageRenderers.updates = (() => {
   const ACTION_BTN = (act, icon, label, cls = '') =>
     `<button class="net-toggle up-btn ${cls}" data-up="${act}">${icon}<span>${label}</span></button>`;
 
+  let lastChecked = null;
   async function load(host) {
     let data;
     try { data = await api('/updates'); } catch { return; }
     updates = data.updates || [];
+    lastChecked = data.checkedAt || null;
     firmware = await api('/updates/firmware').catch(() => null);
-    // Only paint the full table once we actually have data or a real scan;
-    // an empty cached list on first visit keeps the friendly prompt.
-    if (updates.length || data.available) render(host);
+    if (data.available) render(host);   // we have a cached scan (even if 0 updates)
     else {
-      $('[data-up=chips]', host).innerHTML = '<span class="up-chip">no cached results</span>';
+      // never checked on this install
+      $('[data-up=chips]', host).innerHTML = '<span class="up-chip">never checked</span>';
       $('[data-up=actions]', host).innerHTML = ACTION_BTN('refresh', ICN.refresh, 'Check for updates');
       wireActions(host);
+      $('[data-up=table]', host).innerHTML = '<p class="sess-empty">Click \u201cCheck for updates\u201d to scan.</p>';
     }
+  }
+
+  function fmtChecked(ts) {
+    if (!ts) return '';
+    const mins = Math.round((Date.now() - ts) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return new Date(ts).toLocaleDateString();
   }
 
   function render(host) {
@@ -1609,7 +1621,8 @@ pageRenderers.updates = (() => {
       <span class="up-chip">${updates.length} update${updates.length !== 1 ? 's' : ''}</span>
       ${sec ? `<span class="up-chip up-chip-sec">${sec} security</span>` : ''}
       ${kern ? `<span class="up-chip up-chip-kern">${kern} kernel</span>` : ''}
-      <span class="up-chip ${fw ? 'up-chip-fw' : ''}">firmware ${fw ? 'update available' : 'ok'}</span>`;
+      <span class="up-chip ${fw ? 'up-chip-fw' : ''}">firmware ${fw ? 'update available' : 'ok'}</span>
+      ${lastChecked ? `<span class="up-checked">checked ${fmtChecked(lastChecked)}</span>` : ''}`;
 
     $('[data-up=actions]', host).innerHTML =
       ACTION_BTN('refresh', ICN.refresh, 'Check for updates')
@@ -1632,7 +1645,7 @@ pageRenderers.updates = (() => {
             <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>
-          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log"><pre>${esc(logCache[u.package] || 'Fetching new version changelog… (downloading package metadata)')}</pre></div></td></tr>` : ''}`).join('')}</tbody>
+          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log">${logCache[u.package] !== undefined ? `<pre class="up-log-text">${esc(logCache[u.package])}</pre>` : '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>'}</div></td></tr>` : ''}`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
   }

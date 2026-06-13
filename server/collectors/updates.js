@@ -8,13 +8,20 @@
 
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
-export function createUpdatesCollector() {
+export function createUpdatesCollector({ updatesRepo } = {}) {
   async function refresh() {
-    // apt-get update (no stream needed here) then list.
+    // apt-get update (no stream needed here) then list; persist to cache.
     if (!agentConfigured()) return { available: false };
     await agentCall('apt.update', {}, null, 120000).catch(() => {});
     const { updates } = await agentCall('apt.listUpgradable', {}, null, 90000);
-    return { available: true, updates };
+    updatesRepo?.saveCache(updates);
+    return { available: true, updates, checkedAt: Date.now() };
+  }
+
+  function cached() {
+    if (!updatesRepo) return { available: false, updates: [], checkedAt: null };
+    const c = updatesRepo.getCache();
+    return { available: c.checkedAt != null, updates: c.updates, checkedAt: c.checkedAt };
   }
 
   async function list() {
@@ -48,5 +55,5 @@ export function createUpdatesCollector() {
     return agentCall('eeprom.update', {}, onLine, 300000);
   }
 
-  return { refresh, list, changelog, firmware, upgrade, firmwareUpdate };
+  return { refresh, cached, list, changelog, firmware, upgrade, firmwareUpdate };
 }

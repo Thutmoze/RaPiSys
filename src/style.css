@@ -5047,3 +5047,11 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-inline-log { padding: 12px 14px; border-left: 2px solid var(--accent-cyan); margin: 4px 0 10px; }
 .up-inline-log pre { font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5;
   white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); margin: 0; max-height: 280px; overflow-y: auto; }
+
+/* Updates: last-checked label, brighter changelog text, animated fetch */
+.up-checked { font-size: 11px; color: var(--text-muted); align-self: center; margin-left: 4px; }
+.up-log-text { color: var(--text-primary) !important; }
+.up-inline-log .up-log-text { color: #e8e8f0 !important; }
+.up-log-loading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  color: var(--text-secondary); font-size: 12px; padding: 4px 0; }
+.up-log-loading .up-scanbar { flex-basis: 100%; margin: 6px 0 0; }
