@@ -187,6 +187,15 @@ function buildGrid({ editable }) {
     disableResize: !editable,
     disableDrag: !editable,
     handle: '.gs-edit-bar',
+    // responsive: collapse to fewer columns on narrow screens so resized
+    // widgets stack cleanly on mobile instead of overflowing.
+    columnOpts: {
+      breakpointForWindow: true,
+      breakpoints: [
+        { w: 700, c: 1 },     // phones → single column
+        { w: 1100, c: 6 },    // tablets → 6 columns
+      ],
+    },
   }, gridEl);
   document.body.classList.add('layout-grid-active');
   return g;
@@ -232,6 +241,16 @@ function ensureSummaryCards() {
 let rendered = false;
 export async function initOverviewLayout() {
   ensureSummaryCards();
+  // Only the authenticated admin sees the custom layout + edit button. Everyone
+  // else (no login) gets the original Pi-Dashboard view untouched.
+  let isAdmin = false;
+  try {
+    const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => r.json());
+    isAdmin = !!me.authenticated && me.mode !== 'monitor';
+  } catch { isAdmin = false; }
+
+  if (!isAdmin) return;        // native view, no edit affordance, no saved layout
+
   ensureEditButton();
   if (rendered) return;
   savedLayout = await fetchLayout();
@@ -329,6 +348,7 @@ function addWidget(id) {
   if (!item) return;
   grid.makeWidget(item);
   wireHideButtons();
+  wireSizeInputs();
   refreshToolbarPalette();
 }
 
