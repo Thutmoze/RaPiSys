@@ -9,7 +9,6 @@
  * Everything reuses the existing design tokens (.card, --accent-*, glass).
  */
 
-import 'gridstack/dist/gridstack.min.css';
 import { initOverviewLayout } from './layout.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
@@ -383,7 +382,7 @@ function route() {
   if (page === 'overview') {
     if (legacy) legacy.style.display = '';
     document.body.classList.remove('rapisys-subpage');
-    // F6: wrap the dashboard as a (static-by-default) GridStack once.
+    // F6: apply any saved layout (order/visibility) to the native dashboard.
     initOverviewLayout();
   } else {
     if (legacy) legacy.style.display = 'none';

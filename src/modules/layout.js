@@ -1,34 +1,34 @@
-/** RaPiSys — dashboard layout foundation (F6, phase a).
+/** RaPiSys — dashboard layout (F6).
  *
- * Wraps the existing Overview dashboard blocks as GridStack widgets WITHOUT
- * changing their appearance by default. Each "widget" is one of the existing
- * top-level blocks (the four stat cards and the six sections). They keep their
- * original DOM nodes and ids/classes, so the live-update code in main.js keeps
- * targeting them unchanged.
+ * Architecture: the Overview dashboard renders NATIVELY by default (its own
+ * CSS grid / sections, pixel-identical to upstream — zero risk). A saved layout
+ * only adjusts widget ORDER and VISIBILITY on the native view, which needs no
+ * grid engine. GridStack is loaded lazily and used ONLY while the user is in
+ * "edit layout" mode (phase b), then torn down — so the normal view never pays
+ * the fixed-row-height cost that clips content-driven cards.
  *
- * Phase a scope: load a saved layout if one exists and apply it; otherwise the
- * dashboard renders exactly as upstream. No edit UI yet (that is phase b).
+ * Phase a scope (this file): widget registry + load/apply saved order &
+ * visibility to the native dashboard. Edit mode arrives in phase b.
  */
-import { GridStack } from 'gridstack';
 
-// The widget registry. `sel` selects the existing block in index.html; `def`
-// is the default 12-column grid placement chosen to reproduce the current
-// layout (stat cards in a 4-up row, sections full width stacked below).
+// Each widget is one existing top-level block on the Overview page.
 export const OVERVIEW_WIDGETS = [
-  { id: 'cpu',        sel: '.stats-grid .cpu-card',     title: 'CPU Usage',     def: { x: 0, y: 0, w: 3, h: 4 } },
-  { id: 'memory',     sel: '.stats-grid .memory-card',  title: 'Memory',        def: { x: 3, y: 0, w: 3, h: 4 } },
-  { id: 'temp',       sel: '.stats-grid .temp-card',    title: 'Temperature',   def: { x: 6, y: 0, w: 3, h: 4 } },
-  { id: 'uptime',     sel: '.stats-grid .uptime-card',  title: 'Uptime & Load', def: { x: 9, y: 0, w: 3, h: 4 } },
-  { id: 'services',   sel: '.services-section',         title: 'Services',      def: { x: 0, y: 4,  w: 12, h: 4 } },
-  { id: 'containers', sel: '.containers-section',       title: 'Containers',    def: { x: 0, y: 8,  w: 12, h: 4 } },
-  { id: 'wireguard',  sel: '.wireguard-section',        title: 'WireGuard',     def: { x: 0, y: 12, w: 12, h: 4 } },
-  { id: 'network',    sel: '.network-section',          title: 'Network',       def: { x: 0, y: 16, w: 12, h: 4 } },
-  { id: 'processes',  sel: '.processes-section',        title: 'Processes',     def: { x: 0, y: 20, w: 12, h: 5 } },
-  { id: 'disk',       sel: '.disk-section',             title: 'Disk',          def: { x: 0, y: 25, w: 12, h: 5 } },
+  { id: 'cpu',        sel: '.stats-grid .cpu-card',    title: 'CPU Usage',     group: 'stats' },
+  { id: 'memory',     sel: '.stats-grid .memory-card', title: 'Memory',        group: 'stats' },
+  { id: 'temp',       sel: '.stats-grid .temp-card',   title: 'Temperature',   group: 'stats' },
+  { id: 'uptime',     sel: '.stats-grid .uptime-card', title: 'Uptime & Load', group: 'stats' },
+  { id: 'services',   sel: '.services-section',        title: 'Services',      group: 'section' },
+  { id: 'containers', sel: '.containers-section',      title: 'Containers',    group: 'section' },
+  { id: 'wireguard',  sel: '.wireguard-section',       title: 'WireGuard',     group: 'section' },
+  { id: 'network',    sel: '.network-section',         title: 'Network',       group: 'section' },
+  { id: 'processes',  sel: '.processes-section',       title: 'Processes',     group: 'section' },
+  { id: 'disk',       sel: '.disk-section',            title: 'Disk',          group: 'section' },
 ];
 
-let grid = null;
-let installed = false;
+let savedLayout = null;       // last fetched layout (array) or null
+let applied = false;
+
+function widgetNode(w) { return document.querySelector(w.sel); }
 
 /** Fetch the saved active layout for the overview page (null if none). */
 async function fetchLayout() {
@@ -41,78 +41,51 @@ async function fetchLayout() {
 }
 
 /**
- * Convert the existing dashboard into a GridStack grid. The blocks are moved
- * into grid-item wrappers in place. Idempotent: only runs once.
- *
- * @param {Array|null} saved  saved layout to apply, or null for defaults
+ * Apply a saved layout to the NATIVE dashboard: reorder the stat cards within
+ * their grid, reorder the sections, and hide widgets flagged not-visible.
+ * Uses CSS `order` for the stat grid and physical re-append for sections.
  */
-function buildGrid(saved) {
-  const dashboard = document.querySelector('main.dashboard');
-  if (!dashboard || installed) return;
+function applyToNative(layout) {
+  if (!layout) return;
+  const byId = {};
+  layout.forEach((w, i) => { byId[w.id] = { ...w, _idx: i }; });
 
-  // Map saved placements by id for quick lookup.
-  const savedById = {};
-  if (saved) for (const w of saved) savedById[w.id] = w;
-
-  // Create the grid container that will host the items.
-  const gridEl = document.createElement('div');
-  gridEl.className = 'grid-stack rapisys-grid';
-
-  // Collect each widget's existing node and wrap it as a grid item.
-  const items = [];
   for (const widget of OVERVIEW_WIDGETS) {
-    const node = dashboard.querySelector(widget.sel);
-    if (!node) continue; // block not present (e.g. wireguard hidden) — skip
-
-    const placement = savedById[widget.id] || widget.def;
-    // Honor a saved "hidden" flag by not adding the item at all (kept in DOM,
-    // detached, so it can be restored later in edit mode).
-    const item = document.createElement('div');
-    item.className = 'grid-stack-item';
-    item.setAttribute('gs-id', widget.id);
-    item.setAttribute('gs-x', placement.x);
-    item.setAttribute('gs-y', placement.y);
-    item.setAttribute('gs-w', placement.w);
-    item.setAttribute('gs-h', placement.h);
-
-    const content = document.createElement('div');
-    content.className = 'grid-stack-item-content';
-    // Move the original node inside the grid item content (preserves it intact).
-    node.parentNode.removeChild(node);
-    content.appendChild(node);
-    item.appendChild(content);
-
-    if (placement.visible === false) {
-      item.dataset.hidden = '1';
-      item.style.display = 'none';
-    }
-    items.push(item);
-    gridEl.appendChild(item);
+    const node = widgetNode(widget);
+    if (!node) continue;
+    const placement = byId[widget.id];
+    if (!placement) { node.style.order = ''; node.style.removeProperty('display'); continue; }
+    node.style.display = placement.visible === false ? 'none' : '';
+    node.style.order = String(placement._idx);
   }
-
-  // Replace the dashboard's children with the grid.
-  dashboard.appendChild(gridEl);
-
-  // Initialize GridStack in STATIC mode (no drag/resize until edit mode).
-  grid = GridStack.init({
-    column: 12,
-    cellHeight: 70,
-    margin: 8,
-    staticGrid: true,           // locked by default; phase b unlocks for editing
-    float: false,
-    disableResize: true,
-    disableDrag: true,
-  }, gridEl);
-
-  installed = true;
+  // Sections sit in normal flow, so re-append them physically in saved order.
+  const dashboard = document.querySelector('main.dashboard');
+  if (dashboard) {
+    const sectionWidgets = layout
+      .map((p) => OVERVIEW_WIDGETS.find((w) => w.id === p.id))
+      .filter((w) => w && w.group === 'section');
+    for (const w of sectionWidgets) {
+      const node = widgetNode(w);
+      if (node) dashboard.appendChild(node);
+    }
+  }
 }
 
 /** Public: called when the Overview page becomes active. */
 export async function initOverviewLayout() {
-  if (installed) return;
-  const saved = await fetchLayout();
-  buildGrid(saved);
+  savedLayout = await fetchLayout();
+  if (savedLayout && !applied) {
+    applyToNative(savedLayout);
+    applied = true;
+  }
 }
 
-/** Expose the grid + registry for the (future) editor. */
-export function getGrid() { return grid; }
+/** Re-read + re-apply (used after the editor saves). */
+export async function reloadOverviewLayout() {
+  savedLayout = await fetchLayout();
+  applied = false;
+  applyToNative(savedLayout);
+  applied = true;
+}
+
+export function getSavedLayout() { return savedLayout; }
