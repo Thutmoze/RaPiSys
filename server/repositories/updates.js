@@ -34,6 +34,25 @@ export function createUpdatesRepo(db) {
     const row = db.prepare(`SELECT candidate, changelog FROM update_sectags WHERE package=?`).get(pkg);
     return row && row.changelog ? { candidateVersion: row.candidate, changelog: row.changelog } : null;
   }
+
+  // Dedicated changelog cache: any successful fetch (range OR full download) is
+  // stored here keyed by package + candidate version, so we never re-fetch and
+  // every view renders consistently. Invalidated automatically when the
+  // candidate version changes (a new upgrade supersedes the old notes).
+  db.exec(`CREATE TABLE IF NOT EXISTS update_changelogs (package TEXT PRIMARY KEY, candidate TEXT, changelog TEXT, fetched_at INTEGER)`);
+  function saveChangelog(pkg, candidate, changelog) {
+    if (!changelog) return;
+    db.prepare(`INSERT INTO update_changelogs (package, candidate, changelog, fetched_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, changelog=excluded.changelog, fetched_at=excluded.fetched_at`)
+      .run(pkg, candidate || null, changelog, Date.now());
+  }
+  function getChangelog(pkg, candidate) {
+    const row = db.prepare(`SELECT candidate, changelog FROM update_changelogs WHERE package=?`).get(pkg);
+    if (!row || !row.changelog) return null;
+    // only reuse if it's for the same candidate version we're upgrading to
+    if (candidate && row.candidate && row.candidate !== candidate) return null;
+    return { candidateVersion: row.candidate, changelog: row.changelog };
+  }
   function getSecurityTags() {
     const rows = db.prepare(`SELECT package, candidate, security, cves, urgency FROM update_sectags`).all();
     const out = {};
@@ -54,5 +73,5 @@ export function createUpdatesRepo(db) {
     return db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log
                        FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
   }
-  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog };
+  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog };
 }

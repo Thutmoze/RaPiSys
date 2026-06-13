@@ -152,27 +152,36 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     } catch (err) { return { available: false, error: err.message, updates: [] }; }
   }
 
+  function candidateOf(pkg) {
+    try { const c = updatesRepo?.getCache?.(); const u = (c?.updates || []).find((x) => x.package === pkg); return u ? u.candidate : null; }
+    catch { return null; }
+  }
+
   async function changelog(pkg, candidate = true) {
     if (!agentConfigured()) return { changelog: 'agent unavailable' };
     if (candidate) {
-      // Reuse the changelog the scan already fetched (consistent + instant).
-      const cached = updatesRepo?.getCachedChangelog?.(pkg);
-      if (cached && cached.changelog) return { changelog: cached.changelog, candidateVersion: cached.candidateVersion, source: 'candidate' };
-      // Otherwise try the partial range-fetch.
+      const cand = candidateOf(pkg);
+      // 1) DB cache first — any prior successful fetch (range or full download).
+      const stored = updatesRepo?.getChangelog?.(pkg, cand);
+      if (stored && stored.changelog) return { changelog: stored.changelog, candidateVersion: stored.candidateVersion || cand, source: 'candidate' };
+      // 2) range-fetch (cheap); store on success.
       try {
         const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
-        if (r && r.changelog) return r;
+        if (r && r.changelog) { updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || cand, r.changelog); return r; }
       } catch { /* fall through */ }
     }
-    // local installed changelog (no new-version notes, but instant)
+    // local installed changelog (instant fallback; NOT stored as candidate)
     return agentCall('apt.changelog', { pkg, candidate: false }, null, 30000);
   }
 
   // Full download with progress (for big packages whose docs are past budget).
   async function changelogFull(pkg, onProgress) {
     if (!agentConfigured()) throw new Error('host agent required');
-    return agentCall('apt.changelogFull', { pkg },
+    const r = await agentCall('apt.changelogFull', { pkg },
       (line) => { try { onProgress?.(JSON.parse(line)); } catch { /* */ } }, 200000);
+    // persist so future views reuse it instantly with the proper format
+    if (r && r.changelog) updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || candidateOf(pkg), r.changelog);
+    return r;
   }
 
   // Bulk security scan, now cheap thanks to range-fetched changelogs.
@@ -192,6 +201,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
           const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
           out[pkg] = { security, cves, urgency, scanned: true };
           updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency, changelog: r.changelog });
+          updatesRepo?.saveChangelog?.(pkg, r.candidateVersion, r.changelog);
         } else {
           // range-fetch couldn't reach the changelog (docs past budget = large pkg)
           out[pkg] = { scanned: false };
