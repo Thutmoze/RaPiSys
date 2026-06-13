@@ -230,7 +230,64 @@ const OPS = {
   // The Pi's own recent DNS lookups, no logging config needed: parse
   // systemd-resolved's journal (it records 'Looking up' / cache) when
   // present; otherwise sample current :53 peers via ss.
-  async 'dns.recent'({ limit = 20 }) {
+  // ---- DNS logging forwarder in front of Tailscale MagicDNS (opt-in) ------
+  // Installs dnsmasq as a LOCAL forwarder: listens on 127.0.0.1#5353, logs
+  // every query, forwards upstream to MagicDNS (100.100.100.100). We point
+  // /etc/resolv.conf at it and back up the original. Fully reversible.
+  async 'dns.forwarder'({ enable }) {
+    const BACKUP = '/etc/rapisys/resolv.conf.orig';
+    const DROPIN = '/etc/dnsmasq.d/rapisys-forwarder.conf';
+    const LOG = '/var/log/dnsmasq-rapisys.log';
+    if (enable) {
+      const have = await run('sh', ['-c', 'command -v dnsmasq'], 3000);
+      if (have.code !== 0) {
+        const inst = await run('apt-get', ['install', '-y', 'dnsmasq'], 120000);
+        assert(inst.code === 0, 'dnsmasq install failed');
+      }
+      // dnsmasq as a non-default-port forwarder so it never clashes with
+      // whatever else binds :53; resolv.conf points at it directly.
+      fs.mkdirSync('/etc/dnsmasq.d', { recursive: true });
+      fs.writeFileSync(DROPIN,
+        ['port=5353', 'listen-address=127.0.0.1', 'bind-interfaces',
+         'no-resolv', 'server=100.100.100.100', 'log-queries',
+         `log-facility=${LOG}`, 'cache-size=1000'].join('\n') + '\n');
+      // back up resolv.conf once, then repoint it
+      fs.mkdirSync('/etc/rapisys', { recursive: true });
+      if (!fs.existsSync(BACKUP)) {
+        try { fs.copyFileSync('/etc/resolv.conf', BACKUP); } catch { /* may be symlink */ }
+      }
+      // dnsmasq on 5353 — resolv.conf can't carry a port, so we run a tiny
+      // :53 listener too by adding a second drop-in binding 53 on loopback.
+      fs.writeFileSync('/etc/dnsmasq.d/rapisys-forwarder.conf',
+        ['listen-address=127.0.0.53', 'bind-interfaces', 'no-resolv',
+         'server=100.100.100.100', 'log-queries', `log-facility=${LOG}`,
+         'cache-size=1000'].join('\n') + '\n');
+      const sysd = await run('systemctl', ['list-unit-files', 'dnsmasq.service'], 4000).catch(() => ({ stdout: '' }));
+      if (sysd.stdout.includes('dnsmasq.service')) {
+        await run('systemctl', ['enable', '--now', 'dnsmasq'], 8000);
+        await run('systemctl', ['restart', 'dnsmasq'], 8000);
+      } else {
+        return { ok: false, error: 'no dnsmasq.service unit; manual start required' };
+      }
+      // repoint resolver
+      try { fs.unlinkSync('/etc/resolv.conf'); } catch { /* */ }
+      fs.writeFileSync('/etc/resolv.conf', 'nameserver 127.0.0.53\noptions edns0\n');
+      return { ok: true, enabled: true, log: LOG };
+    } else {
+      try { fs.unlinkSync(DROPIN); } catch { /* */ }
+      await run('systemctl', ['restart', 'dnsmasq'], 8000).catch(() => {});
+      // restore original resolv.conf
+      if (fs.existsSync(BACKUP)) {
+        try { fs.unlinkSync('/etc/resolv.conf'); } catch { /* */ }
+        try { fs.copyFileSync(BACKUP, '/etc/resolv.conf'); } catch { /* */ }
+      } else {
+        fs.writeFileSync('/etc/resolv.conf', 'nameserver 100.100.100.100\n');
+      }
+      return { ok: true, enabled: false };
+    }
+  },
+
+    async 'dns.recent'({ limit = 20 }) {
     // journal route (systemd-resolved with at least default logging)
     const j = await run('sh', ['-c',
       "journalctl -u systemd-resolved --no-pager -n 400 -o cat 2>/dev/null | grep -oiE 'question: [^ ]+|Looking up [^ ]+' | awk '{print $NF}'"], 5000)

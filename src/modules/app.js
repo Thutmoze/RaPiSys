@@ -1166,13 +1166,21 @@ pageRenderers.network = (() => {
         <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>`;
     } else if (d.resolver) {
       html = `<div class="set-kv"><span>Active resolver</span><b>${esc(d.resolver)}</b></div>
-        <p class="net-dns-note">This Pi resolves DNS through ${esc(d.resolver)}. Per-domain query history isn\u2019t exposed by this resolver; connection peers are reverse-resolved to hostnames in the Protocols panel instead.</p>`;
+        <p class="net-dns-note">This Pi resolves DNS through ${esc(d.resolver)}. Per-domain query history isn\u2019t exposed by this resolver. You can insert a local logging forwarder to capture queries (reversible).</p>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="fwdon">Enable query logging (local forwarder)</button></div>`;
     } else {
       html = '<p class="sess-empty">No DNS data available from this Pi\u2019s resolver.</p>';
     }
     $('[data-net=dns]', host).innerHTML = html;
     const off = $('[data-net=dnsoff]', host);
     if (off) off.onclick = async () => { try { await api('/network/dns/logging', { method: 'POST', body: { enabled: false } }); setTimeout(() => refreshDns(host), 1200); } catch (e) { toast('error', 'DNS', e.message); } };
+    const fwdOn = $('[data-net=fwdon]', host);
+    if (fwdOn) fwdOn.onclick = async () => {
+      if (!await rapisysConfirm('Insert a local DNS logging forwarder in front of ' + esc(d.resolver) + '? This installs dnsmasq (if needed), repoints the Pi\u2019s resolver to a local logging proxy, and is fully reversible. Queries will then appear here.', { confirmLabel: 'Enable logging' })) return;
+      fwdOn.textContent = 'Setting up… (may install dnsmasq)'; fwdOn.disabled = true;
+      try { await api('/network/dns/forwarder', { method: 'POST', body: { enable: true } }); toast('success', 'DNS', 'Logging forwarder active'); setTimeout(() => refreshDns(host), 2500); }
+      catch (e) { toast('error', 'DNS', e.message); fwdOn.textContent = 'Enable query logging (local forwarder)'; fwdOn.disabled = false; }
+    };
   }
 
   function initChart(host) {
@@ -1217,7 +1225,7 @@ pageRenderers.network = (() => {
           <div class="card-body" data-net="procs"></div>
         </div>
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></div><span class="card-title">DNS — Pi Queries</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="8"/><path d="M4 10h5M15 10h5M12 2a12 12 0 0 0 0 16M12 2a12 12 0 0 1 0 16"/><rect x="8" y="7" width="8" height="6" rx="1" fill="var(--bg-card)"/><path d="M12 18v3M8 21h8" /></svg></div><span class="card-title">DNS — Pi Queries</span></div>
           <div class="card-body" data-net="dns"></div>
         </div>
       </div>`;

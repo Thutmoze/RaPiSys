@@ -261,6 +261,11 @@ export function createNetworkCollector() {
     return agentCall(enabled ? 'dns.enableLogging' : 'dns.disableLogging', {}, null, 12000);
   }
 
+  async function dnsForwarder(enable) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('dns.forwarder', { enable }, null, 140000);
+  }
+
   async function nethogsSample(seconds = 5) {
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('nethogs.sample', { seconds }, null, (Number(seconds) + 130) * 1000);
@@ -271,7 +276,7 @@ export function createNetworkCollector() {
     return { throughput: throughput(), vnstat: vn, protocols: proto, processes: procs, dns: dnsStats, ts: Date.now() };
   }
 
-  return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, nethogsSample, snapshot };
+  return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot };
 }
 
 const WELL_KNOWN = {

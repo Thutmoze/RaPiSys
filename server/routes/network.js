@@ -52,6 +52,12 @@ export function networkRouter({ network, metricsRepo, requireControl }) {
     catch (err) { res.status(502).json({ error: err.message }); }
   });
 
+  // Opt-in DNS logging forwarder in front of MagicDNS (installs dnsmasq).
+  r.post('/dns/forwarder', requireControl, async (req, res) => {
+    try { res.json(await network.dnsForwarder(!!req.body?.enable)); }
+    catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
   // Opt-in per-process bandwidth sample via nethogs (installs on first use).
   r.post('/nethogs', requireControl, async (req, res) => {
     try { res.json(await network.nethogsSample(Number(req.body?.seconds) || 5)); }
