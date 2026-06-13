@@ -1017,10 +1017,12 @@ pageRenderers.network = (() => {
           const lbl = d.date ? `${d.date.month}/${d.date.day}` : '';
           return `<div class="net-bar" style="height:${Math.max(2, h)}px" title="${lbl}: ${fmtBytes(tot)}"></div>`;
         }).join('');
+        // pad with empty slots so a few days don't stretch full-width
+        const pad = Math.max(0, 14 - days.length);
         return `
           <div class="net-hist-iface">
             <div class="net-hist-head"><b>${esc(i.name)}</b><span>today ${today} · total ${total}</span></div>
-            <div class="net-bars">${bars}</div>
+            <div class="net-bars">${bars}${'<div class="net-bar net-bar-empty"></div>'.repeat(pad)}</div>
           </div>`;
       }).join('');
     }
@@ -1038,23 +1040,77 @@ pageRenderers.network = (() => {
           <span class="net-proto-n">${n}</span>
         </div>`).join('') : '<p class="sess-empty">No classified connections</p>'}`;
 
-    // top processes
-    $('[data-net=procs]', host).innerHTML = snap.processes.length
-      ? snap.processes.map((p) => `
-        <div class="net-proc-row">
-          <span><b>${esc(p.comm)}</b> <small>pid ${p.pid}</small></span>
-          <span>${p.sockets} socket${p.sockets > 1 ? 's' : ''}</span>
-        </div>`).join('')
-      : '<p class="sess-empty">No socket-owning processes visible</p>';
+    // top processes — socket counts by default; bandwidth after a nethogs sample
+    if (!pageRenderers.network._nethogs) {
+      $('[data-net=procs]', host).innerHTML = (snap.processes.length
+        ? snap.processes.map((p) => `
+          <div class="net-proc-row">
+            <span><b>${esc(p.comm)}</b> <small>pid ${p.pid}</small></span>
+            <span>${p.sockets} socket${p.sockets > 1 ? 's' : ''}</span>
+          </div>`).join('')
+        : '<p class="sess-empty">No socket-owning processes visible</p>')
+        + `<div class="net-dns-cta"><button class="net-toggle" data-net="nethogs">Measure bandwidth per process (nethogs)</button></div>`;
+      const nh = $('[data-net=nethogs]', host);
+      if (nh) nh.onclick = async () => {
+        if (!await rapisysConfirm('Sample per-process bandwidth with nethogs? Installs nethogs on first use and runs a brief packet capture (~5s, some CPU).', { confirmLabel: 'Measure' })) return;
+        nh.textContent = 'Measuring (~5s)…'; nh.disabled = true;
+        try {
+          const r = await api('/network/nethogs', { method: 'POST', body: { seconds: 5 } });
+          pageRenderers.network._nethogs = r.processes || [];
+          refreshSlow(host);
+        } catch (err) { toast('error', 'Network', err.message); nh.textContent = 'Measure bandwidth per process (nethogs)'; nh.disabled = false; }
+      };
+    } else {
+      const list = pageRenderers.network._nethogs;
+      $('[data-net=procs]', host).innerHTML = (list.length
+        ? list.map((p) => `
+          <div class="net-proc-row">
+            <span><b>${esc(p.comm)}</b> <small>pid ${p.pid}</small></span>
+            <span>▼ ${p.recvKBs.toFixed(1)} ▲ ${p.sentKBs.toFixed(1)} KB/s</span>
+          </div>`).join('')
+        : '<p class="sess-empty">No per-process traffic during the sample window</p>')
+        + `<div class="net-dns-cta"><button class="net-toggle" data-net="nethogs2">Sample again</button> <button class="net-toggle" data-net="nethogsback">back to sockets</button></div>`;
+      const again = $('[data-net=nethogs2]', host), back = $('[data-net=nethogsback]', host);
+      if (again) again.onclick = async () => {
+        again.textContent = 'Measuring…'; again.disabled = true;
+        try { const r = await api('/network/nethogs', { method: 'POST', body: { seconds: 5 } }); pageRenderers.network._nethogs = r.processes || []; refreshSlow(host); }
+        catch (err) { toast('error', 'Network', err.message); }
+      };
+      if (back) back.onclick = () => { pageRenderers.network._nethogs = null; refreshSlow(host); };
+    }
 
     // DNS
     const d = snap.dns;
-    $('[data-net=dns]', host).innerHTML = d.available
-      ? `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
+    let dnsHtml;
+    if (d.source === 'dnsmasq' && d.loggingEnabled) {
+      const max = Math.max(1, ...(d.domains || []).map((x) => x.queries));
+      dnsHtml = `<div class="net-proto-summary">${(d.totalQueries || 0).toLocaleString()} queries logged · <button class="net-toggle" data-net="dnsoff">disable logging</button></div>`
+        + ((d.domains || []).length ? d.domains.map((x) => `
+          <div class="net-proto-row">
+            <span class="net-domain">${esc(x.domain)}</span>
+            <span class="net-proto-bar"><span style="width:${(x.queries / max) * 100}%"></span></span>
+            <span class="net-proto-n">${x.queries}</span>
+          </div>`).join('') : '<p class="sess-empty">No queries logged yet</p>');
+    } else if (d.source === 'resolved') {
+      dnsHtml = `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
          <div class="set-kv"><span>Cache hits</span><b>${(d.cacheHits ?? 0).toLocaleString()}</b></div>
          <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>
-         <div class="set-kv"><span>In flight</span><b>${d.current ?? 0}</b></div>`
-      : '<p class="sess-empty">No resolver statistics (systemd-resolved not active). DNS analytics will use Pi-hole/dnsmasq logs when present.</p>';
+         <div class="net-dns-cta"><button class="net-toggle" data-net="dnson">Enable per-domain logging (dnsmasq)</button></div>`;
+    } else {
+      dnsHtml = `<p class="sess-empty">No resolver stats. Enable dnsmasq query logging for top-domain analytics.</p>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="dnson">Enable per-domain logging (dnsmasq)</button></div>`;
+    }
+    $('[data-net=dns]', host).innerHTML = dnsHtml;
+    const dnsOn = $('[data-net=dnson]', host), dnsOff = $('[data-net=dnsoff]', host);
+    if (dnsOn) dnsOn.onclick = async () => {
+      if (!await rapisysConfirm('Enable DNS query logging? This adds a dnsmasq config and restarts dnsmasq.', { confirmLabel: 'Enable' })) return;
+      try { await api('/network/dns/logging', { method: 'POST', body: { enabled: true } }); toast('success', 'DNS', 'Query logging enabled'); setTimeout(() => refreshSlow(host), 1500); }
+      catch (err) { toast('error', 'DNS', err.message); }
+    };
+    if (dnsOff) dnsOff.onclick = async () => {
+      try { await api('/network/dns/logging', { method: 'POST', body: { enabled: false } }); toast('success', 'DNS', 'Query logging disabled'); setTimeout(() => refreshSlow(host), 1500); }
+      catch (err) { toast('error', 'DNS', err.message); }
+    };
   }
 
   function initChart(host) {

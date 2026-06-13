@@ -2,7 +2,7 @@
 
 import express from 'express';
 
-export function networkRouter({ network, metricsRepo }) {
+export function networkRouter({ network, metricsRepo, requireControl }) {
   const r = express.Router();
 
   // Live snapshot (everything in one call for the page's first paint).
@@ -32,6 +32,18 @@ export function networkRouter({ network, metricsRepo }) {
       rx: metricsRepo.query({ metric: `net.${iface}.rx`, since }),
       tx: metricsRepo.query({ metric: `net.${iface}.tx`, since }),
     });
+  });
+
+  // Opt-in DNS query logging (modifies dnsmasq config -> Pi control).
+  r.post('/dns/logging', requireControl, async (req, res) => {
+    try { res.json(await network.dnsSetLogging(!!req.body?.enabled)); }
+    catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
+  // Opt-in per-process bandwidth sample via nethogs (installs on first use).
+  r.post('/nethogs', requireControl, async (req, res) => {
+    try { res.json(await network.nethogsSample(Number(req.body?.seconds) || 5)); }
+    catch (err) { res.status(502).json({ error: err.message }); }
   });
 
   return r;

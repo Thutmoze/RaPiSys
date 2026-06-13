@@ -138,19 +138,39 @@ export function createNetworkCollector() {
 
   /** DNS resolver stats (systemd-resolved), best-effort. */
   async function dns() {
+    // Prefer dnsmasq query-log analytics (top domains) when enabled.
+    if (agentConfigured()) {
+      try {
+        const top = await agentCall('dns.topDomains', { limit: 15 }, null, 6000);
+        if (top.enabled) {
+          return { available: true, source: 'dnsmasq', loggingEnabled: true,
+            totalQueries: top.totalQueries, domains: top.domains };
+        }
+      } catch { /* fall through to resolver stats */ }
+    }
     try {
       const { stdout } = await execFileAsync('resolvectl', ['statistics'], { timeout: 4000 });
       const get = (re) => { const m = stdout.match(re); return m ? Number(m[1]) : null; };
       return {
-        available: true,
+        available: true, source: 'resolved', loggingEnabled: false,
         current: get(/Current Transactions:\s+(\d+)/),
         total: get(/Total Transactions:\s+(\d+)/),
         cacheHits: get(/Cache Hits:\s+(\d+)/),
         cacheMisses: get(/Cache Misses:\s+(\d+)/),
       };
     } catch {
-      return { available: false };
+      return { available: false, loggingEnabled: false };
     }
+  }
+
+  async function dnsSetLogging(enabled) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall(enabled ? 'dns.enableLogging' : 'dns.disableLogging', {}, null, 12000);
+  }
+
+  async function nethogsSample(seconds = 5) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('nethogs.sample', { seconds }, null, (Number(seconds) + 130) * 1000);
   }
 
   async function snapshot() {
@@ -158,7 +178,7 @@ export function createNetworkCollector() {
     return { throughput: throughput(), vnstat: vn, protocols: proto, processes: procs, dns: dnsStats, ts: Date.now() };
   }
 
-  return { throughput, vnstat, protocols, topProcesses, dns, snapshot };
+  return { throughput, vnstat, protocols, topProcesses, dns, dnsSetLogging, nethogsSample, snapshot };
 }
 
 const WELL_KNOWN = {

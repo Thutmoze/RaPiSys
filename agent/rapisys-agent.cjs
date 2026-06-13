@@ -226,7 +226,70 @@ const OPS = {
     return { sessions };
   },
 
-  async 'vnstat.json'({ iface }) {
+  // ---- DNS query logging via dnsmasq (opt-in) -----------------------------
+  async 'dns.enableLogging'() {
+    const conf = '/etc/dnsmasq.d/rapisys-logging.conf';
+    fs.writeFileSync(conf, 'log-queries\nlog-facility=/var/log/dnsmasq-rapisys.log\n');
+    const r = await run('systemctl', ['restart', 'dnsmasq'], 8000);
+    assert(r.code === 0, `dnsmasq restart failed: ${r.stderr || r.stdout}`);
+    return { ok: true, log: '/var/log/dnsmasq-rapisys.log' };
+  },
+  async 'dns.disableLogging'() {
+    try { fs.unlinkSync('/etc/dnsmasq.d/rapisys-logging.conf'); } catch { /* gone */ }
+    await run('systemctl', ['restart', 'dnsmasq'], 8000).catch(() => {});
+    return { ok: true };
+  },
+  async 'dns.topDomains'({ limit = 15 }) {
+    const log = '/var/log/dnsmasq-rapisys.log';
+    let text = '';
+    try { text = fs.readFileSync(log, 'utf-8'); } catch { return { enabled: false, domains: [] }; }
+    // keep memory bounded: only the tail
+    if (text.length > 2_000_000) text = text.slice(-2_000_000);
+    const counts = {};
+    for (const line of text.split('\n')) {
+      // "... query[A] github.com from 192.168.10.9"
+      const m = line.match(/query\[[A-Z]+\]\s+(\S+)\s+from/);
+      if (m) { const d = m[1].toLowerCase(); counts[d] = (counts[d] || 0) + 1; }
+    }
+    const domains = Object.entries(counts)
+      .map(([domain, queries]) => ({ domain, queries }))
+      .sort((a, b) => b.queries - a.queries)
+      .slice(0, Math.min(Number(limit) || 15, 50));
+    return { enabled: true, domains, totalQueries: Object.values(counts).reduce((a, b) => a + b, 0) };
+  },
+
+  // ---- per-process bandwidth via nethogs (opt-in, installs on first use) ---
+  async 'nethogs.sample'({ seconds = 5 }) {
+    // Ensure nethogs is present (tiny package).
+    const have = await run('sh', ['-c', 'command -v nethogs'], 3000);
+    if (have.code !== 0) {
+      const inst = await run('apt-get', ['install', '-y', 'nethogs'], 120000);
+      assert(inst.code === 0, 'nethogs install failed (apt)');
+    }
+    const dur = Math.min(Math.max(Number(seconds) || 5, 2), 15);
+    // -t trace mode, -c count cycles (~1s each), -d delay
+    const r = await run('nethogs', ['-t', '-c', String(dur), '-d', '1'], (dur + 5) * 1000)
+      .catch((e) => ({ code: 1, stdout: '', stderr: String(e) }));
+    // trace output: "program/pid/uid\tsent_KB/s\trecv_KB/s"
+    const procs = {};
+    for (const line of (r.stdout || '').split('\n')) {
+      const m = line.match(/^(.+?)\/(\d+)\/\d+\s+([\d.]+)\s+([\d.]+)/);
+      if (!m) continue;
+      const name = m[1].split('/').pop();
+      const key = `${name}:${m[2]}`;
+      const sent = parseFloat(m[3]), recv = parseFloat(m[4]);
+      if (!procs[key]) procs[key] = { comm: name, pid: Number(m[2]), sentKB: 0, recvKB: 0, n: 0 };
+      procs[key].sentKB += sent; procs[key].recvKB += recv; procs[key].n += 1;
+    }
+    const list = Object.values(procs)
+      .map((p) => ({ comm: p.comm, pid: p.pid, sentKBs: p.sentKB / p.n, recvKBs: p.recvKB / p.n }))
+      .filter((p) => p.sentKBs + p.recvKBs > 0.01)
+      .sort((a, b) => (b.sentKBs + b.recvKBs) - (a.sentKBs + a.recvKBs))
+      .slice(0, 10);
+    return { processes: list };
+  },
+
+    async 'vnstat.json'({ iface }) {
     const args = ['--json'];
     if (iface && /^[a-zA-Z0-9._-]{1,32}$/.test(iface)) args.push('-i', iface);
     const r = await run('vnstat', args, 8000).catch(() => ({ code: 127, stdout: '' }));
