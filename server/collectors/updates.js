@@ -8,13 +8,32 @@
 
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
-// Security signals can live in a LATER sub-entry — e.g. the upstream
-// "trixie-security; urgency=high" block that follows the benign rpt1 repackage
-// block. The fetched changelog is already trimmed to the candidate's recent
-// notes (~150 lines), so scan the whole fetched text rather than only the
-// first version block.
-function firstEntry(text) {
-  return String(text || '');
+// Strip epoch ("8:") and debian revision ("-0+deb...") to get the upstream
+// version, e.g. "8:7.1.4-0+deb13u1+rpt1" -> "7.1.4".
+function upstreamOf(v) { return String(v || '').replace(/^\d+:/, '').replace(/-.*$/, ''); }
+
+// Return only the changelog entries belonging to the CANDIDATE version. The
+// changelog often holds several version blocks; security info for the update
+// lives in the candidate's own entries (incl. a following -security sub-entry),
+// NOT in older releases. We include all leading entries whose upstream version
+// matches the candidate's and stop at the first that differs.
+function candidateWindow(text, candidateVersion) {
+  const body = String(text || '');
+  if (!candidateVersion) return body;            // unknown — fall back to full
+  const candUp = upstreamOf(candidateVersion);
+  const lines = body.split('\n');
+  const headerRe = /^\S+\s+\(([^)]+)\)/;
+  const keep = []; let started = false;
+  for (const line of lines) {
+    const m = line.match(headerRe);
+    if (m) {
+      const up = upstreamOf(m[1]);
+      if (up === candUp) started = true;
+      else if (started) break;                   // moved past the candidate's blocks
+    }
+    if (started) keep.push(line);
+  }
+  return keep.length ? keep.join('\n') : body;
 }
 
 export function createUpdatesCollector({ updatesRepo } = {}) {
@@ -49,7 +68,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
   // Inspect a single candidate changelog's security signals (called lazily
   // from the changelog endpoint). Returns and persists the tag.
   function tagSecurityFromChangelog(pkg, candidate, changelogText) {
-    const head = firstEntry(changelogText);
+    const head = candidateWindow(changelogText, candidate);
     const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
     const um = head.match(/urgency=(\w+)/i);
     const urgency = um ? um[1].toLowerCase() : null;
@@ -103,7 +122,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
         // empty and are simply left untagged (user can download individually).
         const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
         if (r && r.changelog) {
-          const head = firstEntry(r.changelog);
+          const head = candidateWindow(r.changelog, r.candidateVersion);
           const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
           const um = head.match(/urgency=(\w+)/i);
           const urgency = um ? um[1].toLowerCase() : null;

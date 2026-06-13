@@ -1582,8 +1582,8 @@ pageRenderers.updates = (() => {
     rocket: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0zM12 15l-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8zM9 12H4s.5-3 2-4 5 0 5 0M12 15v5s3-.5 4-2 0-5 0-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
   };
-  const ACTION_BTN = (act, icon, label, cls = '') =>
-    `<button class="net-toggle up-btn ${cls}" data-up="${act}">${icon}<span>${label}</span></button>`;
+  const ACTION_BTN = (act, icon, label, cls = '', disabled = false) =>
+    `<button class="up-btn ${cls} ${disabled ? 'up-btn-dim' : ''}" data-up="${act}"${disabled ? ' disabled' : ''}>${icon}<span>${label}</span></button>`;
 
   let lastChecked = null;
   async function load(host) {
@@ -1626,11 +1626,10 @@ pageRenderers.updates = (() => {
 
     $('[data-up=actions]', host).innerHTML =
       ACTION_BTN('refresh', ICN.refresh, 'Check for updates')
-      + (sec ? ACTION_BTN('security', ICN.shield, 'Install security updates', 'up-act-sec') : '')
-      + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel')
-      + ACTION_BTN('full', ICN.rocket, 'Full upgrade…', 'up-act-danger')
-      + (fw ? ACTION_BTN('firmware', ICN.chip, 'Update firmware', 'up-act-fw') : '');
-    const selInit = $('[data-up=selected]', host); if (selInit) selInit.disabled = selected.size === 0;
+      + ACTION_BTN('security', ICN.shield, sec ? `Install security updates (${sec})` : 'No security updates', 'up-act-sec', !sec)
+      + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel', selected.size === 0)
+      + ACTION_BTN('full', ICN.rocket, 'Full upgrade…', 'up-act-danger', !updates.length)
+      + ACTION_BTN('firmware', ICN.chip, fw ? 'Update firmware' : 'Firmware up to date', 'up-act-fw', !fw);
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
@@ -1705,12 +1704,12 @@ pageRenderers.updates = (() => {
     host.querySelectorAll('.up-cb').forEach((cb) => cb.onclick = () => {
       if (cb.checked) selected.add(cb.dataset.pkg); else selected.delete(cb.dataset.pkg);
       const b = $('[data-up=selected]', host);
-      if (b) { b.disabled = selected.size === 0; const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
+      if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
     });
     host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
     host.querySelectorAll('[data-dlfull]').forEach((b) => b.onclick = () => downloadFullChangelog(host, b.dataset.dlfull));
     const b = $('[data-up=selected]', host);
-    if (b) { b.disabled = selected.size === 0; const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
+    if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
   }
 
   function downloadFullChangelog(host, pkg) {
