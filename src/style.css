@@ -5390,34 +5390,45 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sw-value.sw-value-xs { font-size: 17px; line-height: 1.2; }
 
 /* ---------------------------------------------------------------------------
-   Mobile / narrow viewport: a 12-column grid is unusable below ~760px (each
-   column is too thin and content scales tiny). Rather than use GridStack's
-   lossy column remap (which zeroed widths), we override the grid with CSS to
-   stack every widget full-width vertically. GridStack v11 positions items via
-   computed CSS from gs-* attributes, so neutralizing position/left/width here
-   makes them flow naturally.
+   Responsive fallback for narrow viewports. A fixed 12-column grid gets thin
+   and unreadable below ~1100px, but GridStack's own column remap zeroes widths.
+   So below 1100px we override the grid with CSS GRID (not GridStack): items go
+   position:static and auto-place in source order. Two tiers:
+     • 760–1100px  → 2 columns (tablet / resized window)
+     • < 760px     → 1 column  (phone)
+   GridStack v11 positions via computed CSS from gs-* attrs, so neutralizing
+   position/left/top/width/transform here lets the items flow into CSS grid.
    --------------------------------------------------------------------------- */
-@media (max-width: 760px) {
+@media (max-width: 1100px) {
+  body.layout-grid-active .container { max-width: 1100px; }
   body.layout-grid-active .rapisys-grid.grid-stack {
-    display: flex !important;
-    flex-direction: column !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
     height: auto !important;
     min-height: 0 !important;
   }
   body.layout-grid-active .rapisys-grid .grid-stack-item {
-    position: relative !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 100% !important;
-    height: auto !important;
-    min-height: 220px;
+    position: static !important;
+    left: auto !important; top: auto !important;
+    width: auto !important; height: auto !important;
+    min-height: 240px;
     transform: none !important;
-    margin-bottom: 12px;
+    inset: auto !important;
   }
-  /* content fills the stacked widget naturally; no scaling needed full-width */
-  body.layout-grid-active .rapisys-grid .gs-body[data-fit="scale"] .gs-scale {
-    transform: none !important;
-    width: 100% !important;
+  /* the content box must flow (it's absolute/inset:0 in the desktop grid) */
+  body.layout-grid-active .rapisys-grid .grid-stack-item-content {
+    position: static !important; inset: auto !important; height: 100%;
   }
+  /* full-width content in the cell; scale widgets don't shrink when given room */
   body.layout-grid-active .rapisys-grid .gs-body { align-items: stretch; }
+  body.layout-grid-active .rapisys-grid .gs-body[data-fit="scale"] .gs-scale {
+    transform: none !important; width: 100% !important;
+  }
 }
+@media (max-width: 760px) {
+  body.layout-grid-active .rapisys-grid.grid-stack {
+    grid-template-columns: 1fr;     /* phone → single column */
+  }
+}
+
