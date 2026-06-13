@@ -13,7 +13,20 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
     res.json(updates.cached());
   });
 
-  // apt-get update + fresh list.
+  // apt-get update + fresh list + security scan, streamed (SSE) with progress.
+  r.get('/refresh/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    try {
+      const out = await updates.refresh((p) => send('progress', p));
+      send('done', { count: out.updates?.length || 0, checkedAt: out.checkedAt });
+    } catch (err) { send('error', { message: err.message }); }
+    res.end();
+  });
+
+  // Non-streaming refresh (kept for scripts/automation).
   r.post('/refresh', requireControl, async (req, res) => {
     try { res.json(await updates.refresh()); }
     catch (err) { res.status(502).json({ error: err.message }); }

@@ -1644,7 +1644,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${esc(u.installed || '—')}</td>
             <td class="up-new">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
-            <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
+            <td>${u.security ? `<span class="up-tag up-tag-sec">security${u.cves ? ' · ' + u.cves + ' CVE' + (u.cves > 1 ? 's' : '') : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>
           ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="8"><div class="up-inline-log">${(() => {
@@ -1661,13 +1661,25 @@ pageRenderers.updates = (() => {
 
   function wireActions(host) {
     const refresh = $('[data-up=refresh]', host);
-    if (refresh) refresh.onclick = async () => {
+    if (refresh) refresh.onclick = () => {
+      if (streaming) { toast('info', 'Updates', 'A check is already running'); return; }
+      streaming = true;
       refresh.disabled = true; refresh.classList.add('up-btn-busy');
       refresh.innerHTML = '<span class="up-spinner-sm"></span><span>Checking…</span>';
-      $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>scanning apt…</span>';
-      $('[data-up=table]', host).innerHTML = '<div class="up-scanbar up-scanbar-active"><span></span></div><p class="sess-empty">Running apt-get update…</p>';
-      try { await api('/updates/refresh', { method: 'POST', body: {} }); await load(host); toast('success', 'Updates', 'Up-to-date check complete'); }
-      catch (e) { toast('error', 'Updates', e.message); render(host); }
+      const setProg = (label) => {
+        $('[data-up=chips]', host).innerHTML = `<span class="up-chip up-checking"><span class="up-spinner-sm"></span>${esc(label)}</span>`;
+        $('[data-up=table]', host).innerHTML = `<div class="up-scanbar up-scanbar-active"><span></span></div><p class="sess-empty">${esc(label)}</p>`;
+      };
+      setProg('Running apt-get update…');
+      const ev = new EventSource('/api/updates/refresh/stream');
+      ev.addEventListener('progress', (e) => {
+        const p = JSON.parse(e.data);
+        if (p.phase === 'apt-update') setProg('Running apt-get update…');
+        else if (p.phase === 'listing') setProg('Listing upgradable packages…');
+        else if (p.phase === 'scanning') setProg(`Scanning changelogs for security fixes… ${p.done || 0}/${p.total || '?'}${p.pkg ? ' (' + p.pkg + ')' : ''}`);
+      });
+      ev.addEventListener('done', async () => { ev.close(); streaming = false; await load(host); toast('success', 'Updates', 'Check complete'); });
+      ev.addEventListener('error', (e) => { let m = 'check failed'; try { m = JSON.parse(e.data).message; } catch { /* */ } ev.close(); streaming = false; toast('error', 'Updates', m); render(host); });
     };
     const sec = $('[data-up=security]', host);
     if (sec) sec.onclick = () => confirmUpgrade(host, { packages: updates.filter((u) => u.security).map((u) => u.package), label: 'security updates' });

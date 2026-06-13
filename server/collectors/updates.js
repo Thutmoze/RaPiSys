@@ -9,11 +9,28 @@
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
 export function createUpdatesCollector({ updatesRepo } = {}) {
-  async function refresh() {
-    // apt-get update (no stream needed here) then list; persist to cache.
+  async function refresh(onProgress) {
+    // apt-get update, list upgradable, then deep-scan each candidate
+    // changelog for security signals (RPi repo has no -security pocket).
     if (!agentConfigured()) return { available: false };
+    onProgress?.({ phase: 'apt-update' });
     await agentCall('apt.update', {}, null, 120000).catch(() => {});
+    onProgress?.({ phase: 'listing' });
     const { updates } = await agentCall('apt.listUpgradable', {}, null, 90000);
+    // deep security scan with progress
+    if (updates.length) {
+      onProgress?.({ phase: 'scanning', total: updates.length, done: 0 });
+      try {
+        const { result } = await agentCall('apt.securityScan',
+          { packages: updates.map((u) => u.package) },
+          (line) => { try { const p = JSON.parse(line); onProgress?.({ phase: 'scanning', total: p.total, done: p.progress, pkg: p.pkg }); } catch { /* */ } },
+          updates.length * 35000 + 30000);
+        for (const u of updates) {
+          const r = result[u.package];
+          if (r) { u.security = u.security || r.security; u.urgency = r.urgency; u.cves = r.cves || 0; }
+        }
+      } catch { /* keep pocket-based tags only */ }
+    }
     updatesRepo?.saveCache(updates);
     return { available: true, updates, checkedAt: Date.now() };
   }

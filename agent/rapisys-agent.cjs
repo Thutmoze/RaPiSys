@@ -698,7 +698,56 @@ WantedBy=multi-user.target
     }
     return { updates };
   },
-  async 'apt.changelog'({ pkg, candidate = false }) {
+  // Bulk security scan: download each candidate .deb, read its changelog top
+  // entry, and flag CVE / urgency=high / *-security. RPi-repo packages don't
+  // expose a -security pocket, so the changelog is the only reliable signal.
+  async 'apt.securityScan'({ packages = [] }, send) {
+    const zlib = require('zlib');
+    const result = {};
+    let done = 0;
+    for (const pkg of packages) {
+      if (!PKG_RE.test(pkg)) { result[pkg] = { security: false }; done++; continue; }
+      let security = false, urgency = null, cves = 0;
+      const tmp = `/tmp/rapisys-sec-${pkg}-${Date.now()}`;
+      try {
+        fs.mkdirSync(tmp, { recursive: true });
+        const dl = await run('apt-get', ['download', pkg], 30000, { cwd: tmp }).catch(() => ({ code: 1 }));
+        if (dl.code === 0) {
+          const deb = fs.readdirSync(tmp).find((f) => f.endsWith('.deb'));
+          if (deb) {
+            await run('dpkg-deb', ['-x', path.join(tmp, deb), path.join(tmp, 'x')], 15000).catch(() => {});
+            const docDir = path.join(tmp, 'x', 'usr', 'share', 'doc', pkg);
+            let text = '';
+            if (fs.existsSync(docDir)) {
+              for (const f of ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog']) {
+                const p = path.join(docDir, f);
+                if (fs.existsSync(p)) { const b = fs.readFileSync(p); text = f.endsWith('.gz') ? zlib.gunzipSync(b).toString('utf-8') : b.toString('utf-8'); break; }
+              }
+            }
+            // inspect only the FIRST (newest) entry — up to the 2nd header
+            const lines = text.split('\n');
+            let end = lines.length, seen = false;
+            for (let i = 0; i < lines.length; i++) {
+              if (/^\S.*\([^)]+\)\s/.test(lines[i])) { if (seen) { end = i; break; } seen = true; }
+            }
+            const head = lines.slice(0, end).join('\n');
+            const cveMatches = head.match(/CVE-\d{4}-\d+/g) || [];
+            cves = new Set(cveMatches).size;
+            const um = head.match(/urgency=(\w+)/i);
+            urgency = um ? um[1].toLowerCase() : null;
+            security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
+          }
+        }
+      } catch { /* leave defaults */ }
+      finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } }
+      result[pkg] = { security, urgency, cves };
+      done++;
+      send?.(JSON.stringify({ progress: done, total: packages.length, pkg, security }));
+    }
+    return { result };
+  },
+
+    async 'apt.changelog'({ pkg, candidate = false }) {
     assert(PKG_RE.test(pkg), 'invalid package name');
     const zlib = require('zlib');
     const readGz = (p) => { try { const b = fs.readFileSync(p); return p.endsWith('.gz') ? zlib.gunzipSync(b).toString('utf-8') : b.toString('utf-8'); } catch { return ''; } };
