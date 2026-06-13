@@ -1583,10 +1583,24 @@ pageRenderers.updates = (() => {
     rocket: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0zM12 15l-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8zM9 12H4s.5-3 2-4 5 0 5 0M12 15v5s3-.5 4-2 0-5 0-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
   };
-  // Escape, then wrap CVE ids and security markers in a red span so they pop.
+  // Escape, then color-code CVE ids, security markers, and urgency by severity.
   const hlSec = (s) => esc(s)
     .replace(/(CVE-\d{4}-\d+)/g, '<span class="up-cve">$1</span>')
-    .replace(/(trixie-security|-security;|urgency=(?:high|critical|emergency))/gi, '<span class="up-sec-mark">$1</span>');
+    .replace(/(trixie-security|-security;)/gi, '<span class="up-sec-mark">$1</span>')
+    .replace(/urgency=(\w+)/gi, (m, lvl) => {
+      const l = lvl.toLowerCase();
+      const cls = (l === 'high' || l === 'critical' || l === 'emergency') ? 'up-urg-high'
+        : l === 'medium' ? 'up-urg-medium'
+        : l === 'low' ? 'up-urg-low' : 'up-urg-other';
+      return `urgency=<span class="${cls}">${esc(lvl)}</span>`;
+    });
+  const urgBadge = (u) => {
+    if (!u) return '<span class="inv-dim">—</span>';
+    const l = String(u).toLowerCase();
+    const cls = (l === 'high' || l === 'critical' || l === 'emergency') ? 'up-urg-high'
+      : l === 'medium' ? 'up-urg-medium' : l === 'low' ? 'up-urg-low' : 'up-urg-other';
+    return `<span class="up-urg-badge ${cls}">${esc(l)}</span>`;
+  };
   const ACTION_BTN = (act, icon, label, cls = '', disabled = false) =>
     `<button class="up-btn ${cls} ${disabled ? 'up-btn-dim' : ''}" data-up="${act}"${disabled ? ' disabled' : ''}>${icon}<span>${label}</span></button>`;
 
@@ -1640,7 +1654,7 @@ pageRenderers.updates = (() => {
     $('[data-up=table]', host).innerHTML = updates.length ? `
       <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
       <table class="inv-table up-table">
-        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Last updated</th><th>Tags</th><th>Changelog</th></tr></thead>
+        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>Changelog</th></tr></thead>
         <tbody>${updates.map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
@@ -1650,14 +1664,15 @@ pageRenderers.updates = (() => {
             <td class="up-new">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
             <td>${u.security ? `<span class="up-tag up-tag-sec">security${u.cves ? ' · ' + u.cves + ' CVE' + (u.cves > 1 ? 's' : '') : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
+            <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>
-          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="8"><div class="up-inline-log">${(() => {
+          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="9"><div class="up-inline-log">${(() => {
             const c = logCache[u.package];
             if (c === undefined) return '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>';
             if (c.downloading) return `<div class="up-dl-prog"><div class="up-dl-row"><span class="up-spinner-sm"></span><span>Downloading package… ${c.pct || 0}%</span><span class="up-dl-meta">${c.mb || '0.0'} / ${c.totalMb || '?'} MB · ${c.elapsed || '0'}s</span></div><div class="up-scanbar"><span style="width:${c.pct || 0}%;margin-left:0;animation:none;background:var(--accent-cyan)"></span></div></div>`;
-            if (c.needsFull) return `<div class="up-needfull"><p>This package is large, so the new-version changelog needs a full download. The notes below are for the <b>installed</b> version.</p><button class="net-toggle up-dl-btn" data-dlfull="${esc(u.package)}">${ICN.download}<span>Download new changelog</span></button><pre class="up-log-text" style="margin-top:10px">${esc(c.rest || '')}</pre></div>`;
-            if (c.plain) return `<pre class="up-log-text">${esc(c.plain)}</pre>`;
+            if (c.needsFull) return `<div class="up-needfull"><p>This package is large, so the new-version changelog needs a full download. The notes below are for the <b>installed</b> version.</p><button class="net-toggle up-dl-btn" data-dlfull="${esc(u.package)}">${ICN.download}<span>Download new changelog</span></button><pre class="up-log-text" style="margin-top:10px">${hlSec(c.rest || '')}</pre></div>`;
+            if (c.plain) return `<pre class="up-log-text">${hlSec(c.plain)}</pre>`;
             return `${c.head ? `<div class="up-log-head">${esc(c.head)}</div>` : ''}`
               + `${c.newBlock ? `<pre class="up-log-new">${hlSec(c.newBlock)}</pre>` : ''}`
               + `${c.rest ? `<div class="up-log-older"><button class="up-link up-older-toggle" data-older="${esc(u.package)}">${oldExpanded.has(u.package) ? '▾ Hide older versions' : '▸ Show older versions'}</button>${oldExpanded.has(u.package) ? `<pre class="up-log-text">${hlSec(c.rest)}</pre>` : ''}</div>` : ''}`;
