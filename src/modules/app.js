@@ -1634,6 +1634,7 @@ pageRenderers.updates = (() => {
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
+      <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
       <table class="inv-table up-table">
         <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Last updated</th><th>Tags</th><th>Changelog</th></tr></thead>
         <tbody>${updates.map((u) => `
@@ -1650,6 +1651,8 @@ pageRenderers.updates = (() => {
           ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="8"><div class="up-inline-log">${(() => {
             const c = logCache[u.package];
             if (c === undefined) return '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>';
+            if (c.downloading) return `<div class="up-dl-prog"><div class="up-dl-row"><span class="up-spinner-sm"></span><span>Downloading package… ${c.pct || 0}%</span><span class="up-dl-meta">${c.mb || '0.0'} / ${c.totalMb || '?'} MB · ${c.elapsed || '0'}s</span></div><div class="up-scanbar"><span style="width:${c.pct || 0}%;margin-left:0;animation:none;background:var(--accent-cyan)"></span></div></div>`;
+            if (c.needsFull) return `<div class="up-needfull"><p>This package is large, so the new-version changelog needs a full download. The notes below are for the <b>installed</b> version.</p><button class="net-toggle up-dl-btn" data-dlfull="${esc(u.package)}">${ICN.download}<span>Download new changelog</span></button><pre class="up-log-text" style="margin-top:10px">${esc(c.rest || '')}</pre></div>`;
             if (c.plain) return `<pre class="up-log-text">${esc(c.plain)}</pre>`;
             return `${c.head ? `<div class="up-log-head">${esc(c.head)}</div>` : ''}`
               + `${c.newBlock ? `<pre class="up-log-new">${esc(c.newBlock)}</pre>` : ''}`
@@ -1667,8 +1670,10 @@ pageRenderers.updates = (() => {
       refresh.disabled = true; refresh.classList.add('up-btn-busy');
       refresh.innerHTML = '<span class="up-spinner-sm"></span><span>Checking…</span>';
       const setProg = (label) => {
-        $('[data-up=chips]', host).innerHTML = `<span class="up-chip up-checking"><span class="up-spinner-sm"></span>${esc(label)}</span>`;
-        $('[data-up=table]', host).innerHTML = `<div class="up-scanbar up-scanbar-active"><span></span></div><p class="sess-empty">${esc(label)}</p>`;
+        // single source of truth: a compact chip + the animated bar, no
+        // duplicated paragraph text underneath.
+        $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>working…</span>';
+        $('[data-up=table]', host).innerHTML = `<div class="up-scan-status"><div class="up-scanbar up-scanbar-active"><span></span></div><p class="up-scan-label">${esc(label)}</p></div>`;
       };
       setProg('Running apt-get update…');
       const ev = new EventSource('/api/updates/refresh/stream');
@@ -1703,8 +1708,40 @@ pageRenderers.updates = (() => {
       if (b) { b.disabled = selected.size === 0; const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
     });
     host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
+    host.querySelectorAll('[data-dlfull]').forEach((b) => b.onclick = () => downloadFullChangelog(host, b.dataset.dlfull));
     const b = $('[data-up=selected]', host);
     if (b) { b.disabled = selected.size === 0; const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
+  }
+
+  function downloadFullChangelog(host, pkg) {
+    const t0 = Date.now();
+    logCache[pkg] = { downloading: true, pct: 0, mb: '0.0', totalMb: '?', elapsed: '0' };
+    render(host);
+    const ev = new EventSource(`/api/updates/changelog/${encodeURIComponent(pkg)}/full/stream`);
+    ev.addEventListener('progress', (e) => {
+      const p = JSON.parse(e.data);
+      const c = logCache[pkg]; if (!c || !c.downloading) return;
+      c.pct = p.pct || 0;
+      c.mb = (p.downloaded / 1e6).toFixed(1);
+      c.totalMb = p.total ? (p.total / 1e6).toFixed(1) : '?';
+      c.elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+      if (expandedLog === pkg) render(host);
+    });
+    ev.addEventListener('done', (e) => {
+      ev.close();
+      const r = JSON.parse(e.data);
+      if (!r.changelog) { logCache[pkg] = { plain: r.error || 'No changelog available.' }; if (expandedLog === pkg) render(host); return; }
+      const ver = r.candidateVersion ? decodeURIComponent(r.candidateVersion) : null;
+      const body = r.changelog;
+      let newBlock = body, rest = '';
+      const lines = body.split('\n'); let splitAt = -1, seen = false;
+      for (let i = 0; i < lines.length; i++) { if (/^\S.*\([^)]+\)\s/.test(lines[i])) { if (seen) { splitAt = i; break; } seen = true; } }
+      if (splitAt > 0) { newBlock = lines.slice(0, splitAt).join('\n'); rest = lines.slice(splitAt).join('\n'); }
+      logCache[pkg] = { head: ver ? `▼ Changes in ${ver} (new version)` : '', newBlock, rest, plain: '' };
+      if (r.security !== undefined) { const u = updates.find((x) => x.package === pkg); if (u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; } }
+      if (expandedLog === pkg) render(host);
+    });
+    ev.addEventListener('error', () => { ev.close(); logCache[pkg] = { plain: 'Download failed.' }; if (expandedLog === pkg) render(host); });
   }
 
   async function showChangelog(host, pkg) {
@@ -1715,6 +1752,12 @@ pageRenderers.updates = (() => {
     if (logCache[pkg] === undefined) {
       try {
         const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`);
+        // big package: quick fetch only returned the installed changelog.
+        if (r.source === 'installed' || (r.source === 'none')) {
+          logCache[pkg] = { needsFull: true, head: '', newBlock: '', rest: r.changelog || '', plain: '' };
+          if (expandedLog === pkg) render(host);
+          return;
+        }
         const ver = r.candidateVersion ? decodeURIComponent(r.candidateVersion) : null;
         // Split into the newest entry (the candidate's notes) and the rest.
         // dpkg changelog entries are separated by a blank line before the
@@ -1738,6 +1781,11 @@ pageRenderers.updates = (() => {
           head = "(showing installed version's changelog — new notes unavailable)";
         }
         logCache[pkg] = { head, newBlock, rest, plain: head ? '' : body };
+        // lazily learned security tag — reflect it in the row immediately
+        if (r.security !== undefined) {
+          const u = updates.find((x) => x.package === pkg);
+          if (u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; }
+        }
       }
       catch (e) { logCache[pkg] = { head: '', newBlock: '', rest: '', plain: 'Error: ' + e.message }; }
       if (expandedLog === pkg) render(host);

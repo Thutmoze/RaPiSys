@@ -15,6 +15,26 @@ export function createUpdatesRepo(db) {
     return { checkedAt: row.checkedAt, updates: JSON.parse(row.payload || '[]') };
   }
 
+  // Per-package security tags learned lazily from viewed changelogs.
+  db.exec(`CREATE TABLE IF NOT EXISTS update_sectags (package TEXT PRIMARY KEY, candidate TEXT, security INTEGER, cves INTEGER, urgency TEXT)`);
+  function saveSecurityTag(pkg, { candidate, security, cves, urgency }) {
+    db.prepare(`INSERT INTO update_sectags (package, candidate, security, cves, urgency) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, security=excluded.security, cves=excluded.cves, urgency=excluded.urgency`)
+      .run(pkg, candidate || null, security ? 1 : 0, cves || 0, urgency || null);
+    // also reflect into the cached list so the table updates on next load
+    try {
+      const c = getCache();
+      const u = c.updates.find((x) => x.package === pkg);
+      if (u) { u.security = !!security; u.cves = cves || 0; u.urgency = urgency || null; saveCache(c.updates); }
+    } catch { /* */ }
+  }
+  function getSecurityTags() {
+    const rows = db.prepare(`SELECT package, candidate, security, cves, urgency FROM update_sectags`).all();
+    const out = {};
+    for (const r of rows) out[r.package] = { candidate: r.candidate, security: !!r.security, cves: r.cves, urgency: r.urgency };
+    return out;
+  }
+
   function record({ ts, packageName, fromV, toV, result, log }) {
     db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log)
                 VALUES (?, ?, ?, ?, ?, ?)`)
@@ -28,5 +48,5 @@ export function createUpdatesRepo(db) {
     return db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log
                        FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
   }
-  return { record, recordBatch, recent, saveCache, getCache };
+  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags };
 }

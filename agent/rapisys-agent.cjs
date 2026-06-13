@@ -29,6 +29,8 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
 const { execFile, spawn } = require('child_process');
 
 const SOCKET_DIR = process.env.AGENT_SOCKET_DIR || '/run/rapisys';
@@ -698,53 +700,180 @@ WantedBy=multi-user.target
     }
     return { updates };
   },
-  // Bulk security scan: download each candidate .deb, read its changelog top
-  // entry, and flag CVE / urgency=high / *-security. RPi-repo packages don't
-  // expose a -security pocket, so the changelog is the only reliable signal.
-  async 'apt.securityScan'({ packages = [] }, send) {
-    const zlib = require('zlib');
-    const result = {};
-    let done = 0;
-    for (const pkg of packages) {
-      if (!PKG_RE.test(pkg)) { result[pkg] = { security: false }; done++; continue; }
-      let security = false, urgency = null, cves = 0;
-      const tmp = `/tmp/rapisys-sec-${pkg}-${Date.now()}`;
-      try {
-        fs.mkdirSync(tmp, { recursive: true });
-        const dl = await run('apt-get', ['download', pkg], 30000, { cwd: tmp }).catch(() => ({ code: 1 }));
-        if (dl.code === 0) {
-          const deb = fs.readdirSync(tmp).find((f) => f.endsWith('.deb'));
-          if (deb) {
-            await run('dpkg-deb', ['-x', path.join(tmp, deb), path.join(tmp, 'x')], 15000).catch(() => {});
-            const docDir = path.join(tmp, 'x', 'usr', 'share', 'doc', pkg);
-            let text = '';
+  // -- Partial changelog fetch over HTTP range requests -----------------------
+  // A .deb is an `ar` archive: [magic][debian-binary][control.tar.*][data.tar.*].
+  // The changelog lives in data.tar under ./usr/share/doc/<pkg>/. The RPi
+  // archive supports range requests, so we (1) probe the ar headers, (2) range-
+  // fetch just the data.tar member, (3) stream it through tar and stop as soon
+  // as the changelog is extracted — pulling a few MB instead of 100+ MB.
+  async 'apt.changelogRange'({ pkg }) {
+    assert(PKG_RE.test(pkg), 'invalid package name');
+
+    // 1) resolve the candidate .deb URL for THIS exact package (no download).
+    //    `apt-get download --print-uris` is empty on this archive, so use
+    //    install --reinstall --print-uris and pick the line whose filename
+    //    starts with "<pkg>_".
+    const piu = await run('apt-get', ['install', '--reinstall', '--print-uris', '-y', pkg], 20000).catch(() => ({ stdout: '' }));
+    let uri = null;
+    const re = new RegExp("'(https?://[^']+/(" + pkg.replace(/[.+]/g, '\\$&') + "_[^']+\\.deb))'");
+    const m = (piu.stdout || '').match(re);
+    if (m) uri = m[1];
+    if (!uri) return { changelog: '', source: 'none', error: 'could not resolve package URL' };
+
+    // Byte budget: stream at most this much of data.tar looking for the
+    // changelog. Cheap packages (docs early) finish in a few hundred KB;
+    // giants (chromium) whose docs sit late will hit the budget and bail.
+    const BYTE_BUDGET = 8 * 1024 * 1024;
+
+    const httpGet = (url, headers) => new Promise((resolve, reject) => {
+      const lib = url.startsWith('https') ? https : http;
+      const req = lib.get(url, { headers }, (res) => resolve(res));
+      req.on('error', reject);
+      req.setTimeout(20000, () => { req.destroy(new Error('http timeout')); });
+    });
+
+    // 2) probe first 2KB to read ar member headers
+    const head = await new Promise((resolve, reject) => {
+      httpGet(uri, { Range: 'bytes=0-2047' }).then((res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+        res.on('error', reject);
+      }).catch(reject);
+    }).catch(() => null);
+    if (!head || head.slice(0, 8).toString('ascii') !== '!<arch>\n') {
+      return { changelog: '', source: 'none', error: 'unexpected archive format' };
+    }
+    // parse members
+    let off = 8, dataMember = null;
+    while (off + 60 <= head.length) {
+      const name = head.slice(off, off + 16).toString('ascii').trim();
+      const size = parseInt(head.slice(off + 48, off + 58).toString('ascii').trim(), 10);
+      if (!Number.isFinite(size)) break;
+      const dataOff = off + 60;
+      if (name.startsWith('data.tar')) { dataMember = { name, size, dataOff }; break; }
+      off = dataOff + size + (size % 2);
+    }
+    if (!dataMember) return { changelog: '', source: 'none', error: 'data member not found' };
+
+    // 3) range-fetch the data.tar.* member, pipe through tar, extract only the
+    //    changelog, abort the moment it's written.
+    const comp = dataMember.name.split('.').pop(); // gz | xz | zst
+    const tmp = `/tmp/rapisys-clr-${pkg}-${Date.now()}`;
+    fs.mkdirSync(tmp, { recursive: true });
+    const docGlob = `./usr/share/doc/${pkg}/changelog*`;
+    const tarArgs = ['-x', '--ignore-command-error', '--warning=no-unknown-keyword',
+      '-C', tmp, '--wildcards', '--no-anchored', `usr/share/doc/${pkg}/changelog*`];
+    // choose tar decompress flag
+    if (comp === 'gz') tarArgs.unshift('-z');
+    else if (comp === 'xz') tarArgs.unshift('-J');
+    else if (comp === 'zst') tarArgs.unshift('--zstd');
+
+    const rangeEnd = dataMember.dataOff + dataMember.size - 1;
+    const result = await new Promise((resolve) => {
+      let settled = false;
+      const finish = (val) => { if (!settled) { settled = true; resolve(val); } };
+      httpGet(uri, { Range: `bytes=${dataMember.dataOff}-${rangeEnd}` }).then((res) => {
+        const tar = spawn('tar', tarArgs, { stdio: ['pipe', 'ignore', 'ignore'] });
+        let streamed = 0;
+        res.on('data', (d) => { streamed += d.length; if (streamed > BYTE_BUDGET) { try { res.destroy(); tar.kill('SIGTERM'); } catch {} } });
+        res.pipe(tar.stdin);
+        res.on('error', () => {});
+        tar.stdin.on('error', () => {});
+        // poll for the changelog file; once present, kill the stream early
+        const poll = setInterval(() => {
+          try {
+            const docDir = `${tmp}/usr/share/doc/${pkg}`;
             if (fs.existsSync(docDir)) {
-              for (const f of ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog']) {
-                const p = path.join(docDir, f);
-                if (fs.existsSync(p)) { const b = fs.readFileSync(p); text = f.endsWith('.gz') ? zlib.gunzipSync(b).toString('utf-8') : b.toString('utf-8'); break; }
+              const f = fs.readdirSync(docDir).find((n) => n.startsWith('changelog'));
+              if (f) {
+                clearInterval(poll);
+                res.destroy(); try { tar.kill('SIGTERM'); } catch {}
+                finish(`${docDir}/${f}`);
               }
             }
-            // inspect only the FIRST (newest) entry — up to the 2nd header
-            const lines = text.split('\n');
-            let end = lines.length, seen = false;
-            for (let i = 0; i < lines.length; i++) {
-              if (/^\S.*\([^)]+\)\s/.test(lines[i])) { if (seen) { end = i; break; } seen = true; }
-            }
-            const head = lines.slice(0, end).join('\n');
-            const cveMatches = head.match(/CVE-\d{4}-\d+/g) || [];
-            cves = new Set(cveMatches).size;
-            const um = head.match(/urgency=(\w+)/i);
-            urgency = um ? um[1].toLowerCase() : null;
-            security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
-          }
-        }
-      } catch { /* leave defaults */ }
-      finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } }
-      result[pkg] = { security, urgency, cves };
-      done++;
-      send?.(JSON.stringify({ progress: done, total: packages.length, pkg, security }));
+          } catch {}
+        }, 150);
+        tar.on('close', () => { clearInterval(poll);
+          // tar finished (whole member read) — check one last time
+          try {
+            const docDir = `${tmp}/usr/share/doc/${pkg}`;
+            const f = fs.existsSync(docDir) ? fs.readdirSync(docDir).find((n) => n.startsWith('changelog')) : null;
+            finish(f ? `${docDir}/${f}` : null);
+          } catch { finish(null); }
+        });
+        // hard cap so a pathological package can't hang the op
+        setTimeout(() => { try { res.destroy(); tar.kill('SIGKILL'); } catch {}; finish(null); }, 45000);
+      }).catch(() => finish(null));
+    });
+
+    let text = '';
+    if (result) {
+      try { const b = fs.readFileSync(result); text = result.endsWith('.gz') ? require('zlib').gunzipSync(b).toString('utf-8') : b.toString('utf-8'); } catch {}
     }
-    return { result };
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    if (!text) return { changelog: '', source: 'none', error: 'changelog not found in stream' };
+    // candidate version from the URL filename (epoch dropped, ~ and + encoded)
+    let candidateVersion = null;
+    const fnm = uri.split('/').pop().match(/_([^_]+)_/);
+    if (fnm) candidateVersion = decodeURIComponent(fnm[1]).replace(/%7e/gi, '~').replace(/%2b/gi, '+');
+    return { changelog: text.split('\n').slice(0, 150).join('\n'), source: 'candidate', candidateVersion, partial: true };
+  },
+
+    // Full-download changelog fetch WITH progress (for packages whose docs sit
+  // past the range-fetch budget, e.g. chromium @ 114MB). Streams the .deb,
+  // emitting {downloaded,total,pct} lines, then extracts the changelog.
+  async 'apt.changelogFull'({ pkg }, send) {
+    assert(PKG_RE.test(pkg), 'invalid package name');
+    const piu = await run('apt-get', ['install', '--reinstall', '--print-uris', '-y', pkg], 20000).catch(() => ({ stdout: '' }));
+    const re = new RegExp("'(https?://[^']+/(" + pkg.replace(/[.+]/g, '\\$&') + "_[^']+\\.deb))'");
+    const m = (piu.stdout || '').match(re);
+    if (!m) return { changelog: '', source: 'none', error: 'could not resolve package URL' };
+    const uri = m[1];
+
+    const tmp = `/tmp/rapisys-clf-${pkg}-${Date.now()}`;
+    fs.mkdirSync(tmp, { recursive: true });
+    const debPath = path.join(tmp, 'pkg.deb');
+
+    const ok = await new Promise((resolve) => {
+      const lib = uri.startsWith('https') ? https : http;
+      const req = lib.get(uri, (res) => {
+        if (res.statusCode !== 200) { res.destroy(); return resolve(false); }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        const out = fs.createWriteStream(debPath);
+        let got = 0, lastPct = -1;
+        res.on('data', (d) => {
+          got += d.length;
+          const pct = total ? Math.floor((got / total) * 100) : 0;
+          if (pct !== lastPct) { lastPct = pct; send?.(JSON.stringify({ downloaded: got, total, pct })); }
+        });
+        res.pipe(out);
+        out.on('finish', () => resolve(true));
+        out.on('error', () => resolve(false));
+        res.on('error', () => resolve(false));
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(180000, () => { req.destroy(); resolve(false); });
+    });
+
+    let text = '';
+    if (ok) {
+      // extract just the changelog from the downloaded .deb
+      await run('dpkg-deb', ['-x', debPath, path.join(tmp, 'x')], 60000).catch(() => {});
+      const docDir = path.join(tmp, 'x', 'usr', 'share', 'doc', pkg);
+      if (fs.existsSync(docDir)) {
+        for (const f of ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog']) {
+          const p = path.join(docDir, f);
+          if (fs.existsSync(p)) { const b = fs.readFileSync(p); text = f.endsWith('.gz') ? require('zlib').gunzipSync(b).toString('utf-8') : b.toString('utf-8'); break; }
+        }
+      }
+    }
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+    if (!text) return { changelog: '', source: 'none', error: 'changelog not found' };
+    let candidateVersion = null;
+    const fnm = uri.split('/').pop().match(/_([^_]+)_/);
+    if (fnm) candidateVersion = decodeURIComponent(fnm[1]).replace(/%7e/gi, '~').replace(/%2b/gi, '+');
+    return { changelog: text.split('\n').slice(0, 150).join('\n'), source: 'candidate', candidateVersion };
   },
 
     async 'apt.changelog'({ pkg, candidate = false }) {

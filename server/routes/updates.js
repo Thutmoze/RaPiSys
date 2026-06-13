@@ -39,9 +39,35 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
 
   // Changelog for a package.
   r.get('/changelog/:pkg', async (req, res) => {
-    // candidate=1 (default) extracts the NEW version's notes from its .deb
+    // candidate=1 (default) extracts the NEW version's notes (range-fetch).
     const candidate = req.query.candidate !== '0';
-    res.json(await updates.changelog(req.params.pkg, candidate));
+    const out = await updates.changelog(req.params.pkg, candidate);
+    if (out.source === 'candidate' && out.changelog) {
+      try {
+        const tag = updates.tagSecurityFromChangelog(req.params.pkg, out.candidateVersion, out.changelog);
+        out.security = tag.security; out.cves = tag.cves; out.urgency = tag.urgency;
+      } catch { /* */ }
+    }
+    res.json(out);
+  });
+
+  // SSE changelog with download progress — used when the quick fetch returned
+  // only the installed-version changelog (big package: docs past the budget).
+  r.get('/changelog/:pkg/full/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const pkg = req.params.pkg;
+    send('start', { pkg });
+    try {
+      const out = await updates.changelogFull(pkg, (p) => send('progress', p));
+      if (out.source === 'candidate' && out.changelog) {
+        try { const tag = updates.tagSecurityFromChangelog(pkg, out.candidateVersion, out.changelog); out.security = tag.security; out.cves = tag.cves; out.urgency = tag.urgency; } catch { /* */ }
+      }
+      send('done', out);
+    } catch (err) { send('error', { message: err.message }); }
+    res.end();
   });
 
   // Update history.

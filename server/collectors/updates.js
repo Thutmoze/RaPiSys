@@ -8,31 +8,55 @@
 
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
+// Up to the second dpkg changelog header = the newest (candidate) entry.
+function firstEntry(text) {
+  const lines = String(text || '').split('\n');
+  let end = lines.length, seen = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\S.*\([^)]+\)\s/.test(lines[i])) { if (seen) { end = i; break; } seen = true; }
+  }
+  return lines.slice(0, end).join('\n');
+}
+
 export function createUpdatesCollector({ updatesRepo } = {}) {
   async function refresh(onProgress) {
-    // apt-get update, list upgradable, then deep-scan each candidate
-    // changelog for security signals (RPi repo has no -security pocket).
+    // Fast refresh: apt-get update + list. Security is detected lazily when a
+    // changelog is viewed (the RPi repo offers no -security pocket and no
+    // standalone changelog URL — the only source is the 100MB+ package, so we
+    // never bulk-download). Known security tags are re-applied from cache.
     if (!agentConfigured()) return { available: false };
     onProgress?.({ phase: 'apt-update' });
     await agentCall('apt.update', {}, null, 120000).catch(() => {});
     onProgress?.({ phase: 'listing' });
     const { updates } = await agentCall('apt.listUpgradable', {}, null, 90000);
-    // deep security scan with progress
-    if (updates.length) {
-      onProgress?.({ phase: 'scanning', total: updates.length, done: 0 });
-      try {
-        const { result } = await agentCall('apt.securityScan',
-          { packages: updates.map((u) => u.package) },
-          (line) => { try { const p = JSON.parse(line); onProgress?.({ phase: 'scanning', total: p.total, done: p.progress, pkg: p.pkg }); } catch { /* */ } },
-          updates.length * 35000 + 30000);
-        for (const u of updates) {
-          const r = result[u.package];
-          if (r) { u.security = u.security || r.security; u.urgency = r.urgency; u.cves = r.cves || 0; }
-        }
-      } catch { /* keep pocket-based tags only */ }
+    // carry forward known tags (skip re-scan when candidate unchanged)
+    const known = updatesRepo?.getSecurityTags?.() || {};
+    const toScan = [];
+    for (const u of updates) {
+      const k = known[u.package];
+      if (k && k.candidate === u.candidate) { u.security = u.security || k.security; u.cves = k.cves; u.urgency = k.urgency; }
+      else toScan.push(u.package);
+    }
+    // deep security scan via partial range-fetch (cheap now)
+    if (toScan.length) {
+      onProgress?.({ phase: 'scanning', total: toScan.length, done: 0 });
+      const res = await securityScan(toScan, (p) => onProgress?.({ phase: 'scanning', total: p.total, done: p.done, pkg: p.pkg }));
+      for (const u of updates) { const r = res[u.package]; if (r) { u.security = u.security || r.security; u.cves = r.cves; u.urgency = r.urgency; } }
     }
     updatesRepo?.saveCache(updates);
     return { available: true, updates, checkedAt: Date.now() };
+  }
+
+  // Inspect a single candidate changelog's security signals (called lazily
+  // from the changelog endpoint). Returns and persists the tag.
+  function tagSecurityFromChangelog(pkg, candidate, changelogText) {
+    const head = firstEntry(changelogText);
+    const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
+    const um = head.match(/urgency=(\w+)/i);
+    const urgency = um ? um[1].toLowerCase() : null;
+    const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
+    updatesRepo?.saveSecurityTag?.(pkg, { candidate, security, cves, urgency });
+    return { security, cves, urgency };
   }
 
   function cached() {
@@ -51,7 +75,48 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
 
   async function changelog(pkg, candidate = true) {
     if (!agentConfigured()) return { changelog: 'agent unavailable' };
-    return agentCall('apt.changelog', { pkg, candidate }, null, 45000);
+    if (candidate) {
+      // Try the partial range-fetch first (a few hundred KB for most packages).
+      try {
+        const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
+        if (r && r.changelog) return r;
+      } catch { /* fall through */ }
+    }
+    // local installed changelog (no new-version notes, but instant)
+    return agentCall('apt.changelog', { pkg, candidate: false }, null, 30000);
+  }
+
+  // Full download with progress (for big packages whose docs are past budget).
+  async function changelogFull(pkg, onProgress) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('apt.changelogFull', { pkg },
+      (line) => { try { onProgress?.(JSON.parse(line)); } catch { /* */ } }, 200000);
+  }
+
+  // Bulk security scan, now cheap thanks to range-fetched changelogs.
+  async function securityScan(packages, onProgress) {
+    if (!agentConfigured()) return {};
+    const out = {};
+    let done = 0;
+    for (const pkg of packages) {
+      try {
+        // range-fetch only — cheap. Giants whose docs are past budget return
+        // empty and are simply left untagged (user can download individually).
+        const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
+        if (r && r.changelog) {
+          const head = firstEntry(r.changelog);
+          const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
+          const um = head.match(/urgency=(\w+)/i);
+          const urgency = um ? um[1].toLowerCase() : null;
+          const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
+          out[pkg] = { security, cves, urgency };
+          updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency });
+        }
+      } catch { /* skip */ }
+      done++;
+      onProgress?.({ done, total: packages.length, pkg });
+    }
+    return out;
   }
 
   async function firmware() {
@@ -72,5 +137,5 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     return agentCall('eeprom.update', {}, onLine, 300000);
   }
 
-  return { refresh, cached, list, changelog, firmware, upgrade, firmwareUpdate };
+  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, firmwareUpdate };
 }
