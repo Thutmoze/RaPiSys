@@ -1594,6 +1594,33 @@ pageRenderers.updates = (() => {
         : l === 'low' ? 'up-urg-low' : 'up-urg-other';
       return `urgency=<span class="${cls}">${esc(lvl)}</span>`;
     });
+  // Client-side Debian version compare (mirror of the server's) so the changelog
+  // split is consistent: everything NEWER than installed = the new block.
+  function cParseVer(v){v=String(v||'').trim();let e=null;const ci=v.indexOf(':');if(ci>=0){e=parseInt(v.slice(0,ci),10)||0;v=v.slice(ci+1);}let up=v,rev='';const di=v.lastIndexOf('-');if(di>=0){up=v.slice(0,di);rev=v.slice(di+1);}return{epoch:e,upstream:up,revision:rev};}
+  function cCmpPart(a,b){a=a||'';b=b||'';let i=0,j=0;while(i<a.length||j<b.length){let nd='',md='';while(i<a.length&&!/\d/.test(a[i]))nd+=a[i++];while(j<b.length&&!/\d/.test(b[j]))md+=b[j++];if(nd!==md){for(let k=0;k<Math.max(nd.length,md.length);k++){const ca=nd[k]||'',cb=md[k]||'';if(ca===cb)continue;if(ca==='~')return -1;if(cb==='~')return 1;const oa=ca===''?0:(/[a-zA-Z]/.test(ca)?ca.charCodeAt(0):ca.charCodeAt(0)+256);const ob=cb===''?0:(/[a-zA-Z]/.test(cb)?cb.charCodeAt(0):cb.charCodeAt(0)+256);return oa<ob?-1:1;}}let na='',ma='';while(i<a.length&&/\d/.test(a[i]))na+=a[i++];while(j<b.length&&/\d/.test(b[j]))ma+=b[j++];const ia=parseInt(na||'0',10),ib=parseInt(ma||'0',10);if(ia!==ib)return ia<ib?-1:1;}return 0;}
+  function cVercmp(x,y,de){const a=cParseVer(x),b=cParseVer(y);const ea=a.epoch==null?de:a.epoch;const eb=b.epoch==null?de:b.epoch;if(ea!==eb)return ea<eb?-1:1;const u=cCmpPart(a.upstream,b.upstream);if(u)return u;return cCmpPart(a.revision,b.revision);}
+
+  // Split a candidate changelog into the NEW block (entries newer than the
+  // installed version) and the OLD block (the rest). Applied to every package.
+  function splitChangelog(body, candidateVersion, installedVersion) {
+    const ver = candidateVersion;
+    const head = ver ? `▼ Changes in ${ver} (new version)` : '';
+    if (!installedVersion) return { head, newBlock: body, rest: '', plain: '' };
+    const candE = cParseVer(candidateVersion).epoch;
+    const instE = cParseVer(installedVersion).epoch;
+    const de = (candE != null ? candE : (instE != null ? instE : 0));
+    const lines = body.split('\n');
+    const re = /^\S+\s+\(([^)]+)\)/;
+    const newLines = [], oldLines = [];
+    let isNew = true;
+    for (const line of lines) {
+      const m = line.match(re);
+      if (m) isNew = cVercmp(m[1], installedVersion, de) > 0;
+      (isNew ? newLines : oldLines).push(line);
+    }
+    return { head, newBlock: newLines.join('\n').trim(), rest: oldLines.join('\n').trim(), plain: '' };
+  }
+
   const urgBadge = (u) => {
     if (!u) return '<span class="inv-dim">—</span>';
     const l = String(u).toLowerCase();
@@ -1823,28 +1850,9 @@ pageRenderers.updates = (() => {
           return;
         }
         const ver = r.candidateVersion ? decodeURIComponent(r.candidateVersion) : null;
-        // Split into the newest entry (the candidate's notes) and the rest.
-        // dpkg changelog entries are separated by a blank line before the
-        // next "pkg (version) ..." header; the first block is the newest.
-        const body = r.changelog || 'No changelog available.';
-        let head = '', newBlock = '', rest = body;
-        if (r.source === 'candidate' && ver) {
-          head = `▼ Changes in ${ver} (new version)`;
-          // first entry runs until the line starting a *second* "name (" header
-          const lines = body.split('\n');
-          let splitAt = -1, seenHeader = false;
-          for (let i = 0; i < lines.length; i++) {
-            if (/^\S.*\([^)]+\)\s/.test(lines[i])) {
-              if (seenHeader) { splitAt = i; break; }
-              seenHeader = true;
-            }
-          }
-          if (splitAt > 0) { newBlock = lines.slice(0, splitAt).join('\n'); rest = lines.slice(splitAt).join('\n'); }
-          else { newBlock = body; rest = ''; }
-        } else if (r.source === 'installed') {
-          head = "(showing installed version's changelog — new notes unavailable)";
-        }
-        logCache[pkg] = { head, newBlock, rest, plain: head ? '' : body };
+        const u = updates.find((x) => x.package === pkg);
+        const installed = u ? u.installed : null;
+        logCache[pkg] = splitChangelog(r.changelog || 'No changelog available.', ver, installed);
         // lazily learned security tag — reflect it in the row immediately
         if (r.security !== undefined) {
           const u = updates.find((x) => x.package === pkg);
