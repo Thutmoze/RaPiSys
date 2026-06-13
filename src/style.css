@@ -5225,7 +5225,11 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   background: var(--bg-card);
   border: 1px solid var(--border-color);
 }
-.rapisys-grid .gs-body { padding: 4px; }
+.rapisys-grid .gs-body { padding: 10px; }
+/* inner cards/sections keep a little internal padding so their rectangles
+   (service tiles, progress bars) don't sit flush against the cell border */
+.rapisys-grid .gs-scale > .card,
+.rapisys-grid .gs-scale > section { padding-right: 2px; }
 /* the inner card/section then becomes frameless (the cell provides the frame) */
 .rapisys-grid .gs-body > .card,
 .rapisys-grid .gs-body > section {
@@ -5363,3 +5367,14 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   color: var(--text-secondary); order: 99; padding-top: 6px;
   border-top: 1px solid var(--border-color); margin-top: 4px;
 }
+
+/* Top Processes: let the command column use the flexible (1fr) grid space it's
+   given instead of a hard 250px cap, and (in the grid) fill the widget height. */
+.process-cmd { max-width: none; }
+.rapisys-grid .processes-list { max-height: none; height: 100%; }
+.rapisys-grid .processes-section { height: 100%; display: flex; flex-direction: column; }
+.rapisys-grid .processes-section .processes-list { flex: 1; min-height: 0; }
+
+/* summary value font shrinks for longer text values (protocols, resolver) */
+.sw-value.sw-value-sm { font-size: 24px; }
+.sw-value.sw-value-xs { font-size: 17px; line-height: 1.2; }

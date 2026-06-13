@@ -103,15 +103,18 @@ export const SUMMARY_WIDGETS = [
     id: 'sum-domains', title: 'Top Domains', icon: iconGlobe, nav: '#/network',
     async load(elv) {
       const d = await getJSON('/api/network');
-      const doms = d.dns?.domains || [];
-      if (!doms.length) {
-        // no per-domain history (resolver doesn't expose it / logging off)
-        setBig(elv, '—', 'logging off');
-        setRow(elv, [['Resolver', shortResolver(d.dns?.resolver)]]);
+      const dns = d.dns || {};
+      const doms = dns.domains || [];
+      if (doms.length) {
+        setBig(elv, doms.length, 'domains');
+        setRow(elv, doms.slice(0, 3).map((x) => [x.domain, x.queries ?? '']));
         return;
       }
-      setBig(elv, doms.length, 'domains');
-      setRow(elv, doms.slice(0, 3).map((x) => [x.domain, x.queries ?? '']));
+      // No per-domain history available from this resolver (e.g. MagicDNS).
+      // Surface the resolver name as the headline — that's the useful info.
+      const resolver = shortResolver(dns.resolver);
+      setBig(elv, resolver, 'resolver');
+      setRow(elv, [['Per-domain', 'not logged']]);
     },
   },
 ];
@@ -132,7 +135,14 @@ async function getJSON(url) {
 function setBig(card, value, label, tone = '') {
   const v = card.querySelector('[data-sw=value]');
   const l = card.querySelector('[data-sw=label]');
-  if (v) { v.textContent = value; v.className = 'sw-value' + (tone ? ' sw-' + tone : ''); }
+  if (v) {
+    v.textContent = value;
+    v.className = 'sw-value' + (tone ? ' sw-' + tone : '');
+    // long text values (e.g. a resolver name) get a smaller font so they fit
+    const len = String(value).length;
+    v.classList.toggle('sw-value-sm', len > 6);
+    v.classList.toggle('sw-value-xs', len > 12);
+  }
   if (l) l.textContent = label;
 }
 function setRow(card, pairs) {
