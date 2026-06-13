@@ -16,20 +16,21 @@ import 'gridstack/dist/gridstack.min.css';
 import { SUMMARY_WIDGETS, buildSummaryCard } from './summary-widgets.js';
 
 export const OVERVIEW_WIDGETS = [
-  { id: 'cpu',        sel: '.cpu-card',          title: 'CPU Usage',     group: 'stats',   home: '.stats-grid' },
-  { id: 'memory',     sel: '.memory-card',       title: 'Memory',        group: 'stats',   home: '.stats-grid' },
-  { id: 'temp',       sel: '.temp-card',         title: 'Temperature',   group: 'stats',   home: '.stats-grid' },
-  { id: 'uptime',     sel: '.uptime-card',       title: 'Uptime & Load', group: 'stats',   home: '.stats-grid' },
-  { id: 'services',   sel: '.services-section',  title: 'Services',      group: 'section', home: 'main.dashboard' },
-  { id: 'containers', sel: '.containers-section',title: 'Containers',    group: 'section', home: 'main.dashboard' },
-  { id: 'wireguard',  sel: '.wireguard-section', title: 'WireGuard',     group: 'section', home: 'main.dashboard' },
-  { id: 'network',    sel: '.network-section',   title: 'Network',       group: 'section', home: 'main.dashboard' },
-  { id: 'processes',  sel: '.processes-section', title: 'Processes',     group: 'section', home: 'main.dashboard' },
-  { id: 'disk',       sel: '.disk-section',      title: 'Disk',          group: 'section', home: 'main.dashboard' },
+  { id: 'cpu',        sel: '.cpu-card',          title: 'CPU Usage',     group: 'stats',   home: '.stats-grid',    fit: 'scale' },
+  { id: 'memory',     sel: '.memory-card',       title: 'Memory',        group: 'stats',   home: '.stats-grid',    fit: 'scale' },
+  { id: 'temp',       sel: '.temp-card',         title: 'Temperature',   group: 'stats',   home: '.stats-grid',    fit: 'scale' },
+  { id: 'uptime',     sel: '.uptime-card',       title: 'Uptime & Load', group: 'stats',   home: '.stats-grid',    fit: 'scale' },
+  { id: 'services',   sel: '.services-section',  title: 'Services',      group: 'section', home: 'main.dashboard', fit: 'scroll' },
+  { id: 'containers', sel: '.containers-section',title: 'Containers',    group: 'section', home: 'main.dashboard', fit: 'scroll' },
+  { id: 'wireguard',  sel: '.wireguard-section', title: 'WireGuard',     group: 'section', home: 'main.dashboard', fit: 'scroll' },
+  { id: 'network',    sel: '.network-section',   title: 'Network',       group: 'section', home: 'main.dashboard', fit: 'scroll' },
+  { id: 'processes',  sel: '.processes-section', title: 'Processes',     group: 'section', home: 'main.dashboard', fit: 'scroll' },
+  { id: 'disk',       sel: '.disk-section',      title: 'Disk',          group: 'section', home: 'main.dashboard', fit: 'scale' },
   // Summary widgets (compact, opt-in via the editor). Each has a stable id and
   // selector pointing at its parked card; they default to a 3-col stat size.
+  // Simple content → scale to fit (no scrollbar).
   ...SUMMARY_WIDGETS.map((s) => ({
-    id: s.id, sel: `[data-sw-id="${s.id}"]`, title: s.title, group: 'stats', home: '#sw-parking', summary: true,
+    id: s.id, sel: `[data-sw-id="${s.id}"]`, title: s.title, group: 'stats', home: '#sw-parking', summary: true, fit: 'scale',
   })),
 ];
 const WById = Object.fromEntries(OVERVIEW_WIDGETS.map((w) => [w.id, w]));
@@ -90,6 +91,8 @@ function makeItem(widget, placement, { editable }) {
   }
   const body = document.createElement('div');
   body.className = 'gs-body';
+  const fit = widget.fit || 'scale';
+  body.dataset.fit = fit;
   const scale = document.createElement('div');
   scale.className = 'gs-scale';
   if (node.parentNode) node.parentNode.removeChild(node);
@@ -97,7 +100,7 @@ function makeItem(widget, placement, { editable }) {
   body.appendChild(scale);
   content.appendChild(body);
   item.appendChild(content);
-  observeScale(body, scale);
+  if (fit === 'scale') observeScale(body, scale);
   return item;
 }
 
@@ -108,22 +111,19 @@ const scaleObservers = new WeakMap();
 function observeScale(body, scale) {
   const apply = () => {
     const availW = body.clientWidth;
-    if (availW <= 0) return;
-    // Width-only scaling: give the content the full cell width, measure its real
-    // width (scrollWidth captures min-width content like a wide table), and
-    // scale DOWN only if it can't fit horizontally. Vertical overflow is NOT
-    // scaled — it scrolls within the widget at native size, so text stays
-    // readable instead of shrinking to fit a short cell.
+    const availH = body.clientHeight;
+    if (availW <= 0 || availH <= 0) return;
+    // 'scale' widgets hold simple content (a gauge, a number, a bar), so we
+    // scale to fit BOTH dimensions — no scrollbar, always fully visible.
     scale.style.transform = 'none';
     scale.style.width = `${availW}px`;
     scale.style.height = 'auto';
     const naturalW = Math.max(availW, scale.scrollWidth);
-    if (naturalW <= 0) return;
-    const s = Math.min(availW / naturalW, 1);   // never upscale
+    const naturalH = scale.scrollHeight;
+    if (naturalW <= 0 || naturalH <= 0) return;
+    const s = Math.min(availW / naturalW, availH / naturalH, 1);  // never upscale
     scale.style.width = `${naturalW}px`;
     scale.style.transform = s < 1 ? `scale(${s})` : 'none';
-    // when width-scaled, the block's laid-out height exceeds its visual height
-    // by 1/s; compensate so the scroll area matches what's actually shown.
     scale.style.transformOrigin = 'top center';
   };
   const ro = new ResizeObserver(() => requestAnimationFrame(apply));

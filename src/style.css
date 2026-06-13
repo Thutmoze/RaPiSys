@@ -5204,7 +5204,13 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   padding: 0;
 }
 /* the body hosts the scaled content; the natural-width block is set by JS */
-.rapisys-grid .gs-body { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; position: relative; display: flex; flex-direction: column; align-items: center; }
+/* the body hosts the content; behaviour depends on the widget's fit mode */
+.rapisys-grid .gs-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; align-items: center; }
+/* 'scale' widgets (gauge, number, bar): scale to fit, never scroll */
+.rapisys-grid .gs-body[data-fit="scale"] { overflow: hidden; }
+/* 'scroll' widgets (lists, tables): native size, scroll when too tall */
+.rapisys-grid .gs-body[data-fit="scroll"] { overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; align-items: stretch; }
+.rapisys-grid .gs-body[data-fit="scroll"] .gs-scale { width: 100% !important; transform: none !important; }
 .rapisys-grid .gs-scale > .card,
 .rapisys-grid .gs-scale > section {
   margin: 0; width: 100%; height: 100%;
