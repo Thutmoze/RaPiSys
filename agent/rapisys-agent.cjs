@@ -197,17 +197,17 @@ const OPS = {
   // ---- software inventory (read-only host inspection) ---------------------
   async 'inventory.packages'() {
     // dpkg-query: name, version, status, size, priority, essential, summary.
-    const fmt = '${Package}\t${Version}\t${Status}\t${Installed-Size}\t${Priority}\t${Essential}\t${binary:Summary}\n';
+    const fmt = '${Package}\t${Version}\t${Status}\t${Installed-Size}\t${Priority}\t${Essential}\t${Section}\t${binary:Summary}\n';
     const r = await run('dpkg-query', ['-W', `-f=${fmt}`], 15000).catch(() => ({ code: 1, stdout: '' }));
     if (r.code !== 0) return { packages: [] };
     const packages = [];
     for (const line of r.stdout.split('\n')) {
-      const [name, version, status, size, priority, essential, summary] = line.split('\t');
+      const [name, version, status, size, priority, essential, section, summary] = line.split('\t');
       if (!name || !/installed/.test(status || '')) continue;
       let installedAt = null;
       try { installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${name}.list`).mtimeMs); } catch { /* */ }
       packages.push({ name, version: version || '', installedAt, sizeKB: Number(size) || 0,
-        priority: priority || '', essential: essential === 'yes', description: summary || '' });
+        priority: priority || '', essential: essential === 'yes', section: section || '', description: summary || '' });
     }
     return { packages };
   },

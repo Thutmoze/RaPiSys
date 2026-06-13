@@ -2,12 +2,12 @@
 
 export function createInventoryRepo(db) {
   const upsert = db.prepare(`
-    INSERT INTO inventory (kind, name, version, installed_at, source, status, last_used, meta)
-    VALUES (@kind, @name, @version, @installedAt, @source, @status, @lastUsed, @meta)
+    INSERT INTO inventory (kind, name, version, installed_at, source, status, last_used, meta, category, priority, section)
+    VALUES (@kind, @name, @version, @installedAt, @source, @status, @lastUsed, @meta, @category, @priority, @section)
     ON CONFLICT(kind, name) DO UPDATE SET
       version=excluded.version, status=excluded.status, source=excluded.source,
       installed_at=COALESCE(excluded.installed_at, inventory.installed_at),
-      meta=excluded.meta`);
+      meta=excluded.meta, category=excluded.category, priority=excluded.priority, section=excluded.section`);
 
   /** Replace the whole inventory for the given kinds in one transaction. */
   const sync = db.transaction((items, kinds) => {
@@ -19,15 +19,19 @@ export function createInventoryRepo(db) {
         installedAt: it.installedAt ?? null, source: it.source ?? null,
         status: it.status ?? null, lastUsed: it.lastUsed ?? null,
         meta: it.meta ? JSON.stringify(it.meta) : null,
+        category: it.category ?? null, priority: it.meta?.priority ?? null, section: it.meta?.section ?? null,
       });
     }
   });
 
-  function search({ kind = null, q = '', limit = 50, offset = 0, sort = 'name' } = {}) {
+  function search({ kind = null, q = '', limit = 50, offset = 0, sort = 'name', category = null, priority = null, section = null } = {}) {
     const where = [];
     const args = [];
     if (kind) { where.push('kind = ?'); args.push(kind); }
-    if (q) { where.push('name LIKE ?'); args.push(`%${q}%`); }
+    if (category) { where.push('category = ?'); args.push(category); }
+    if (priority) { where.push('priority = ?'); args.push(priority); }
+    if (section) { where.push('section = ?'); args.push(section); }
+    if (q) { where.push('(name LIKE ? OR meta LIKE ?)'); args.push(`%${q}%`, `%${q}%`); }
     const wsql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const order = sort === 'installed' ? 'installed_at DESC NULLS LAST' : sort === 'status' ? 'status, name' : 'name';
     const total = db.prepare(`SELECT COUNT(*) AS n FROM inventory ${wsql}`).get(...args).n;
@@ -45,9 +49,20 @@ export function createInventoryRepo(db) {
     return out;
   }
 
+  function facets() {
+    const cat = db.prepare(`SELECT category, COUNT(*) n FROM inventory WHERE kind='package' AND category IS NOT NULL GROUP BY category`).all();
+    const pri = db.prepare(`SELECT priority, COUNT(*) n FROM inventory WHERE kind='package' AND priority IS NOT NULL AND priority!='' GROUP BY priority`).all();
+    const sec = db.prepare(`SELECT section, COUNT(*) n FROM inventory WHERE kind='package' AND section IS NOT NULL AND section!='' GROUP BY section ORDER BY n DESC LIMIT 20`).all();
+    return {
+      category: Object.fromEntries(cat.map((r) => [r.category, r.n])),
+      priority: Object.fromEntries(pri.map((r) => [r.priority, r.n])),
+      section: Object.fromEntries(sec.map((r) => [r.section, r.n])),
+    };
+  }
+
   function lastSync() {
     return db.prepare(`SELECT MAX(installed_at) AS t FROM inventory`).get()?.t || null;
   }
 
-  return { sync, search, counts, lastSync };
+  return { sync, search, counts, facets, lastSync };
 }

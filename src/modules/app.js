@@ -1391,6 +1391,8 @@ pageRenderers.reports = (() => {
 
 pageRenderers.inventory = (() => {
   let kind = 'package', q = '', offset = 0, total = 0;
+  let fCategory = '', fPriority = '', fSection = '';
+  let facetData = null;
   const LIMIT = 50;
   let searchTimer = null;
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1409,20 +1411,26 @@ pageRenderers.inventory = (() => {
     let s;
     try { s = await api('/inventory/summary'); } catch { return; }
     const c = s.counts || {};
+    facetData = s.facets || null;
+    renderFilters(host);
     $('[data-inv=chips]', host).innerHTML = `
       <button class="inv-chip ${kind === 'package' ? 'active' : ''}" data-inv-kind="package">Packages <b>${c.package || 0}</b></button>
       <button class="inv-chip ${kind === 'service' ? 'active' : ''}" data-inv-kind="service">Services <b>${c.service || 0}</b></button>
       <button class="inv-chip ${kind === 'container' ? 'active' : ''}" data-inv-kind="container">Containers <b>${c.container || 0}</b></button>`;
     host.querySelectorAll('[data-inv-kind]').forEach((b) => b.onclick = () => {
       kind = b.dataset.invKind; offset = 0;
+      fCategory = fPriority = fSection = '';
       host.querySelectorAll('[data-inv-kind]').forEach((x) => x.classList.toggle('active', x === b));
-      loadRows(host);
+      renderFilters(host); loadRows(host);
     });
   }
 
   async function loadRows(host) {
     let data;
     const params = new URLSearchParams({ kind, q, limit: LIMIT, offset });
+    if (fCategory) params.set('category', fCategory);
+    if (fPriority) params.set('priority', fPriority);
+    if (fSection) params.set('section', fSection);
     try { data = await api(`/inventory?${params}`); } catch { return; }
     total = data.total;
     const rows = data.rows;
@@ -1470,6 +1478,26 @@ pageRenderers.inventory = (() => {
     if (next) next.onclick = () => { offset += LIMIT; loadRows(host); };
   }
 
+  function renderFilters(host) {
+    const bar = $('[data-inv=filters]', host);
+    if (!bar) return;
+    if (kind !== 'package' || !facetData) { bar.innerHTML = ''; return; }
+    const opt = (obj, sel, allLabel) => `<option value="">${allLabel}</option>` +
+      Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
+        .map(([k, n]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(k)} (${n})</option>`).join('');
+    bar.innerHTML = `
+      <select class="inv-filter" data-filter="category">${opt(facetData.category, fCategory, 'All categories')}</select>
+      <select class="inv-filter" data-filter="priority">${opt(facetData.priority, fPriority, 'All priorities')}</select>
+      <select class="inv-filter" data-filter="section">${opt(facetData.section, fSection, 'All sections')}</select>
+      ${(fCategory || fPriority || fSection) ? '<button class="net-toggle" data-filter="clear">Clear</button>' : ''}`;
+    bar.querySelector('[data-filter=category]').onchange = (e) => { fCategory = e.target.value; offset = 0; loadRows(host); };
+    bar.querySelector('[data-filter=priority]').onchange = (e) => { fPriority = e.target.value; offset = 0; loadRows(host); };
+    bar.querySelector('[data-filter=section]').onchange = (e) => { fSection = e.target.value; offset = 0; loadRows(host); };
+    const clr = bar.querySelector('[data-filter=clear]');
+    if (clr) clr.onclick = () => { fCategory = fPriority = fSection = ''; offset = 0; renderFilters(host); loadRows(host); };
+    enhanceSelects(host);
+  }
+
   async function pkgRemove(host, name) {
     // simulate first to show the full cascade
     let sim;
@@ -1509,7 +1537,8 @@ pageRenderers.inventory = (() => {
           </div>
           <div class="card-body">
             <div class="inv-chips" data-inv="chips"></div>
-            <input class="inv-search" data-inv="search" placeholder="Search by name…" autocomplete="off">
+            <input class="inv-search" data-inv="search" placeholder="Search by name or description…" autocomplete="off">
+            <div class="inv-filters" data-inv="filters"></div>
             <div data-inv="table"></div>
             <div class="inv-pager" data-inv="pager"></div>
           </div>

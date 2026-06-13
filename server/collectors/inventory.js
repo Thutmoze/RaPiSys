@@ -33,7 +33,15 @@ export function createInventoryCollector() {
       return (packages || []).map((p) => ({
         kind: 'package', name: p.name, version: p.version,
         installedAt: p.installedAt, source: 'apt', status: 'installed',
-        meta: { sizeKB: p.sizeKB, description: p.description, priority: p.priority, essential: p.essential },
+        // Simple 3-bucket category derived from dpkg facets:
+        //  system  = essential or priority required/important
+        //  library = libs section or lib* name (and not system)
+        //  user    = everything else (optional/standard apps)
+        category: (p.essential || p.priority === 'required' || p.priority === 'important') ? 'system'
+          : (p.section === 'libs' || p.section === 'oldlibs' || /^lib/.test(p.name)) ? 'library'
+          : 'user',
+        meta: { sizeKB: p.sizeKB, description: p.description, priority: p.priority,
+          essential: p.essential, section: p.section },
       }));
     } catch { return []; }
   }
