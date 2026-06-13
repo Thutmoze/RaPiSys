@@ -38,13 +38,18 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
   });
 
   // Changelog for a package.
+  const installedOf = (pkg) => {
+    try { const c = updates.cached(); const u = (c.updates || []).find((x) => x.package === pkg); return u ? u.installed : null; }
+    catch { return null; }
+  };
+
   r.get('/changelog/:pkg', async (req, res) => {
     // candidate=1 (default) extracts the NEW version's notes (range-fetch).
     const candidate = req.query.candidate !== '0';
     const out = await updates.changelog(req.params.pkg, candidate);
     if (out.source === 'candidate' && out.changelog) {
       try {
-        const tag = updates.tagSecurityFromChangelog(req.params.pkg, out.candidateVersion, out.changelog);
+        const tag = updates.tagSecurityFromChangelog(req.params.pkg, out.candidateVersion, out.changelog, installedOf(req.params.pkg));
         out.security = tag.security; out.cves = tag.cves; out.urgency = tag.urgency;
       } catch { /* */ }
     }
@@ -63,7 +68,7 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
     try {
       const out = await updates.changelogFull(pkg, (p) => send('progress', p));
       if (out.source === 'candidate' && out.changelog) {
-        try { const tag = updates.tagSecurityFromChangelog(pkg, out.candidateVersion, out.changelog); out.security = tag.security; out.cves = tag.cves; out.urgency = tag.urgency; } catch { /* */ }
+        try { const tag = updates.tagSecurityFromChangelog(pkg, out.candidateVersion, out.changelog, installedOf(pkg)); out.security = tag.security; out.cves = tag.cves; out.urgency = tag.urgency; } catch { /* */ }
       }
       send('done', out);
     } catch (err) { send('error', { message: err.message }); }

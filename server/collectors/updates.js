@@ -8,32 +8,71 @@
 
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
-// Strip epoch ("8:") and debian revision ("-0+deb...") to get the upstream
-// version, e.g. "8:7.1.4-0+deb13u1+rpt1" -> "7.1.4".
-function upstreamOf(v) { return String(v || '').replace(/^\d+:/, '').replace(/-.*$/, ''); }
+// --- Debian version comparison (dpkg algorithm, sufficient subset) ----------
+function parseVer(v) {
+  v = String(v || '').trim();
+  let epoch = null; const ci = v.indexOf(':');   // null = epoch omitted in this string
+  if (ci >= 0) { epoch = parseInt(v.slice(0, ci), 10) || 0; v = v.slice(ci + 1); }
+  let upstream = v, revision = '';
+  const di = v.lastIndexOf('-');
+  if (di >= 0) { upstream = v.slice(0, di); revision = v.slice(di + 1); }
+  return { epoch, upstream, revision };
+}
+function cmpPart(a, b) {
+  a = a || ''; b = b || ''; let i = 0, j = 0;
+  while (i < a.length || j < b.length) {
+    let nd = '', md = '';
+    while (i < a.length && !/\d/.test(a[i])) nd += a[i++];
+    while (j < b.length && !/\d/.test(b[j])) md += b[j++];
+    if (nd !== md) {
+      for (let k = 0; k < Math.max(nd.length, md.length); k++) {
+        const ca = nd[k] || '', cb = md[k] || '';
+        if (ca === cb) continue;
+        if (ca === '~') return -1;
+        if (cb === '~') return 1;
+        const oa = ca === '' ? 0 : (/[a-zA-Z]/.test(ca) ? ca.charCodeAt(0) : ca.charCodeAt(0) + 256);
+        const ob = cb === '' ? 0 : (/[a-zA-Z]/.test(cb) ? cb.charCodeAt(0) : cb.charCodeAt(0) + 256);
+        return oa < ob ? -1 : 1;
+      }
+    }
+    let na = '', ma = '';
+    while (i < a.length && /\d/.test(a[i])) na += a[i++];
+    while (j < b.length && /\d/.test(b[j])) ma += b[j++];
+    const ia = parseInt(na || '0', 10), ib = parseInt(ma || '0', 10);
+    if (ia !== ib) return ia < ib ? -1 : 1;
+  }
+  return 0;
+}
+function vercmp(x, y, defaultEpoch = 0) {
+  const a = parseVer(x), b = parseVer(y);
+  // Changelog entry headers often omit the epoch; inherit the candidate's so
+  // an epoch-less security sub-block isn't mistaken for an older release.
+  const ea = a.epoch == null ? defaultEpoch : a.epoch;
+  const eb = b.epoch == null ? defaultEpoch : b.epoch;
+  if (ea !== eb) return ea < eb ? -1 : 1;
+  const u = cmpPart(a.upstream, b.upstream); if (u) return u;
+  return cmpPart(a.revision, b.revision);
+}
 
-// Return only the changelog entries belonging to the CANDIDATE version. The
-// changelog often holds several version blocks; security info for the update
-// lives in the candidate's own entries (incl. a following -security sub-entry),
-// NOT in older releases. We include all leading entries whose upstream version
-// matches the candidate's and stop at the first that differs.
-function candidateWindow(text, candidateVersion) {
+// Return only the changelog entries that are NEWER than the installed version.
+// This is the correct, uniform rule: a CVE/security marker only matters if it
+// belongs to a version you don't yet have. Entries at or below the installed
+// version describe fixes you already received (or never needed).
+function newerThanInstalledWindow(text, installedVersion, candidateVersion) {
   const body = String(text || '');
-  if (!candidateVersion) return body;            // unknown — fall back to full
-  const candUp = upstreamOf(candidateVersion);
+  if (!installedVersion) return body;            // unknown — fall back to full
+  const candEpoch = parseVer(candidateVersion || installedVersion).epoch || 0;
   const lines = body.split('\n');
   const headerRe = /^\S+\s+\(([^)]+)\)/;
-  const keep = []; let started = false;
+  const keep = [];
+  let include = true;
   for (const line of lines) {
     const m = line.match(headerRe);
-    if (m) {
-      const up = upstreamOf(m[1]);
-      if (up === candUp) started = true;
-      else if (started) break;                   // moved past the candidate's blocks
-    }
-    if (started) keep.push(line);
+    // entries that omit the epoch inherit the candidate's epoch for comparison
+    if (m) { include = vercmp(m[1], installedVersion, candEpoch) > 0; }
+    if (include) keep.push(line);
   }
-  return keep.length ? keep.join('\n') : body;
+  return keep.join('\n');
 }
 
 export function createUpdatesCollector({ updatesRepo } = {}) {
@@ -58,8 +97,10 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     // deep security scan via partial range-fetch (cheap now)
     if (toScan.length) {
       onProgress?.({ phase: 'scanning', total: toScan.length, done: 0 });
-      const res = await securityScan(toScan, (p) => onProgress?.({ phase: 'scanning', total: p.total, done: p.done, pkg: p.pkg }));
-      for (const u of updates) { const r = res[u.package]; if (r) { u.security = u.security || r.security; u.cves = r.cves; u.urgency = r.urgency; } }
+      const installedMap = {};
+      for (const u of updates) installedMap[u.package] = u.installed;
+      const res = await securityScan(toScan, installedMap, (p) => onProgress?.({ phase: 'scanning', total: p.total, done: p.done, pkg: p.pkg }));
+      for (const u of updates) { const r = res[u.package]; if (r) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; } }
     }
     updatesRepo?.saveCache(updates);
     return { available: true, updates, checkedAt: Date.now() };
@@ -67,8 +108,8 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
 
   // Inspect a single candidate changelog's security signals (called lazily
   // from the changelog endpoint). Returns and persists the tag.
-  function tagSecurityFromChangelog(pkg, candidate, changelogText) {
-    const head = candidateWindow(changelogText, candidate);
+  function tagSecurityFromChangelog(pkg, candidate, changelogText, installed) {
+    const head = newerThanInstalledWindow(changelogText, installed, candidate);
     const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
     const um = head.match(/urgency=(\w+)/i);
     const urgency = um ? um[1].toLowerCase() : null;
@@ -112,7 +153,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
   }
 
   // Bulk security scan, now cheap thanks to range-fetched changelogs.
-  async function securityScan(packages, onProgress) {
+  async function securityScan(packages, installedMap, onProgress) {
     if (!agentConfigured()) return {};
     const out = {};
     let done = 0;
@@ -122,7 +163,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
         // empty and are simply left untagged (user can download individually).
         const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
         if (r && r.changelog) {
-          const head = candidateWindow(r.changelog, r.candidateVersion);
+          const head = newerThanInstalledWindow(r.changelog, installedMap?.[pkg], r.candidateVersion);
           const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
           const um = head.match(/urgency=(\w+)/i);
           const urgency = um ? um[1].toLowerCase() : null;
