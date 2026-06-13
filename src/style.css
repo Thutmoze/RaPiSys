@@ -5189,6 +5189,60 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
    F6 — Dashboard layout
    Normal view renders natively (unchanged). A saved layout only reorders /
    hides widgets via CSS order + DOM order. GridStack styles load lazily with
-   the editor (phase b), so the normal view is untouched.
+   the editor, so the normal view is untouched. The styles below apply ONLY
+   while editing (body.layout-editing).
    =========================================================================== */
+body.layout-editing .rapisys-grid.grid-stack { background: transparent; }
+body.layout-editing .grid-stack-item-content {
+  inset: 0;
+  background: var(--bg-card);
+  border: 1px dashed var(--accent-cyan);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+body.layout-editing .gs-edit-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px; background: rgba(0, 212, 255, 0.08);
+  border-bottom: 1px solid var(--border-color); cursor: move;
+  flex-shrink: 0;
+}
+body.layout-editing .gs-edit-title { font-size: 12px; font-weight: 600; color: var(--accent-cyan); }
+body.layout-editing .gs-hide-btn {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 2px 6px; border-radius: 4px;
+}
+body.layout-editing .gs-hide-btn:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+/* the wrapped card/section fills the remaining item space, clipped while editing */
+body.layout-editing .grid-stack-item-content > .card,
+body.layout-editing .grid-stack-item-content > section {
+  flex: 1; margin: 0; width: 100%; min-height: 0; overflow: auto;
+}
+body.layout-editing .grid-stack-item-content > section { margin-bottom: 0; }
+/* GridStack resize handle visible in cyan */
+body.layout-editing .grid-stack-item > .ui-resizable-se { filter: hue-rotate(160deg); }
+
+/* The editing toolbar pinned to the bottom */
+.layout-toolbar {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px;
+  z-index: 1000; max-width: calc(100vw - 32px);
+}
+.layout-toolbar-inner {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  background: var(--bg-card); border: 1px solid var(--accent-cyan);
+  border-radius: 14px; padding: 10px 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); backdrop-filter: blur(12px);
+}
+.layout-toolbar-title { font-size: 12px; color: var(--text-secondary); }
+.layout-palette { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.layout-palette-label { font-size: 11px; color: var(--text-muted); }
+.layout-chip {
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  color: var(--text-secondary); font-size: 11px; padding: 4px 10px;
+  border-radius: 999px; cursor: pointer;
+}
+.layout-chip:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+.layout-toolbar-actions { display: flex; gap: 8px; }
 

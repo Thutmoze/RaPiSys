@@ -9,7 +9,7 @@
  * Everything reuses the existing design tokens (.card, --accent-*, glass).
  */
 
-import { initOverviewLayout } from './layout.js';
+import { initOverviewLayout, setToast as setLayoutToast } from './layout.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -2434,6 +2434,7 @@ async function maybeShowWizard() {
 
 window.addEventListener('DOMContentLoaded', () => {
   buildNav();
+  setLayoutToast(toast);
   window.addEventListener('hashchange', route);
   route();
   maybeShowWizard();
