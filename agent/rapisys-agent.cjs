@@ -226,7 +226,15 @@ const OPS = {
     return { sessions };
   },
 
-  async 'sessions.terminate'({ id }) {
+  async 'vnstat.json'({ iface }) {
+    const args = ['--json'];
+    if (iface && /^[a-zA-Z0-9._-]{1,32}$/.test(iface)) args.push('-i', iface);
+    const r = await run('vnstat', args, 8000).catch(() => ({ code: 127, stdout: '' }));
+    if (r.code !== 0 || !r.stdout.trim()) throw new Error('vnstat not available or no data');
+    return { output: r.stdout };
+  },
+
+    async 'sessions.terminate'({ id }) {
     assert(/^\d{1,8}$/.test(String(id)), 'invalid session id');
     const r = await run('loginctl', ['terminate-session', String(id)], 5000);
     assert(r.code === 0, `terminate failed: ${r.stderr || r.stdout || 'unknown'}`);

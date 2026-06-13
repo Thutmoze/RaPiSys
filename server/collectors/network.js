@@ -14,6 +14,7 @@
 import fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { agentCall, agentConfigured } from '../core/agent-client.js';
 
 const execFileAsync = promisify(execFile);
 const HOST_PROC = fs.existsSync('/host/proc') ? '/host/proc' : '/proc';
@@ -63,9 +64,17 @@ export function createNetworkCollector() {
   /** vnStat history for an interface (or default). */
   async function vnstat(iface = null) {
     try {
-      const args = ['--json'];
-      if (iface) args.push('-i', iface);
-      const { stdout } = await execFileAsync('vnstat', args, { timeout: 6000 });
+      // vnstat lives on the HOST (not in the container image), so prefer
+      // the agent; fall back to a local binary if one is ever present.
+      let stdout;
+      if (agentConfigured()) {
+        const r = await agentCall('vnstat.json', { iface }, null, 9000);
+        stdout = r.output;
+      } else {
+        const args = ['--json'];
+        if (iface) args.push('-i', iface);
+        ({ stdout } = await execFileAsync('vnstat', args, { timeout: 6000 }));
+      }
       const data = JSON.parse(stdout);
       const ifaces = (data.interfaces || []).filter((i) => !SKIP_IF.test(i.name));
       return {
