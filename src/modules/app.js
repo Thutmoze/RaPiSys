@@ -1868,9 +1868,9 @@ pageRenderers.updates = (() => {
       // newest = first section; expand it by default on first render
       if (activeIdx === null && sections.length) { activeIdx = 0; expanded.add(0); }
       const nav = sections.map((s, i) => {
-        const isNew = installed ? cVercmp(s.version, installed, de) > 0 : false;
+        const isNewest = i === 0;          // only the candidate's own entry is cyan
         const isActive = i === activeIdx;
-        return `<button class="up-cl-navitem ${isNew ? 'up-cl-nav-new' : ''} ${isActive ? 'up-cl-nav-active' : ''}" data-nav="${i}">${esc(s.version)}${isNew ? ' <span class="up-cl-newdot">●</span>' : ''}</button>`;
+        return `<button class="up-cl-navitem ${isNewest ? 'up-cl-nav-new' : ''} ${isActive ? 'up-cl-nav-active' : ''}" data-nav="${i}">${esc(s.version)}${isNewest ? ' <span class="up-cl-newdot">●</span>' : ''}</button>`;
       }).join('');
       const bodyHtml = sections.map((s, i) => {
         const isNew = installed && cVercmp(s.version, installed, de) > 0;

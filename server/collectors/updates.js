@@ -142,7 +142,18 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
   function cached() {
     if (!updatesRepo) return { available: false, updates: [], checkedAt: null };
     const c = updatesRepo.getCache();
-    return { available: c.checkedAt != null, updates: c.updates, checkedAt: c.checkedAt };
+    // Always merge the latest tags from update_sectags so the table reflects
+    // them even if they were computed/updated after the list was cached.
+    const tags = updatesRepo.getSecurityTags?.() || {};
+    const strip = (v) => String(v || '').replace(/^\d+:/, '');
+    const updates = (c.updates || []).map((u) => {
+      const t = tags[u.package];
+      if (t && (!t.candidate || strip(t.candidate) === strip(u.candidate))) {
+        return { ...u, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency };
+      }
+      return u;
+    });
+    return { available: c.checkedAt != null, updates, checkedAt: c.checkedAt };
   }
 
   async function list() {
