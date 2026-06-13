@@ -196,19 +196,64 @@ const OPS = {
   // ---- Login sessions via systemd-logind (Trixie dropped utmp) ------------
   // ---- software inventory (read-only host inspection) ---------------------
   async 'inventory.packages'() {
-    // dpkg-query: name, version, status; install time from the .list mtime.
-    const r = await run('dpkg-query', ['-W', '-f=${Package}\t${Version}\t${Status}\t${Installed-Size}\n'], 15000)
-      .catch(() => ({ code: 1, stdout: '' }));
+    // dpkg-query: name, version, status, size, priority, essential, summary.
+    const fmt = '${Package}\t${Version}\t${Status}\t${Installed-Size}\t${Priority}\t${Essential}\t${binary:Summary}\n';
+    const r = await run('dpkg-query', ['-W', `-f=${fmt}`], 15000).catch(() => ({ code: 1, stdout: '' }));
     if (r.code !== 0) return { packages: [] };
     const packages = [];
     for (const line of r.stdout.split('\n')) {
-      const [name, version, status, size] = line.split('\t');
+      const [name, version, status, size, priority, essential, summary] = line.split('\t');
       if (!name || !/installed/.test(status || '')) continue;
       let installedAt = null;
       try { installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${name}.list`).mtimeMs); } catch { /* */ }
-      packages.push({ name, version: version || '', installedAt, sizeKB: Number(size) || 0 });
+      packages.push({ name, version: version || '', installedAt, sizeKB: Number(size) || 0,
+        priority: priority || '', essential: essential === 'yes', description: summary || '' });
     }
     return { packages };
+  },
+
+  // ---- simulate + perform package removal (destructive, guarded) ----------
+  async 'inventory.removeSimulate'({ name }) {
+    assert(/^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,128}$/.test(name), 'invalid package name');
+    // refuse essential/required outright
+    const meta = await run('dpkg-query', ['-W', '-f=${Essential}\t${Priority}', name], 5000).catch(() => ({ stdout: '' }));
+    const [essential, priority] = (meta.stdout || '').split('\t');
+    if (essential === 'yes' || priority === 'required') {
+      return { allowed: false, reason: `${name} is ${essential === 'yes' ? 'an essential' : 'a required'} package and cannot be removed from here.` };
+    }
+    // simulate to capture the full cascade
+    const sim = await run('apt-get', ['-s', 'remove', name], 20000).catch((e) => ({ code: 1, stdout: '', stderr: String(e) }));
+    const removed = [];
+    for (const line of (sim.stdout || '').split('\n')) {
+      const m = line.match(/^Remv\s+(\S+)/);
+      if (m) removed.push(m[1]);
+    }
+    // guard: if the cascade would pull in protected packages, flag them
+    const protectedHits = [];
+    for (const pkg of removed) {
+      const pm = await run('dpkg-query', ['-W', '-f=${Essential}\t${Priority}', pkg], 3000).catch(() => ({ stdout: '' }));
+      const [e2, p2] = (pm.stdout || '').split('\t');
+      if (e2 === 'yes' || p2 === 'required' || p2 === 'important') protectedHits.push(pkg);
+    }
+    return { allowed: protectedHits.length === 0, removed, protectedHits,
+      reason: protectedHits.length ? `Removal would also remove protected package(s): ${protectedHits.join(', ')}` : null };
+  },
+
+  async 'inventory.remove'({ name, confirm }) {
+    assert(/^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,128}$/.test(name), 'invalid package name');
+    assert(confirm === name, 'confirmation mismatch');
+    // re-run the guard server-side (never trust the client)
+    const guard = await this['inventory.removeSimulate']({ name });
+    assert(guard.allowed, guard.reason || 'removal not allowed');
+    const r = await run('apt-get', ['remove', '-y', name], 120000);
+    return { ok: r.code === 0, log: (r.stdout || '') + (r.stderr || ''), removed: guard.removed };
+  },
+
+  async 'inventory.serviceControl'({ name, action }) {
+    assert(/^[a-zA-Z0-9@._\\-]{1,128}$/.test(name), 'invalid service');
+    assert(['stop', 'start', 'restart', 'disable', 'enable'].includes(action), 'invalid action');
+    const r = await run('systemctl', [action, `${name}.service`], 15000);
+    return { ok: r.code === 0, log: (r.stderr || r.stdout || '') };
   },
   async 'inventory.services'() {
     // systemd units: load/active/sub state + since-timestamp.

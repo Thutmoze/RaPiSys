@@ -42,7 +42,7 @@ async function api(path, opts = {}, retried = false) {
 // App-native confirm dialog (replaces window.confirm's browser chrome)
 // ---------------------------------------------------------------------------
 
-function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm' } = {}) {
+function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', html = false } = {}) {
   return new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay rconfirm-overlay');
     ov.innerHTML = `
@@ -53,7 +53,10 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm' } = 
           <button class="action-btn" data-rc="cancel">Cancel</button>
         </div>
       </div>`;
-    ov.querySelector('.rconfirm-msg').textContent = message;
+    // html:true is only ever passed our own escaped strings (names run
+    // through esc()); never raw user input.
+    if (html) ov.querySelector('.rconfirm-msg').innerHTML = message;
+    else ov.querySelector('.rconfirm-msg').textContent = message;
     ov.querySelector('[data-rc=ok]').textContent = confirmLabel;
     document.body.appendChild(ov);
     const done = (v) => { ov.remove(); resolve(v); };
@@ -1424,20 +1427,38 @@ pageRenderers.inventory = (() => {
     total = data.total;
     const rows = data.rows;
     const head = kind === 'package'
-      ? '<th>Package</th><th>Version</th><th>Size</th><th>Installed</th>'
+      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th></th>'
       : kind === 'service'
-      ? '<th>Service</th><th>Status</th><th>Description</th>'
-      : '<th>Container</th><th>Image</th><th>Status</th><th>Created</th>';
+      ? '<th>Service</th><th>Status</th><th>Description</th><th></th>'
+      : '<th>Container</th><th>Image</th><th>Status</th><th></th>';
 
     $('[data-inv=table]', host).innerHTML = rows.length ? `
       <table class="inv-table">
         <thead><tr>${head}</tr></thead>
         <tbody>${rows.map((r) => {
-          if (kind === 'package') return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.version)}</td><td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td></tr>`;
-          if (kind === 'service') return `<tr><td><b>${esc(r.name)}</b></td><td>${statusBadge('service', r.status)}</td><td class="inv-dim">${esc(r.meta?.description || '')}</td></tr>`;
-          return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim">${esc(r.meta?.image || r.source)}</td><td>${statusBadge('container', r.status)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td></tr>`;
+          const trash = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+          const stopIco = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>';
+          if (kind === 'package') {
+            const ess = r.meta?.essential || r.meta?.priority === 'required';
+            const btn = ess
+              ? `<span class="inv-protected" title="Essential/required — protected">protected</span>`
+              : `<button class="inv-act inv-act-danger" data-act="pkg-remove" data-name="${esc(r.name)}" title="Uninstall">${trash}</button>`;
+            return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td>${esc(r.version)}</td><td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-actions">${btn}</td></tr>`;
+          }
+          if (kind === 'service') {
+            const running = /active\/running/.test(r.status);
+            const btn = `<button class="inv-act" data-act="svc-toggle" data-name="${esc(r.name)}" data-action="${running ? 'stop' : 'start'}" title="${running ? 'Stop' : 'Start'}">${running ? stopIco : '▶'}</button>`;
+            return `<tr><td><b>${esc(r.name)}</b></td><td>${statusBadge('service', r.status)}</td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td class="inv-actions">${btn}</td></tr>`;
+          }
+          const btn = `<button class="inv-act inv-act-danger" data-act="ctr-remove" data-name="${esc(r.name)}" title="Remove container">${trash}</button>`;
+          return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim">${esc(r.meta?.image || r.source)}</td><td>${statusBadge('container', r.status)}</td><td class="inv-actions">${btn}</td></tr>`;
         }).join('')}</tbody>
       </table>` : '<p class="sess-empty">No matches.</p>';
+
+    // action handlers
+    host.querySelectorAll('[data-act=pkg-remove]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name));
+    host.querySelectorAll('[data-act=svc-toggle]').forEach((b) => b.onclick = () => svcToggle(host, b.dataset.name, b.dataset.action));
+    host.querySelectorAll('[data-act=ctr-remove]').forEach((b) => b.onclick = () => ctrRemove(host, b.dataset.name));
 
     const from = total ? offset + 1 : 0, to = Math.min(offset + LIMIT, total);
     $('[data-inv=pager]', host).innerHTML = `
@@ -1447,6 +1468,33 @@ pageRenderers.inventory = (() => {
     const prev = $('[data-inv=prev]', host), next = $('[data-inv=next]', host);
     if (prev) prev.onclick = () => { offset = Math.max(0, offset - LIMIT); loadRows(host); };
     if (next) next.onclick = () => { offset += LIMIT; loadRows(host); };
+  }
+
+  async function pkgRemove(host, name) {
+    // simulate first to show the full cascade
+    let sim;
+    try { sim = await api('/inventory/package/simulate', { method: 'POST', body: { name } }); }
+    catch (e) { toast('error', 'Inventory', e.message); return; }
+    if (!sim.allowed) { toast('error', 'Cannot remove', sim.reason || 'protected'); return; }
+    const others = (sim.removed || []).filter((p) => p !== name);
+    const msg = `Uninstall <b>${esc(name)}</b>?`
+      + (others.length ? `<br><br>This will also remove ${others.length} dependent package(s):<br><span class="inv-cascade">${others.map(esc).join(', ')}</span>` : '<br><br>No other packages are affected.');
+    if (!await rapisysConfirm(msg, { danger: true, confirmLabel: `Uninstall ${others.length ? `(${others.length + 1})` : ''}`.trim(), html: true })) return;
+    try {
+      await api('/inventory/package/remove', { method: 'POST', body: { name, confirm: name } });
+      toast('success', 'Inventory', `${name} removed`);
+      loadSummary(host); loadRows(host);
+    } catch (e) { toast('error', 'Inventory', e.message); }
+  }
+  async function svcToggle(host, name, action) {
+    if (!await rapisysConfirm(`${action === 'stop' ? 'Stop' : 'Start'} service <b>${esc(name)}</b>?`, { confirmLabel: action === 'stop' ? 'Stop' : 'Start', html: true, danger: action === 'stop' })) return;
+    try { await api('/inventory/service/control', { method: 'POST', body: { name, action } }); toast('success', 'Service', `${name} ${action}ed`); setTimeout(() => loadRows(host), 800); }
+    catch (e) { toast('error', 'Service', e.message); }
+  }
+  async function ctrRemove(host, name) {
+    if (!await rapisysConfirm(`Stop and remove container <b>${esc(name)}</b>?`, { danger: true, confirmLabel: 'Remove', html: true })) return;
+    try { await api('/inventory/container/remove', { method: 'POST', body: { name } }); toast('success', 'Container', `${name} removed`); loadSummary(host); loadRows(host); }
+    catch (e) { toast('error', 'Container', e.message); }
   }
 
   return {

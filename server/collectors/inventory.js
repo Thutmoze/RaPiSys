@@ -33,7 +33,7 @@ export function createInventoryCollector() {
       return (packages || []).map((p) => ({
         kind: 'package', name: p.name, version: p.version,
         installedAt: p.installedAt, source: 'apt', status: 'installed',
-        meta: { sizeKB: p.sizeKB },
+        meta: { sizeKB: p.sizeKB, description: p.description, priority: p.priority, essential: p.essential },
       }));
     } catch { return []; }
   }
@@ -70,11 +70,37 @@ export function createInventoryCollector() {
     catch { return {}; }
   }
 
+  async function removeSimulate(name) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('inventory.removeSimulate', { name }, null, 30000);
+  }
+  async function removePackage(name, confirm) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('inventory.remove', { name, confirm }, null, 130000);
+  }
+  async function serviceControl(name, action) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('inventory.serviceControl', { name, action }, null, 18000);
+  }
+  async function removeContainer(name) {
+    // stop + remove via Docker API
+    await new Promise((resolve) => {
+      const req = http.request({ socketPath: DOCKER_SOCK, path: `/containers/${name}/stop`, method: 'POST', timeout: 12000 }, () => resolve());
+      req.on('error', () => resolve()); req.on('timeout', () => { req.destroy(); resolve(); }); req.end();
+    });
+    return new Promise((resolve, reject) => {
+      const req = http.request({ socketPath: DOCKER_SOCK, path: `/containers/${name}`, method: 'DELETE', timeout: 12000 }, (res) => {
+        resolve({ ok: res.statusCode < 300, status: res.statusCode });
+      });
+      req.on('error', reject); req.on('timeout', () => { req.destroy(); reject(new Error('docker timeout')); }); req.end();
+    });
+  }
+
   /** Full inventory across all kinds. */
   async function collectAll() {
     const [pkgs, svcs, ctrs] = await Promise.all([packages(), services(), containers()]);
     return [...pkgs, ...svcs, ...ctrs];
   }
 
-  return { packages, services, containers, serviceDetail, collectAll };
+  return { packages, services, containers, serviceDetail, removeSimulate, removePackage, serviceControl, removeContainer, collectAll };
 }
