@@ -1690,20 +1690,10 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${esc(u.installed || '—')}</td>
             <td class="up-new">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
-            <td class="up-tags-cell">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
+            <td class="up-tags-cell up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td>${urgBadge(u.urgency)}</td>
-            <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
-          </tr>
-          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="9"><div class="up-inline-log">${(() => {
-            const c = logCache[u.package];
-            if (c === undefined) return '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>';
-            if (c.downloading) return `<div class="up-dl-prog"><div class="up-dl-row"><span class="up-spinner-sm"></span><span>Downloading package… ${c.pct || 0}%</span><span class="up-dl-meta">${c.mb || '0.0'} / ${c.totalMb || '?'} MB · ${c.elapsed || '0'}s</span></div><div class="up-scanbar"><span style="width:${c.pct || 0}%;margin-left:0;animation:none;background:var(--accent-cyan)"></span></div></div>`;
-            if (c.needsFull) return `<div class="up-needfull"><p>This package is large, so the new-version changelog needs a full download. The notes below are for the <b>installed</b> version.</p><button class="net-toggle up-dl-btn" data-dlfull="${esc(u.package)}">${ICN.download}<span>Download new changelog</span></button><pre class="up-log-text" style="margin-top:10px">${hlSec(c.rest || '')}</pre></div>`;
-            if (c.plain) return `<pre class="up-log-text">${hlSec(c.plain)}</pre>`;
-            return `${c.head ? `<div class="up-log-head">${esc(c.head)}</div>` : ''}`
-              + `${c.newBlock ? `<pre class="up-log-new">${hlSec(c.newBlock)}</pre>` : ''}`
-              + `${c.rest ? `<div class="up-log-older"><button class="up-link up-older-toggle" data-older="${esc(u.package)}">${oldExpanded.has(u.package) ? '▾ Hide older versions' : '▸ Show older versions'}</button>${oldExpanded.has(u.package) ? `<pre class="up-log-text">${hlSec(c.rest)}</pre>` : ''}</div>` : ''}`;
-          })()}</div></td></tr>` : ''}`).join('')}</tbody>
+            <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
+          </tr>`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
   }
@@ -1775,8 +1765,6 @@ pageRenderers.updates = (() => {
       if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
     });
     host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
-    host.querySelectorAll('[data-dlfull]').forEach((b) => b.onclick = () => downloadFullChangelog(host, b.dataset.dlfull));
-    host.querySelectorAll('[data-older]').forEach((b) => b.onclick = () => { const p = b.dataset.older; oldExpanded.has(p) ? oldExpanded.delete(p) : oldExpanded.add(p); render(host); });
     const b = $('[data-up=selected]', host);
     if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
   }
@@ -1835,32 +1823,113 @@ pageRenderers.updates = (() => {
     ev.addEventListener('error', () => { ev.close(); logCache[pkg] = { plain: 'Download failed.' }; if (expandedLog === pkg) render(host); });
   }
 
-  async function showChangelog(host, pkg) {
-    // toggle inline row directly under the clicked package
-    if (expandedLog === pkg) { expandedLog = null; oldExpanded.delete(pkg); render(host); return; }
-    expandedLog = pkg;
-    render(host);
-    if (logCache[pkg] === undefined) {
-      try {
-        const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`);
-        // big package: quick fetch only returned the installed changelog.
-        if (r.source === 'installed' || (r.source === 'none')) {
-          logCache[pkg] = { needsFull: true, head: '', newBlock: '', rest: r.changelog || '', plain: '' };
-          if (expandedLog === pkg) render(host);
-          return;
-        }
-        const ver = r.candidateVersion ? decodeURIComponent(r.candidateVersion) : null;
-        const u = updates.find((x) => x.package === pkg);
-        const installed = u ? u.installed : null;
-        logCache[pkg] = splitChangelog(r.changelog || 'No changelog available.', ver, installed);
-        // lazily learned security tag — reflect it in the row immediately
-        if (r.security !== undefined) {
-          const u = updates.find((x) => x.package === pkg);
-          if (u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; }
-        }
+  // Parse a changelog into version sections (header + body), newest first.
+  function parseSections(body) {
+    const lines = String(body || '').split('\n');
+    const re = /^(\S+)\s+\(([^)]+)\)\s+(\S+);\s*(.*)$/;
+    const sections = []; let cur = null;
+    for (const line of lines) {
+      const m = line.match(re);
+      if (m) { cur = { version: m[2], dist: m[3], meta: m[4], lines: [line] }; sections.push(cur); }
+      else if (cur) cur.lines.push(line);
+      else { cur = { version: '(header)', dist: '', meta: '', lines: [line] }; sections.push(cur); }
+    }
+    return sections;
+  }
+
+  function openChangelogModal(host, pkg, data, installed) {
+    // data: { changelog, candidateVersion, needsFull, error }
+    const ov = el('div', 'wizard-overlay up-cl-overlay');
+    const close = () => ov.remove();
+    const renderBody = () => {
+      if (data.error) return `<p class="up-cl-empty">${esc(data.error)}</p>`;
+      if (data.needsFull) {
+        return `<div class="up-cl-needfull">
+            <p>This package is large, so the new-version changelog isn't cached yet. The notes below are the <b>installed</b> version. Download the new package to see what's changing?</p>
+            <button class="up-btn up-act-fw" data-cl="dl">${ICN.download}<span>Download New Changelog</span></button>
+            <div class="up-cl-dlprog" data-cl="dlprog" style="display:none"></div>
+            <pre class="up-cl-pre">${hlSec(data.changelog || '')}</pre>
+          </div>`;
       }
-      catch (e) { logCache[pkg] = { head: '', newBlock: '', rest: '', plain: 'Error: ' + e.message }; }
-      if (expandedLog === pkg) render(host);
+      // split into version sections, build a jump-nav + highlighted body
+      const candE = parseVerEpoch(data.candidateVersion);
+      const instE = parseVerEpoch(installed);
+      const de = candE != null ? candE : (instE != null ? instE : 0);
+      const sections = parseSections(data.changelog);
+      const nav = sections.filter((s) => s.version !== '(header)').map((s, i) => {
+        const isNew = installed ? cVercmp(s.version, installed, de) > 0 : false;
+        return `<button class="up-cl-navitem ${isNew ? 'up-cl-nav-new' : ''}" data-jump="sec${i}">${esc(s.version)}${isNew ? ' <span class="up-cl-newdot">●</span>' : ''}</button>`;
+      }).join('');
+      const bodyHtml = sections.map((s, i) => {
+        const isNew = s.version !== '(header)' && installed && cVercmp(s.version, installed, de) > 0;
+        return `<div class="up-cl-sec ${isNew ? 'up-cl-sec-new' : ''}" id="sec${i}"><pre class="up-cl-pre ${isNew ? 'up-cl-pre-new' : ''}">${hlSec(s.lines.join('\n'))}</pre></div>`;
+      }).join('');
+      return `<div class="up-cl-layout">
+          <div class="up-cl-nav">${nav || '<span class="up-cl-empty">No versions</span>'}</div>
+          <div class="up-cl-content" data-cl="content">${bodyHtml}</div>
+        </div>`;
+    };
+    ov.innerHTML = `<div class="wizard card up-cl-modal">
+        <div class="up-cl-head">
+          <div><b>${esc(pkg)}</b> <span class="inv-dim">changelog</span>${data.candidateVersion ? ` <span class="up-cl-ver">→ ${esc(decodeURIComponent(data.candidateVersion))}</span>` : ''}</div>
+          <button class="up-link" data-cl="close">close ✕</button>
+        </div>
+        <div class="up-cl-main" data-cl="main">${data.changelog || data.needsFull || data.error ? renderBody() : '<div class="up-log-loading"><span class="up-spinner-sm"></span>Loading changelog…</div>'}</div>
+      </div>`;
+    document.body.appendChild(ov);
+    const wire = () => {
+      ov.querySelector('[data-cl=close]').onclick = close;
+      ov.querySelectorAll('[data-jump]').forEach((b) => b.onclick = () => {
+        const t = ov.querySelector('#' + b.dataset.jump);
+        if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      const dl = ov.querySelector('[data-cl=dl]');
+      if (dl) dl.onclick = () => downloadFullToModal(host, pkg, ov, installed);
+    };
+    wire();
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    // expose re-render for the download path
+    ov._rerender = (newData) => { Object.assign(data, newData); ov.querySelector('[data-cl=main]').innerHTML = renderBody(); wire(); };
+    return ov;
+  }
+
+  function parseVerEpoch(v) { const m = String(v || '').match(/^(\d+):/); return m ? parseInt(m[1], 10) : null; }
+
+  function downloadFullToModal(host, pkg, ov, installed) {
+    const prog = ov.querySelector('[data-cl=dlprog]');
+    const btn = ov.querySelector('[data-cl=dl]');
+    if (btn) btn.disabled = true;
+    if (prog) { prog.style.display = 'block'; prog.innerHTML = '<div class="up-dl-row"><span class="up-spinner-sm"></span><span>Starting…</span></div><div class="up-progbar"><span data-bar style="width:0%"></span></div>'; }
+    const t0 = Date.now();
+    const ev = new EventSource(`/api/updates/changelog/${encodeURIComponent(pkg)}/full/stream`);
+    ev.addEventListener('progress', (e) => {
+      const p = JSON.parse(e.data); const pct = p.pct || 0;
+      if (prog) { const bar = prog.querySelector('[data-bar]'); if (bar) bar.style.width = pct + '%';
+        prog.querySelector('span:last-of-type'); prog.querySelector('.up-dl-row').innerHTML = `<span class="up-spinner-sm"></span><span>${pct}% · ${(p.downloaded/1e6).toFixed(1)}/${p.total?(p.total/1e6).toFixed(1):'?'} MB · ${((Date.now()-t0)/1000).toFixed(0)}s</span>`; }
+    });
+    ev.addEventListener('done', (e) => {
+      ev.close(); const r = JSON.parse(e.data);
+      logCache[pkg] = undefined; // invalidate
+      const u = updates.find((x) => x.package === pkg);
+      if (r.security !== undefined && u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; render(host); }
+      if (ov._rerender) ov._rerender({ changelog: r.changelog, candidateVersion: r.candidateVersion, needsFull: false, error: r.changelog ? null : 'No changelog available.' });
+    });
+    ev.addEventListener('error', () => { ev.close(); if (prog) prog.innerHTML = '<span class="up-cl-empty">Download failed.</span>'; if (btn) btn.disabled = false; });
+  }
+
+  async function showChangelog(host, pkg) {
+    const u = updates.find((x) => x.package === pkg);
+    const installed = u ? u.installed : null;
+    // open modal immediately with a loading state
+    const ov = openChangelogModal(host, pkg, {}, installed);
+    try {
+      const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`);
+      if (r.security !== undefined && u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; render(host); }
+      const needsFull = (r.source === 'installed' || r.source === 'none');
+      ov._rerender({ changelog: r.changelog || 'No changelog available.', candidateVersion: r.candidateVersion, needsFull, error: null });
+    } catch (e) {
+      ov._rerender({ error: 'Error: ' + e.message });
     }
   }
 
