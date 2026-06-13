@@ -707,6 +707,10 @@ function createProcessesList(processes) {
       }
 
       processRowsMap.set(proc.pid, row);
+      // click the row to reveal the full (often truncated) command
+      row.addEventListener('click', () => {
+        row.classList.toggle('process-expanded');
+      });
       setTimeout(() => row.classList.remove('process-enter'), 300);
     }
   });

@@ -5339,3 +5339,10 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sw-stat-val.sw-ok { color: #10b981; }
 .sw-stat-val.sw-warn { color: #f59e0b; }
 .sw-stat-val.sw-crit { color: #ef4444; }
+
+/* Click a process row to reveal its full command (truncated by default) */
+.process-row { cursor: pointer; }
+.process-row.process-expanded .process-cmd {
+  overflow: visible; white-space: normal; word-break: break-all; max-width: none;
+  color: var(--text-secondary);
+}
