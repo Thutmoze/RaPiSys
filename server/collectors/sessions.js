@@ -70,6 +70,18 @@ function idleMsOf(tty) {
   } catch { return null; }
 }
 
+// Fallback idle for SSH sessions that registered no tty with logind:
+// read the leader process's controlling terminal from /proc/<pid>/stat.
+function idleMsOfPid(pid) {
+  try {
+    const stat = fs.readFileSync(path.join(HOST_PROC, String(pid), 'stat'), 'utf-8');
+    const ttyNr = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[4]);
+    if (!ttyNr) return null;
+    const minor = (ttyNr & 0xff) | ((ttyNr >> 12) & 0xfff00);
+    return idleMsOf(`pts/${minor}`);
+  } catch { return null; }
+}
+
 // ---------------------------------------------------------------------------
 
 export function createSessionsCollector() {
@@ -85,12 +97,16 @@ export function createSessionsCollector() {
         return sessions
           .filter((s) => s.type === 'tty' || s.remote)
           .map((s) => ({
-            kind: 'ssh',
-            key: `ssh:${s.user}:${s.tty || s.id}`,
+            // Local logins (seat/tty without a remote host) are the physical
+            // console, not SSH — label them so the UI can separate them.
+            kind: s.remote ? 'ssh' : 'console',
+            key: `${s.remote ? 'ssh' : 'console'}:${s.user}:${s.tty || s.id}`,
             username: s.user,
             source: s.remote ? (s.host || conns[0]?.peerIp || '') : 'local console',
             startedAt: s.startedAt,
-            idleMs: s.tty ? idleMsOf(s.tty) : null,
+            // idle from the pts/tty; for SSH sessions with no tty registered,
+            // fall back to the leader process's controlling terminal.
+            idleMs: s.tty ? idleMsOf(s.tty) : (s.pid ? idleMsOfPid(s.pid) : null),
             meta: { tty: s.tty, pid: s.pid, sessionId: s.id },
           }));
       } catch { /* fall back to utmp below */ }
@@ -165,8 +181,11 @@ export function createSessionsCollector() {
 
   /** Full snapshot: active SSH + VNC sessions and the Tailscale peer table. */
   async function snapshot() {
-    const [sshSessions, vncSessions, ts] = await Promise.all([ssh(), vnc(), tailscale()]);
-    return { ssh: sshSessions, vnc: vncSessions, tailscale: ts, ts: Date.now() };
+    const [allLocal, vncSessions, ts] = await Promise.all([ssh(), vnc(), tailscale()]);
+    // ssh() returns both remote (ssh) and physical (console) logins.
+    const sshSessions = allLocal.filter((s) => s.kind === 'ssh');
+    const consoleSessions = allLocal.filter((s) => s.kind === 'console');
+    return { ssh: sshSessions, console: consoleSessions, vnc: vncSessions, tailscale: ts, ts: Date.now() };
   }
 
   return { snapshot };

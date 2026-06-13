@@ -600,7 +600,15 @@ pageRenderers.sessions = (() => {
           p.online ? 'active now' : `last seen ${fmtTime(p.lastActive)}`,
         ])).join('') : '<p class="sess-empty">No peers in the tailnet</p>');
 
+    const consoleHtml = (snap.console || []).length
+      ? snap.console.map((s) => row4([
+          `<b>${esc(s.username)}</b> <span class="sess-tty">${esc(s.meta?.tty || '')}</span>`,
+          'physical console', s.startedAt ? fmtDur(now - s.startedAt) : '—',
+          s.idleMs != null ? `idle ${fmtDur(s.idleMs)}` : '—',
+        ])).join('')
+      : '<p class="sess-empty">No local console sessions</p>';
     $('[data-sess=ssh]', host).innerHTML = sshHtml;
+    if ($('[data-sess=console]', host)) $('[data-sess=console]', host).innerHTML = consoleHtml;
     $('[data-sess=vnc]', host).innerHTML = vncHtml;
     $('[data-sess=ts]', host).innerHTML = tsHtml;
     host.querySelectorAll('[data-kick]').forEach((b) => b.onclick = async () => {
@@ -643,6 +651,7 @@ pageRenderers.sessions = (() => {
           </div>
           <div class="card-body">
             <h4 class="sess-h">SSH</h4><div data-sess="ssh"></div>
+            <h4 class="sess-h">Local console</h4><div data-sess="console"></div>
             <h4 class="sess-h">VNC</h4><div data-sess="vnc"></div>
             <h4 class="sess-h">Tailscale</h4><div data-sess="ts"></div>
           </div>
@@ -819,9 +828,9 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Source</span><b>${esc(nas.proto)}://${esc(nas.host)}/${esc(nas.share)}</b></div>
       <div class="set-kv"><span>Mountpoint</span><b>${esc(nas.mountpoint)}</b></div>
       <div class="set-kv"><span>Status</span><b class="${mounted ? 'set-ok' : 'set-err'}">${mounted ? '● mounted' : '○ not mounted'}</b></div>
-      <div class="wz-row">
-        <button class="action-btn" data-set="remount">Remount</button>
-        <button class="action-btn rconfirm-danger" data-set="unmount">Unmount</button>
+      <div class="wz-row set-btn-row">
+        <button class="action-btn set-pill" data-set="remount">Remount</button>
+        <button class="action-btn set-pill set-pill-danger" data-set="unmount">Unmount</button>
         <span data-set="nasmsg"></span>
       </div>` : `<p class="sess-empty">No NAS share configured. Mount one below to store metrics off the SD card.</p>`;
 
@@ -852,7 +861,7 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Filesystem</span><b>${esc(s.fsType || '—')} · ${esc(s.journalMode || '—')} journal</b></div>
       <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ degraded (local fallback)' : '● healthy'}</b></div>
       <div class="wz-form">
-        <label>Database directory <input data-set="dbdir" value="${esc(nas?.mountpoint || '')}" placeholder="/mnt/rapisys/mybook"></label>
+        <label>Database directory <input data-set="dbdir" value="${esc(nas?.mountpoint || (s.path && s.path.startsWith('/mnt/rapisys/') ? s.path.replace(/\/rapisys\.db$/, '') : ''))}" placeholder="/mnt/rapisys/mybook"></label>
         <div class="wz-row"><button class="action-btn" data-set="relocate">Relocate database</button><span data-set="stmsg"></span></div>
       </div>`;
 
@@ -922,7 +931,7 @@ pageRenderers.settings = (() => {
       host.innerHTML = `
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5 12V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5"/><circle cx="8" cy="16" r="1"/></svg></div><span class="card-title">Network Storage (NAS)</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7" y2="7"/><line x1="7" y1="17" x2="7" y2="17"/></svg></div><span class="card-title">Network Storage (NAS)</span></div>
           <div class="card-body"><div data-set="nas"></div><div data-set="nasform"></div></div>
         </div>
         <div class="card">

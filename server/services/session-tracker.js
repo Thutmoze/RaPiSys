@@ -10,7 +10,7 @@
 export function createSessionTracker({ sessions, sessionsRepo, eventsRepo }) {
   async function trackOnce(now = Date.now()) {
     const snap = await sessions.snapshot();
-    const live = [...snap.ssh, ...snap.vnc];
+    const live = [...snap.ssh, ...(snap.console || []), ...snap.vnc];
     // Tailscale peers count as "sessions" only while online.
     for (const p of snap.tailscale.peers || []) {
       if (p.online) live.push({ ...p, startedAt: null, meta: { os: p.os } });
