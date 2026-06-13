@@ -5055,3 +5055,9 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-log-loading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   color: var(--text-secondary); font-size: 12px; padding: 4px 0; }
 .up-log-loading .up-scanbar { flex-basis: 100%; margin: 6px 0 0; }
+
+/* Updates: new-version changelog block in cyan, header emphasized */
+.up-log-head { color: var(--accent-cyan); font-size: 12px; font-weight: 600;
+  margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid rgba(0,212,255,0.2); }
+.up-log-new { color: var(--accent-cyan) !important; font-family: ui-monospace, monospace;
+  font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 0 0 10px; }

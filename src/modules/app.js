@@ -1645,7 +1645,14 @@ pageRenderers.updates = (() => {
             <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>
-          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log">${logCache[u.package] !== undefined ? `<pre class="up-log-text">${esc(logCache[u.package])}</pre>` : '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>'}</div></td></tr>` : ''}`).join('')}</tbody>
+          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log">${(() => {
+            const c = logCache[u.package];
+            if (c === undefined) return '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>';
+            if (c.plain) return `<pre class="up-log-text">${esc(c.plain)}</pre>`;
+            return `${c.head ? `<div class="up-log-head">${esc(c.head)}</div>` : ''}`
+              + `${c.newBlock ? `<pre class="up-log-new">${esc(c.newBlock)}</pre>` : ''}`
+              + `${c.rest ? `<pre class="up-log-text">${esc(c.rest)}</pre>` : ''}`;
+          })()}</div></td></tr>` : ''}`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
   }
@@ -1694,12 +1701,31 @@ pageRenderers.updates = (() => {
     if (logCache[pkg] === undefined) {
       try {
         const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`);
-        const header = r.source === 'candidate' && r.candidateVersion
-          ? `▼ Changes in ${r.candidateVersion} (new version)\n${'─'.repeat(40)}\n`
-          : r.source === 'installed' ? `(showing installed version's changelog — new notes unavailable)\n${'─'.repeat(40)}\n` : '';
-        logCache[pkg] = header + (r.changelog || 'No changelog available.');
+        const ver = r.candidateVersion ? decodeURIComponent(r.candidateVersion) : null;
+        // Split into the newest entry (the candidate's notes) and the rest.
+        // dpkg changelog entries are separated by a blank line before the
+        // next "pkg (version) ..." header; the first block is the newest.
+        const body = r.changelog || 'No changelog available.';
+        let head = '', newBlock = '', rest = body;
+        if (r.source === 'candidate' && ver) {
+          head = `▼ Changes in ${ver} (new version)`;
+          // first entry runs until the line starting a *second* "name (" header
+          const lines = body.split('\n');
+          let splitAt = -1, seenHeader = false;
+          for (let i = 0; i < lines.length; i++) {
+            if (/^\S.*\([^)]+\)\s/.test(lines[i])) {
+              if (seenHeader) { splitAt = i; break; }
+              seenHeader = true;
+            }
+          }
+          if (splitAt > 0) { newBlock = lines.slice(0, splitAt).join('\n'); rest = lines.slice(splitAt).join('\n'); }
+          else { newBlock = body; rest = ''; }
+        } else if (r.source === 'installed') {
+          head = "(showing installed version's changelog — new notes unavailable)";
+        }
+        logCache[pkg] = { head, newBlock, rest, plain: head ? '' : body };
       }
-      catch (e) { logCache[pkg] = 'Error: ' + e.message; }
+      catch (e) { logCache[pkg] = { head: '', newBlock: '', rest: '', plain: 'Error: ' + e.message }; }
       if (expandedLog === pkg) render(host);
     }
   }
