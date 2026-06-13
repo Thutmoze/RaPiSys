@@ -24,7 +24,8 @@ function stats(values) {
 export function createReports({ metricsRepo, eventsRepo, reportsRepo, getStorageInfo }) {
 
   /** Build (and persist) the summary for a given day (default: yesterday). */
-  function materializeDay(dayStart = startOfDay(Date.now() - 86400e3)) {
+  function materializeDay(ts = Date.now() - 86400e3) {
+    const dayStart = startOfDay(ts);
     const dayEnd = dayStart + 86400e3;
     const day = ymd(dayStart);
     const metrics = {};
@@ -50,17 +51,22 @@ export function createReports({ metricsRepo, eventsRepo, reportsRepo, getStorage
     const events = eventsRepo.countByTypeBetween
       ? eventsRepo.countByTypeBetween(dayStart, dayEnd)
       : {};
+    const isToday = day === ymd(Date.now());
     const summary = {
-      day, generatedAt: Date.now(), metrics, events,
+      day, generatedAt: Date.now(), metrics, events, partial: isToday,
       health: healthScore({ metrics, events, storage: getStorageInfo?.() }),
     };
     reportsRepo.upsertDaily(day, summary);
     return summary;
   }
 
-  /** Backfill any missing days within the last `n` days. */
+  /** Backfill any missing days within the last `n` days, plus today (partial). */
   function backfill(n = 14) {
     const out = [];
+    // Always (re)materialize today so the dashboard shows live data without
+    // waiting for the nightly job — even on a fresh install collecting since
+    // this morning.
+    out.push(materializeDay(startOfDay(Date.now())));
     for (let i = 1; i <= n; i++) {
       const dayStart = startOfDay(Date.now() - i * 86400e3);
       if (!reportsRepo.getDaily(ymd(dayStart))) out.push(materializeDay(dayStart));

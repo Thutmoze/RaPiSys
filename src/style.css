@@ -4945,3 +4945,5 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   .card { break-inside: avoid; border: 1px solid #ccc !important; background: #fff !important; }
   .rapisys-page { margin: 0 !important; }
 }
+.rep-live { font-size: 10px; color: var(--accent-cyan); border: 1px solid rgba(0,212,255,0.4);
+  padding: 1px 6px; border-radius: 999px; margin-left: 6px; text-transform: uppercase; }

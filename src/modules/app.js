@@ -1299,7 +1299,7 @@ pageRenderers.reports = (() => {
 
       $('[data-rep=body]', host).innerHTML = `
         <div class="rep-health">
-          <div class="rep-health-ring">${healthRing(health.overall)}<div class="rep-health-cap">Health · ${esc(latest.day)}</div></div>
+          <div class="rep-health-ring">${healthRing(health.overall)}<div class="rep-health-cap">Health · ${esc(latest.day)}${latest.partial ? ' <span class="rep-live">live</span>' : ''}</div></div>
           <div class="rep-health-factors">
             ${(health.factors || []).map((f) => `
               <div class="rep-factor">

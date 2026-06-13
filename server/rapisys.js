@@ -172,6 +172,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('auth-session-purge', 6 * 3600e3, () => auth.purgeExpired());
   // Nightly report materialization (runs the previous day's summary).
   scheduler.register('reports-daily', 6 * 3600e3, () => { try { reports.materializeDay(); reports.backfill(7); } catch { /* */ } });
+  // Refresh today's partial report every 10 min so the Reports page stays live.
+  scheduler.register('reports-today', 600e3, () => { try { reports.materializeDay(Date.now()); } catch { /* */ } });
 
   // ---- routes ----------------------------------------------------------------------
   app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
