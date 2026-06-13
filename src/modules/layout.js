@@ -101,26 +101,28 @@ function makeItem(widget, placement, { editable }) {
 const scaleObservers = new WeakMap();
 function observeScale(body, scale) {
   const apply = () => {
-    // natural (unscaled) content size
-    const prev = scale.style.transform;
+    const availW = body.clientWidth;
+    const availH = body.clientHeight;
+    if (availW <= 0 || availH <= 0) return;
+    // Give the content the full cell WIDTH so it reflows naturally to fill
+    // horizontally (bars stretch, grids spread out) — no transform needed for
+    // width. Then measure its resulting height.
     scale.style.transform = 'none';
-    const naturalW = scale.scrollWidth || scale.offsetWidth;
-    const naturalH = scale.scrollHeight || scale.offsetHeight;
-    scale.style.transform = prev;
-    const availW = body.clientWidth - 8;   // minus padding
-    const availH = body.clientHeight - 8;
-    if (naturalW <= 0 || naturalH <= 0 || availW <= 0 || availH <= 0) return;
-    // fit by the tighter dimension; never upscale past 1 to avoid blurriness on
-    // bitmap content, but allow a little growth for sparse widgets.
-    const s = Math.min(availW / naturalW, availH / naturalH, 1.25);
-    scale.style.transform = `scale(${s})`;
-    scale.style.width = `${naturalW}px`;
-    scale.style.height = `${naturalH}px`;
+    scale.style.width = `${availW}px`;
+    scale.style.height = 'auto';
+    const naturalH = scale.scrollHeight;
+    if (naturalH <= 0) return;
+    // Only scale DOWN if the (width-filled) content is taller than the cell.
+    // Never upscale (keeps text crisp); short content simply sits at the top
+    // and the cell's own height gives it breathing room.
+    const s = naturalH > availH ? availH / naturalH : 1;
+    scale.style.transform = s < 1 ? `scale(${s})` : 'none';
+    // when scaled down, widen so the scaled result still fills the cell width
+    scale.style.width = s < 1 ? `${availW / s}px` : `${availW}px`;
   };
   const ro = new ResizeObserver(() => requestAnimationFrame(apply));
   ro.observe(body);
   scaleObservers.set(body, ro);
-  // initial pass after layout settles
   requestAnimationFrame(apply);
   setTimeout(apply, 120);
 }
