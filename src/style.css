@@ -5183,4 +5183,4 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 /* Updates table: top-align every cell so rows with stacked tags (security +
    CVEs) keep all other columns aligned to the top instead of floating centered */
 .up-table td { vertical-align: top; }
-.up-table td.up-tags-stack { padding-top: 8px; }
+.up-table td.up-tags-cell { padding-top: 8px; }
