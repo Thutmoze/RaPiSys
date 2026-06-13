@@ -142,6 +142,21 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     }
     if (rows.length) metricsFacade.writeBatch(t.ts, rows);
   }, { runNow: true });
+  // Background per-process bandwidth history: a short nethogs sample every
+  // 5 min, recorded to the DB. Skipped automatically if nethogs isn't
+  // installed (agent throws), so it never forces an install on its own.
+  globalThis.__netPageActive = false;
+  scheduler.register('net-proc-history', 300e3, async () => {
+    if (globalThis.__netPageActive) return;   // live view already capturing
+    try {
+      const r = await network.nethogsSample(4);
+      const now = Date.now();
+      for (const p of (r.processes || []).slice(0, 5)) {
+        eventsFacade.add('net.proc_sample', 'info',
+          { comm: p.comm, pid: p.pid, recvKBs: p.recvKBs, sentKBs: p.sentKBs, ts: now });
+      }
+    } catch { /* nethogs absent or busy — skip silently */ }
+  });
   scheduler.register('auth-session-purge', 6 * 3600e3, () => auth.purgeExpired());
 
   // ---- routes ----------------------------------------------------------------------

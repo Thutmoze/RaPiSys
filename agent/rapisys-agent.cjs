@@ -227,7 +227,36 @@ const OPS = {
   },
 
   // ---- DNS query logging via dnsmasq (opt-in) -----------------------------
-  async 'dns.enableLogging'() {
+  // The Pi's own recent DNS lookups, no logging config needed: parse
+  // systemd-resolved's journal (it records 'Looking up' / cache) when
+  // present; otherwise sample current :53 peers via ss.
+  async 'dns.recent'({ limit = 20 }) {
+    // journal route (systemd-resolved with at least default logging)
+    const j = await run('sh', ['-c',
+      "journalctl -u systemd-resolved --no-pager -n 400 -o cat 2>/dev/null | grep -oiE 'question: [^ ]+|Looking up [^ ]+' | awk '{print $NF}'"], 5000)
+      .catch(() => ({ stdout: '' }));
+    const counts = {};
+    for (const d of (j.stdout || '').split('\n')) {
+      const dom = d.trim().toLowerCase().replace(/\.$/, '');
+      if (dom && dom.includes('.')) counts[dom] = (counts[dom] || 0) + 1;
+    }
+    if (Object.keys(counts).length) {
+      const domains = Object.entries(counts).map(([domain, queries]) => ({ domain, queries }))
+        .sort((a, b) => b.queries - a.queries).slice(0, Number(limit) || 20);
+      return { source: 'resolved-journal', domains };
+    }
+    // fallback: live DNS peers the Pi is talking to right now
+    const ss = await run('sh', ['-c', "ss -tunp 'dport = :53' 2>/dev/null"], 4000).catch(() => ({ stdout: '' }));
+    const peers = {};
+    for (const line of (ss.stdout || '').split('\n').slice(1)) {
+      const m = line.match(/\s(\S+):53\s/);
+      if (m) peers[m[1]] = (peers[m[1]] || 0) + 1;
+    }
+    return { source: 'live-peers',
+      domains: Object.entries(peers).map(([domain, queries]) => ({ domain, queries })).slice(0, Number(limit) || 20) };
+  },
+
+    async 'dns.enableLogging'() {
     // Only safe with a STANDALONE dnsmasq: a real service unit + a config
     // directory or file we may edit. NetworkManager/libvirt embed their own
     // dnsmasq with no editable config and no service — never touch those.

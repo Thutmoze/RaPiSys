@@ -19,8 +19,17 @@ import { agentCall, agentConfigured } from '../core/agent-client.js';
 const execFileAsync = promisify(execFile);
 const HOST_PROC = fs.existsSync('/host/proc') ? '/host/proc' : '/proc';
 
-// Skip virtual/loopback/container interfaces for "real" traffic views.
-const SKIP_IF = /^(lo|docker|veth|br-|virbr|wg|tailscale|cni|flannel)/;
+// Loopback and container-internal veths are noise; everything else
+// (including wg/tailscale VPN interfaces) is shown, tagged by kind.
+const SKIP_IF = /^(lo|veth|cni|flannel)$|^(veth|cni)/;
+const VIRTUAL_IF = /^(wg|tailscale|tun|tap|docker|br-|virbr)/;
+function ifaceKind(name) {
+  if (/^(eth|en)/.test(name)) return 'wired';
+  if (/^(wlan|wlp|wifi)/.test(name)) return 'wifi';
+  if (/^(wg|tailscale|tun|tap)/.test(name)) return 'vpn';
+  if (/^(docker|br-|virbr)/.test(name)) return 'bridge';
+  return 'other';
+}
 
 function readProcNetDev() {
   const out = {};
@@ -52,6 +61,8 @@ export function createNetworkCollector() {
       if (SKIP_IF.test(iface)) continue;
       const p = prev?.[iface];
       interfaces[iface] = {
+        kind: ifaceKind(iface),
+        virtual: VIRTUAL_IF.test(iface),
         rxBytes: c.rxBytes, txBytes: c.txBytes,
         rxRate: p && dt > 0 ? Math.max(0, (c.rxBytes - p.rxBytes) / dt) : 0,
         txRate: p && dt > 0 ? Math.max(0, (c.txBytes - p.txBytes) / dt) : 0,
@@ -120,6 +131,52 @@ export function createNetworkCollector() {
     return result;
   }
 
+  /** Full connection list: proto, state, local port, peer, owning process. */
+  async function connections() {
+    const out = [];
+    try {
+      const { stdout } = await execFileAsync('ss', ['-tunp', 'state', 'established'], { timeout: 4000 });
+      for (const line of stdout.split('\n').slice(1)) {
+        const cols = line.trim().split(/\s+/);
+        if (cols.length < 5) continue;
+        const proto = cols[0];                       // tcp|udp
+        const local = cols[3], peer = cols[4];
+        const lpMatch = local.match(/:(\d+)$/);
+        const ppMatch = peer.match(/^(.*):(\d+)$/);
+        const procMatch = line.match(/users:\(\("([^"]+)",pid=(\d+)/);
+        const lport = lpMatch ? Number(lpMatch[1]) : null;
+        const rport = ppMatch ? Number(ppMatch[2]) : null;
+        // classify by whichever side is a well-known service port
+        const svc = WELL_KNOWN[lport] || WELL_KNOWN[rport] || (proto || 'other').toUpperCase();
+        out.push({
+          proto, service: svc,
+          localPort: lport,
+          peer: ppMatch ? ppMatch[1].replace(/^\[|\]$/g, '') : peer,
+          peerPort: rport,
+          comm: procMatch ? procMatch[1] : null,
+          pid: procMatch ? Number(procMatch[2]) : null,
+        });
+      }
+    } catch { /* ss unavailable */ }
+    return out;
+  }
+
+  /** Protocol distribution as % of established connections, with process map. */
+  async function protocolShare() {
+    const conns = await connections();
+    const bySvc = {};
+    for (const c of conns) {
+      bySvc[c.service] = bySvc[c.service] || { service: c.service, count: 0, conns: [] };
+      bySvc[c.service].count += 1;
+      bySvc[c.service].conns.push(c);
+    }
+    const total = conns.length || 1;
+    const shares = Object.values(bySvc)
+      .map((s) => ({ service: s.service, count: s.count, pct: (s.count / total) * 100, conns: s.conns }))
+      .sort((a, b) => b.count - a.count);
+    return { total: conns.length, shares };
+  }
+
   /** Top processes by socket count (proxy for activity); rate needs sampling. */
   async function topProcesses() {
     try {
@@ -145,6 +202,14 @@ export function createNetworkCollector() {
         if (top.enabled) {
           return { available: true, source: 'dnsmasq', loggingEnabled: true,
             totalQueries: top.totalQueries, domains: top.domains };
+        }
+      } catch { /* fall through */ }
+      // The Pi's own recent lookups — works without any logging config.
+      try {
+        const recent = await agentCall('dns.recent', { limit: 20 }, null, 6000);
+        if (recent.domains?.length) {
+          return { available: true, source: recent.source, loggingEnabled: false,
+            domains: recent.domains, ownQueries: true };
         }
       } catch { /* fall through to resolver stats */ }
     }
@@ -174,11 +239,11 @@ export function createNetworkCollector() {
   }
 
   async function snapshot() {
-    const [vn, proto, procs, dnsStats] = await Promise.all([vnstat(), protocols(), topProcesses(), dns()]);
+    const [vn, proto, procs, dnsStats] = await Promise.all([vnstat(), protocolShare(), topProcesses(), dns()]);
     return { throughput: throughput(), vnstat: vn, protocols: proto, processes: procs, dns: dnsStats, ts: Date.now() };
   }
 
-  return { throughput, vnstat, protocols, topProcesses, dns, dnsSetLogging, nethogsSample, snapshot };
+  return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, nethogsSample, snapshot };
 }
 
 const WELL_KNOWN = {

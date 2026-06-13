@@ -34,6 +34,18 @@ export function networkRouter({ network, metricsRepo, requireControl }) {
     });
   });
 
+  // Protocol share (% of connections) with the connection list per service.
+  r.get('/protocols', async (req, res) => {
+    try { res.json(await network.protocolShare()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Full connection list (proc, port, peer) for the click-through.
+  r.get('/connections', async (req, res) => {
+    try { res.json({ connections: await network.connections() }); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Opt-in DNS query logging (modifies dnsmasq config -> Pi control).
   r.post('/dns/logging', requireControl, async (req, res) => {
     try { res.json(await network.dnsSetLogging(!!req.body?.enabled)); }
