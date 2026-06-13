@@ -228,14 +228,39 @@ const OPS = {
 
   // ---- DNS query logging via dnsmasq (opt-in) -----------------------------
   async 'dns.enableLogging'() {
-    const conf = '/etc/dnsmasq.d/rapisys-logging.conf';
-    fs.writeFileSync(conf, 'log-queries\nlog-facility=/var/log/dnsmasq-rapisys.log\n');
+    // Only safe with a STANDALONE dnsmasq: a real service unit + a config
+    // directory or file we may edit. NetworkManager/libvirt embed their own
+    // dnsmasq with no editable config and no service — never touch those.
+    const hasService = (await run('systemctl', ['list-unit-files', 'dnsmasq.service'], 4000)
+      .catch(() => ({ stdout: '' }))).stdout.includes('dnsmasq.service');
+    const hasConfD = fs.existsSync('/etc/dnsmasq.d');
+    const hasConf = fs.existsSync('/etc/dnsmasq.conf');
+    if (!hasService || !(hasConfD || hasConf)) {
+      throw new Error('per-domain logging needs a standalone dnsmasq (none found — your dnsmasq is embedded in NetworkManager/libvirt). Pi-hole is also supported when present.');
+    }
+    if (hasConfD) {
+      fs.writeFileSync('/etc/dnsmasq.d/rapisys-logging.conf',
+        'log-queries\nlog-facility=/var/log/dnsmasq-rapisys.log\n');
+    } else {
+      let conf = fs.readFileSync('/etc/dnsmasq.conf', 'utf-8');
+      if (!conf.includes('# RAPISYS-LOGGING')) {
+        conf += '\n# RAPISYS-LOGGING\nlog-queries\nlog-facility=/var/log/dnsmasq-rapisys.log\n';
+        fs.writeFileSync('/etc/dnsmasq.conf', conf);
+      }
+    }
     const r = await run('systemctl', ['restart', 'dnsmasq'], 8000);
     assert(r.code === 0, `dnsmasq restart failed: ${r.stderr || r.stdout}`);
     return { ok: true, log: '/var/log/dnsmasq-rapisys.log' };
   },
   async 'dns.disableLogging'() {
-    try { fs.unlinkSync('/etc/dnsmasq.d/rapisys-logging.conf'); } catch { /* gone */ }
+    try { fs.unlinkSync('/etc/dnsmasq.d/rapisys-logging.conf'); } catch { /* none */ }
+    try {
+      const conf = fs.readFileSync('/etc/dnsmasq.conf', 'utf-8');
+      if (conf.includes('# RAPISYS-LOGGING')) {
+        fs.writeFileSync('/etc/dnsmasq.conf',
+          conf.replace(/\n# RAPISYS-LOGGING\nlog-queries\nlog-facility=[^\n]*\n/, '\n'));
+      }
+    } catch { /* none */ }
     await run('systemctl', ['restart', 'dnsmasq'], 8000).catch(() => {});
     return { ok: true };
   },
