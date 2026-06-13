@@ -302,6 +302,7 @@ const ICONS = {
   updates: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   inventory: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/>',
   alerts: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 
 const PAGES = [
@@ -313,6 +314,7 @@ const PAGES = [
   { id: 'updates', label: 'Updates', soon: true },
   { id: 'inventory', label: 'Inventory', soon: true },
   { id: 'alerts', label: 'Alerts' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 const pageRenderers = {}; // id -> { mount(el), unmount() }
@@ -791,6 +793,150 @@ pageRenderers.alerts = (() => {
       timer = setInterval(() => refresh(host), 15000);
     },
     unmount() { clearInterval(timer); },
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Settings page — NAS mounts, storage location, retention, mode, SMTP status
+// ---------------------------------------------------------------------------
+
+pageRenderers.settings = (() => {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function load(host) {
+    let st;
+    try { st = await api('/setup/status'); } catch { return; }
+
+    // ---- NAS card ----
+    const nas = st.nas;
+    let nasStatus = null;
+    if (nas?.mountpoint) {
+      try { nasStatus = await api(`/setup/nas/status?mountpoint=${encodeURIComponent(nas.mountpoint)}`); } catch { /* offline */ }
+    }
+    const mounted = nasStatus?.mounted;
+    $('[data-set=nas]', host).innerHTML = nas ? `
+      <div class="set-kv"><span>Label</span><b>${esc(nas.label)}</b></div>
+      <div class="set-kv"><span>Source</span><b>${esc(nas.proto)}://${esc(nas.host)}/${esc(nas.share)}</b></div>
+      <div class="set-kv"><span>Mountpoint</span><b>${esc(nas.mountpoint)}</b></div>
+      <div class="set-kv"><span>Status</span><b class="${mounted ? 'set-ok' : 'set-err'}">${mounted ? '● mounted' : '○ not mounted'}</b></div>
+      <div class="wz-row">
+        <button class="action-btn" data-set="remount">Remount</button>
+        <button class="action-btn rconfirm-danger" data-set="unmount">Unmount</button>
+        <span data-set="nasmsg"></span>
+      </div>` : `<p class="sess-empty">No NAS share configured. Mount one below to store metrics off the SD card.</p>`;
+
+    // mount form (always available to add/replace)
+    $('[data-set=nasform]', host).innerHTML = `
+      <h4 class="sess-h">${nas ? 'Replace share' : 'Mount a share'}</h4>
+      <div class="wz-form">
+        <label>Label <input data-nf="label" value="${esc(nas?.label || 'mybook')}" maxlength="32"></label>
+        <label>Protocol <select data-nf="proto"><option value="cifs">SMB/CIFS</option><option value="nfs">NFS</option></select></label>
+        <label>Host <input data-nf="host" value="${esc(nas?.host || '')}" placeholder="192.168.10.6"></label>
+        <label>Share <input data-nf="share" value="${esc(nas?.share || '')}" placeholder="rapisys"></label>
+        <label data-nf-smb>SMB version <select data-nf="smb">
+          <option value="3.0">3.0 (EX2 Ultra &amp; modern NAS)</option>
+          <option value="2.1">2.1</option><option value="2.0">2.0</option>
+          <option value="1.0">1.0 (My Book World Edition II)</option>
+        </select></label>
+        <label>Username <input data-nf="user" placeholder="admin"></label>
+        <label>Password <input data-nf="pass" type="password"></label>
+        <div class="wz-row"><button class="action-btn" data-nf="mount">Mount &amp; persist</button><span data-nf="msg"></span></div>
+      </div>`;
+    if (nas?.smbVersion) { const sel = $('[data-nf=smb]', host); if (sel) sel.value = nas.smbVersion; }
+    enhanceSelects(host);   // dynamic selects appear after this render
+
+    // ---- storage card ----
+    const s = st.storage || {};
+    $('[data-set=storage]', host).innerHTML = `
+      <div class="set-kv"><span>Database</span><b>${esc(s.path || s.dbPath || '—')}</b></div>
+      <div class="set-kv"><span>Filesystem</span><b>${esc(s.fsType || '—')} · ${esc(s.journalMode || '—')} journal</b></div>
+      <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ degraded (local fallback)' : '● healthy'}</b></div>
+      <div class="wz-form">
+        <label>Database directory <input data-set="dbdir" value="${esc(nas?.mountpoint || '')}" placeholder="/mnt/rapisys/mybook"></label>
+        <div class="wz-row"><button class="action-btn" data-set="relocate">Relocate database</button><span data-set="stmsg"></span></div>
+      </div>`;
+
+    // ---- meta card ----
+    $('[data-set=meta]', host).innerHTML = `
+      <div class="set-kv"><span>Operating mode</span><b>${st.mode === 'full' ? 'Full control' : 'Monitor only'}</b></div>
+      <div class="set-kv"><span>Retention</span><b>${st.retentionDays} days local · ${st.archiveDays} days archived</b></div>
+      <div class="set-kv"><span>Email (SMTP)</span><b class="${st.smtpConfigured ? 'set-ok' : ''}">${st.smtpConfigured ? '● configured' : 'not configured'}</b></div>
+      <div class="set-kv"><span>Host agent</span><b class="${st.agent ? 'set-ok' : 'set-err'}">${st.agent ? '● connected' : '○ unavailable'}</b></div>`;
+
+    wire(host, nas);
+  }
+
+  function wire(host, nas) {
+    const proto = $('[data-nf=proto]', host);
+    const smbWrap = $('[data-nf-smb]', host);
+    if (proto && smbWrap) {
+      const upd = () => { smbWrap.style.display = proto.value === 'cifs' ? '' : 'none'; };
+      proto.addEventListener('change', upd); upd();
+    }
+
+    const mountBtn = $('[data-nf=mount]', host);
+    if (mountBtn) mountBtn.onclick = async () => {
+      const msg = $('[data-nf=msg]', host);
+      setStatus(msg, true, 'Mounting…');
+      try {
+        await api('/setup/nas/mount', { method: 'POST', body: {
+          label: $('[data-nf=label]', host).value.trim(),
+          proto: $('[data-nf=proto]', host).value,
+          host: $('[data-nf=host]', host).value.trim(),
+          share: $('[data-nf=share]', host).value.trim(),
+          smbVersion: $('[data-nf=smb]', host)?.value,
+          username: $('[data-nf=user]', host).value.trim(),
+          password: $('[data-nf=pass]', host).value,
+        }});
+        setStatus(msg, true, '✓ mounted & set to mount on boot');
+        load(host);
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+    };
+
+    const remount = $('[data-set=remount]', host);
+    if (remount) remount.onclick = () => { $('[data-nf=host]', host).scrollIntoView({ behavior: 'smooth' }); toast('info', 'Remount', 'Re-enter the password and click Mount & persist.'); };
+
+    const unmount = $('[data-set=unmount]', host);
+    if (unmount) unmount.onclick = async () => {
+      if (!await rapisysConfirm(`Unmount ${nas.mountpoint}? If the database lives here it will fall back to local storage.`, { danger: true, confirmLabel: 'Unmount' })) return;
+      const msg = $('[data-set=nasmsg]', host);
+      setStatus(msg, true, 'Unmounting…');
+      try { await api('/setup/nas/unmount', { method: 'POST', body: { mountpoint: nas.mountpoint } }); setStatus(msg, true, '✓ unmounted'); load(host); }
+      catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+    };
+
+    const relocate = $('[data-set=relocate]', host);
+    if (relocate) relocate.onclick = async () => {
+      const msg = $('[data-set=stmsg]', host);
+      const dir = $('[data-set=dbdir]', host).value.trim();
+      relocate.disabled = true; setStatus(msg, true, 'Relocating database…');
+      try { const r = await api('/setup/storage', { method: 'POST', body: { dbDir: dir } });
+        setStatus(msg, true, `✓ now on ${r.fsType || 'disk'} (${r.journalMode} journal)`); load(host);
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+      finally { relocate.disabled = false; }
+    };
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12H2M5 12V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5"/><circle cx="8" cy="16" r="1"/></svg></div><span class="card-title">Network Storage (NAS)</span></div>
+          <div class="card-body"><div data-set="nas"></div><div data-set="nasform"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><span class="card-title">Database Storage</span></div>
+          <div class="card-body" data-set="storage"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6M4.2 4.2l4.3 4.3M15.5 15.5l4.3 4.3M1 12h6M17 12h6"/></svg></div><span class="card-title">Configuration</span></div>
+          <div class="card-body" data-set="meta"></div>
+        </div>
+      </div>`;
+      load(host);
+    },
+    unmount() {},
   };
 })();
 

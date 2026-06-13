@@ -28,7 +28,8 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **History engine** | 10 s sampling into SQLite · tiered downsampling (10 s → 1 m → 10 m → 1 h) · configurable retention (7–3650 days) · DB relocatable to a NAS with automatic network-FS-safe journaling and local fallback |
 | **First-run wizard** | Guided setup for NAS mounting (SMB/CIFS incl. SMB1 legacy NAS, NFS), database location, retention policy, SMTP — all from the browser |
 | **Email alerts** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · authenticated SMTP (STARTTLS/465) · password encrypted at rest (AES-256-GCM) and write-only via API · test-send button |
-| **Sessions** | Live SSH (via systemd-logind, utmp fallback), RealVNC and Tailscale sessions · login history and durations recorded server-side |
+| **Sessions** | Live SSH (via systemd-logind, utmp fallback), RealVNC and Tailscale sessions · login history and durations recorded server-side · disconnect active sessions |
+| **Settings page** | Manage NAS mounts (mount/remount/unmount, persisted as systemd units), relocate the metrics database, and review retention, mode, SMTP and agent status — all from the web UI |
 | **Two operating modes** | **Monitor only** — read-only like upstream, Pi-control features disabled outright · **Full control** — fan/NAS/updates/reboot from the UI, gated behind a **local admin account with optional TOTP MFA** (recommended, on by default) (Google Authenticator, Authy, 1Password… — fully offline, no cloud) |
 | **Host agent** | Tiny root systemd service with a *fixed allowlist* of operations, HMAC-authenticated over a Unix socket — lets the web container run **non-root with all capabilities dropped** |
 | **DevOps** | One-command install · snapshot-based upgrades with automatic rollback · deep health checks |

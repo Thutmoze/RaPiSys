@@ -4809,3 +4809,14 @@ body.ultra .al-btn, body.ultra .sess-kick { padding: 4px 9px; font-size: 10px; }
 .hw-fan-btn, .sess-kick { display: inline-flex; align-items: center; gap: 5px; }
 .hw-fan-btn [data-fan=pct] { font-variant-numeric: tabular-nums; min-width: 1.6em; text-align: right; }
 .sess-kick svg { flex: none; }
+
+/* Settings page key/value rows */
+.set-kv { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0;
+  border-bottom: 1px solid var(--border-color); font-size: 13px; }
+.set-kv span { color: var(--text-muted); }
+.set-kv b { color: var(--text-primary); text-align: right; word-break: break-all; }
+.set-ok { color: #10b981 !important; }
+.set-err { color: var(--accent-red, #ef4444) !important; }
+
+/* Settings buttons should not wrap their labels */
+[data-set] .action-btn, [data-nf] .action-btn, .card-body .action-btn { white-space: nowrap; }

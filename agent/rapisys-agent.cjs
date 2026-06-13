@@ -242,6 +242,19 @@ const OPS = {
   },
 
   // ---- NAS mounts (systemd .mount/.automount units, never fstab) ----------
+  async 'nas.unmount'({ mountpoint }) {
+    assert(mountpoint === path.posix.normalize(mountpoint) && mountpoint.startsWith(MOUNT_BASE + '/'),
+      `mountpoint must be under ${MOUNT_BASE}`);
+    const unit = unitNameFor(mountpoint);
+    await run('systemctl', ['disable', '--now', `${unit}.mount`]).catch(() => {});
+    await run('umount', [mountpoint]).catch(async () => {
+      await run('umount', ['-l', mountpoint]).catch(() => {});
+    });
+    try { fs.unlinkSync(`/etc/systemd/system/${unit}.mount`); } catch { /* gone */ }
+    await run('systemctl', ['daemon-reload']);
+    return { ok: true, unmounted: mountpoint };
+  },
+
   async 'nas.status'({ mountpoint }) {
     assert(mountpoint.startsWith(MOUNT_BASE), `mountpoint must be under ${MOUNT_BASE}`);
     const { stdout } = await run('findmnt', ['-J', '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS', mountpoint], 5000)

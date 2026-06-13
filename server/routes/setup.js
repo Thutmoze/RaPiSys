@@ -47,6 +47,8 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
       retentionDays: settings.rapisys?.retention?.days || 90,
       archiveDays: settings.rapisys?.retention?.archiveDays || 365,
       smtpConfigured: !!settings.rapisys?.smtp?.host,
+      mode: settings.rapisys?.mode === 'full' ? 'full' : 'monitor',
+      nas: settings.rapisys?.nas || null,
       presets: RETENTION_PRESETS,
     });
   });
@@ -91,6 +93,12 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
       options.push(readOnly ? 'ro' : 'rw');
       const result = await agentCall('nas.mount',
         { label, proto, host, share, mountpoint, options, username, password }, null, 60000);
+      await withFileLock(async () => {
+        const settings = await loadSettings();
+        settings.rapisys = settings.rapisys || {};
+        settings.rapisys.nas = { label, proto, host, share, mountpoint, smbVersion: smbVersion || null };
+        await saveSettings(settings);
+      });
       events.add('nas.mounted', 'info', { label, proto, host, share, mountpoint });
       res.json({ ok: true, mountpoint, ...result });
     } catch (err) {
@@ -105,6 +113,25 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
     }
     try {
       res.json(await agentCall('nas.status', { mountpoint }));
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // -- unmount a NAS share (Settings page) -------------------------------------
+  r.post('/nas/unmount', requireAuth, async (req, res) => {
+    const mountpoint = String(req.body?.mountpoint || '');
+    if (!mountpoint.startsWith('/mnt/rapisys/')) {
+      return res.status(400).json({ error: 'mountpoint must be under /mnt/rapisys' });
+    }
+    try {
+      const result = await agentCall('nas.unmount', { mountpoint }, null, 30000);
+      await withFileLock(async () => {
+        const settings = await loadSettings();
+        if (settings.rapisys?.nas?.mountpoint === mountpoint) { delete settings.rapisys.nas; await saveSettings(settings); }
+      });
+      events.add('nas.unmounted', 'info', { mountpoint });
+      res.json({ ok: true, ...result });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
