@@ -1573,6 +1573,7 @@ pageRenderers.inventory = (() => {
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set();
   let streaming = false, expandedLog = null, logCache = {};
+  const oldExpanded = new Set();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // inline glyphs (stroke icons matching the app's Lucide-style set)
   const ICN = {
@@ -1655,7 +1656,7 @@ pageRenderers.updates = (() => {
             if (c.plain) return `<pre class="up-log-text">${esc(c.plain)}</pre>`;
             return `${c.head ? `<div class="up-log-head">${esc(c.head)}</div>` : ''}`
               + `${c.newBlock ? `<pre class="up-log-new">${esc(c.newBlock)}</pre>` : ''}`
-              + `${c.rest ? `<pre class="up-log-text">${esc(c.rest)}</pre>` : ''}`;
+              + `${c.rest ? `<div class="up-log-older"><button class="up-link up-older-toggle" data-older="${esc(u.package)}">${oldExpanded.has(u.package) ? '▾ Hide older versions' : '▸ Show older versions'}</button>${oldExpanded.has(u.package) ? `<pre class="up-log-text">${esc(c.rest)}</pre>` : ''}</div>` : ''}`;
           })()}</div></td></tr>` : ''}`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
@@ -1668,19 +1669,35 @@ pageRenderers.updates = (() => {
       streaming = true;
       refresh.disabled = true; refresh.classList.add('up-btn-busy', 'up-btn-glow');
       refresh.innerHTML = '<span class="up-spinner-sm"></span><span>Checking…</span>';
-      const setProg = (label) => {
-        // single source of truth: a compact chip + the animated bar, no
-        // duplicated paragraph text underneath.
-        $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>working…</span>';
-        $('[data-up=table]', host).innerHTML = `<div class="up-scan-status"><div class="up-scanbar up-scanbar-active"><span></span></div><p class="up-scan-label">${esc(label)}</p></div>`;
+      const scanStart = Date.now();
+      const setProg = (label, done, total) => {
+        // Determinate progress with % and ETA when we have counts; the chips
+        // row just shows a quiet status (no redundant "working…" pill).
+        let pct = 0, eta = '';
+        if (total > 0) {
+          pct = Math.round((done / total) * 100);
+          const elapsed = (Date.now() - scanStart) / 1000;
+          if (done > 0) {
+            const perItem = elapsed / done;
+            const remain = Math.max(0, Math.round(perItem * (total - done)));
+            eta = remain >= 60 ? `~${Math.floor(remain / 60)}m ${remain % 60}s left` : `~${remain}s left`;
+          }
+        }
+        $('[data-up=chips]', host).innerHTML = `<span class="up-chip up-checking"><span class="up-spinner-sm"></span>${esc(label)}</span>`;
+        $('[data-up=table]', host).innerHTML = total > 0
+          ? `<div class="up-scan-status">
+               <div class="up-progbar"><span style="width:${pct}%"></span></div>
+               <div class="up-prog-meta"><span>${esc(label)}</span><span class="up-prog-pct">${pct}% · ${done}/${total}${eta ? ' · ' + eta : ''}</span></div>
+             </div>`
+          : `<div class="up-scan-status"><div class="up-scanbar up-scanbar-active"><span></span></div><p class="up-scan-label">${esc(label)}</p></div>`;
       };
       setProg('Running apt-get update…');
       const ev = new EventSource('/api/updates/refresh/stream');
       ev.addEventListener('progress', (e) => {
         const p = JSON.parse(e.data);
-        if (p.phase === 'apt-update') setProg('Running apt-get update…');
+        if (p.phase === 'apt-update') setProg('Updating package index…');
         else if (p.phase === 'listing') setProg('Listing upgradable packages…');
-        else if (p.phase === 'scanning') setProg(`Scanning changelogs for security fixes… ${p.done || 0}/${p.total || '?'}${p.pkg ? ' (' + p.pkg + ')' : ''}`);
+        else if (p.phase === 'scanning') setProg(`Scanning ${p.pkg || ''}`.trim(), p.done || 0, p.total || 0);
       });
       ev.addEventListener('done', async () => { ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); await load(host); toast('success', 'Updates', 'Check complete'); });
       ev.addEventListener('error', (e) => { let m = 'check failed'; try { m = JSON.parse(e.data).message; } catch { /* */ } ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); toast('error', 'Updates', m); render(host); });
@@ -1708,6 +1725,7 @@ pageRenderers.updates = (() => {
     });
     host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
     host.querySelectorAll('[data-dlfull]').forEach((b) => b.onclick = () => downloadFullChangelog(host, b.dataset.dlfull));
+    host.querySelectorAll('[data-older]').forEach((b) => b.onclick = () => { const p = b.dataset.older; oldExpanded.has(p) ? oldExpanded.delete(p) : oldExpanded.add(p); render(host); });
     const b = $('[data-up=selected]', host);
     if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
   }
@@ -1745,7 +1763,7 @@ pageRenderers.updates = (() => {
 
   async function showChangelog(host, pkg) {
     // toggle inline row directly under the clicked package
-    if (expandedLog === pkg) { expandedLog = null; render(host); return; }
+    if (expandedLog === pkg) { expandedLog = null; oldExpanded.delete(pkg); render(host); return; }
     expandedLog = pkg;
     render(host);
     if (logCache[pkg] === undefined) {
