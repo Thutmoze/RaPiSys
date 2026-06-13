@@ -202,16 +202,40 @@ function buildGrid({ editable }) {
       ],
     },
   }, gridEl);
-  // force a column/layout recompute now that the container is full-width
-  requestAnimationFrame(() => {
-    try { g.onParentResize?.(); } catch { /* */ }
-    window.dispatchEvent(new Event('resize'));
+
+  // GridStack can measure the grid element before the browser has finished
+  // laying out the page (fonts/reflow), computing a near-zero cell width →
+  // widgets render as thin slivers until a resize event fires. Force a robust
+  // recompute after paint: re-assert the column count (which recalculates cell
+  // width against the now-settled element width) across a couple of frames and
+  // a short timeout as a safety net.
+  const recompute = () => {
+    try {
+      if (gridEl.offsetWidth > 0) {
+        g.onParentResize?.();
+        g.cellHeight(CELL);          // re-assert sizing → triggers relayout
+      }
+    } catch { /* */ }
+  };
+  requestAnimationFrame(() => requestAnimationFrame(recompute));
+  setTimeout(recompute, 80);
+  setTimeout(recompute, 300);
+  // Also recompute the first time the grid element actually gains width (e.g.
+  // it was built while hidden/0-width during page activation). Disconnect once
+  // a real width is seen so we don't keep firing.
+  let lastW = 0;
+  const widthRO = new ResizeObserver(() => {
+    const w = gridEl.offsetWidth;
+    if (w > 0 && Math.abs(w - lastW) > 4) { lastW = w; recompute(); }
   });
+  widthRO.observe(gridEl);
+  g._widthRO = widthRO;
   return g;
 }
 
 /** Restore all widget nodes to their home containers and remove the grid. */
 function teardownGrid() {
+  try { grid?._widthRO?.disconnect(); } catch { /* */ }
   const grids = document.querySelectorAll('.grid-stack.rapisys-grid');
   // disconnect scale observers
   grids.forEach((g) => g.querySelectorAll('.gs-body').forEach((b) => {
