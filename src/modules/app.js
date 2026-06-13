@@ -1647,9 +1647,9 @@ pageRenderers.updates = (() => {
       catch (e) { toast('error', 'Updates', e.message); render(host); }
     };
     const sec = $('[data-up=security]', host);
-    if (sec) sec.onclick = () => startUpgrade(host, { packages: updates.filter((u) => u.security).map((u) => u.package), label: 'security updates' });
+    if (sec) sec.onclick = () => confirmUpgrade(host, { packages: updates.filter((u) => u.security).map((u) => u.package), label: 'security updates' });
     const selBtn = $('[data-up=selected]', host);
-    if (selBtn) selBtn.onclick = () => startUpgrade(host, { packages: [...selected], label: `${selected.size} package(s)` });
+    if (selBtn) selBtn.onclick = () => confirmUpgrade(host, { packages: [...selected], label: `${selected.size} selected package(s)` });
     const full = $('[data-up=full]', host);
     if (full) full.onclick = () => confirmFull(host);
     const fw = $('[data-up=firmware]', host);
@@ -1696,6 +1696,17 @@ pageRenderers.updates = (() => {
     ov.querySelector('[data-up=cancel]').onclick = () => ov.remove();
     ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
     setTimeout(() => typed.focus(), 50);
+  }
+
+  async function confirmUpgrade(host, { packages, label }) {
+    if (!packages || !packages.length) { toast('info', 'Updates', 'Nothing selected'); return; }
+    // Show the list and let apt's simulation reveal any extra deps pulled in.
+    const preview = packages.slice(0, 20).map(esc).join(', ') + (packages.length > 20 ? `, +${packages.length - 20} more` : '');
+    const msg = `Update <b>${packages.length}</b> package(s) — ${esc(label)}?`
+      + `<br><br><span class="up-confirm-list">${preview}</span>`
+      + `<br><br>apt will also pull in any required dependencies. Output streams live below.`;
+    if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true })) return;
+    startUpgrade(host, { packages, label });
   }
 
   function startUpgrade(host, { packages = null, full = false, label }) {
