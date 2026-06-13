@@ -245,6 +245,15 @@ const OPS = {
         .sort((a, b) => b.queries - a.queries).slice(0, Number(limit) || 20);
       return { source: 'resolved-journal', domains };
     }
+    // Identify the active resolver (Tailscale MagicDNS shows as 100.100.100.100).
+    let resolver = null;
+    try {
+      const rc = fs.readFileSync('/etc/resolv.conf', 'utf-8');
+      const ns = (rc.match(/^nameserver\s+(\S+)/m) || [])[1];
+      if (ns === '100.100.100.100') resolver = 'Tailscale MagicDNS';
+      else if (ns) resolver = ns;
+    } catch { /* none */ }
+
     // fallback: live DNS peers the Pi is talking to right now
     const ss = await run('sh', ['-c', "ss -tunp 'dport = :53' 2>/dev/null"], 4000).catch(() => ({ stdout: '' }));
     const peers = {};
@@ -252,7 +261,7 @@ const OPS = {
       const m = line.match(/\s(\S+):53\s/);
       if (m) peers[m[1]] = (peers[m[1]] || 0) + 1;
     }
-    return { source: 'live-peers',
+    return { source: 'live-peers', resolver,
       domains: Object.entries(peers).map(([domain, queries]) => ({ domain, queries })).slice(0, Number(limit) || 20) };
   },
 

@@ -12,11 +12,32 @@
  */
 
 import fs from 'fs';
+import dns from 'dns';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
 const execFileAsync = promisify(execFile);
+const reverse = promisify(dns.reverse);
+
+// Bounded reverse-DNS cache so connection lists show hostnames, not raw IPs.
+const rdnsCache = new Map();   // ip -> { name, at }
+const RDNS_TTL = 10 * 60e3;
+async function resolveHost(ip) {
+  if (!ip || /^(127\.|::1|fe80|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) return null;
+  const hit = rdnsCache.get(ip);
+  if (hit && Date.now() - hit.at < RDNS_TTL) return hit.name;
+  try {
+    const names = await reverse(ip);
+    const name = names?.[0] || null;
+    rdnsCache.set(ip, { name, at: Date.now() });
+    if (rdnsCache.size > 500) rdnsCache.delete(rdnsCache.keys().next().value);
+    return name;
+  } catch {
+    rdnsCache.set(ip, { name: null, at: Date.now() });
+    return null;
+  }
+}
 const HOST_PROC = fs.existsSync('/host/proc') ? '/host/proc' : '/proc';
 
 // Loopback and container-internal veths are noise; everything else
@@ -158,6 +179,8 @@ export function createNetworkCollector() {
         });
       }
     } catch { /* ss unavailable */ }
+    // best-effort reverse DNS for public peers (cached)
+    await Promise.all(out.map(async (c) => { c.peerHost = await resolveHost(c.peer); }));
     return out;
   }
 
@@ -209,7 +232,12 @@ export function createNetworkCollector() {
         const recent = await agentCall('dns.recent', { limit: 20 }, null, 6000);
         if (recent.domains?.length) {
           return { available: true, source: recent.source, loggingEnabled: false,
-            domains: recent.domains, ownQueries: true };
+            domains: recent.domains, ownQueries: true, resolver: recent.resolver };
+        }
+        if (recent.resolver) {
+          // No per-query data, but we can at least name the resolver.
+          return { available: true, source: recent.source, loggingEnabled: false,
+            domains: [], resolver: recent.resolver, ownQueries: true };
         }
       } catch { /* fall through to resolver stats */ }
     }

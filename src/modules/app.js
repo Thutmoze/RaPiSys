@@ -1006,11 +1006,15 @@ pageRenderers.network = (() => {
   async function refreshLive(host) {
     let t;
     try { t = await api('/network/throughput'); } catch { return; }
-    const ifaces = Object.entries(t.interfaces)
+    const allIfaces = Object.entries(t.interfaces)
       .sort((a, b) => (b[1].rxRate + b[1].txRate) - (a[1].rxRate + a[1].txRate));
+    // Bridges/docker are internal plumbing — hidden unless the user opts in.
+    const showVirtual = pageRenderers.network._showVirtual;
+    const ifaces = allIfaces.filter(([, v]) => showVirtual || v.kind !== 'bridge');
+    const hiddenCount = allIfaces.length - ifaces.length;
     let totalRx = 0, totalTx = 0;
     const now = Date.now();
-    for (const [name, v] of ifaces) {
+    for (const [name, v] of allIfaces) {
       ensureSeries(name);
       if (series[name]) {
         series[name].rx.append(now, v.rxRate * 8 / 1e6);
@@ -1032,7 +1036,12 @@ pageRenderers.network = (() => {
           <span class="net-iface-rates">▼ ${fmtRate(v.rxRate)} &nbsp; ▲ ${fmtRate(v.txRate)}</span>
           <span class="net-iface-total">${fmtBytes(v.rxBytes + v.txBytes)}</span>
         </button>`;
-    }).join('') || '<p class="sess-empty">No interfaces</p>';
+    }).join('')
+      + (hiddenCount > 0 || showVirtual
+        ? `<button class="net-toggle net-virtual-toggle" data-net="togglevirt">${showVirtual ? 'Hide' : 'Show'} ${showVirtual ? '' : hiddenCount + ' '}virtual / bridge interfaces</button>`
+        : '');
+    const tv = $('[data-net=togglevirt]', host);
+    if (tv) tv.onclick = () => { pageRenderers.network._showVirtual = !showVirtual; refreshLive(host); };
 
     $('[data-net=ifaces]', host).querySelectorAll('[data-iface]').forEach((b) => b.onclick = () => {
       const n = b.dataset.iface;
@@ -1051,7 +1060,8 @@ pageRenderers.network = (() => {
     if (!vn.interfaces.length) { vh.innerHTML = '<p class="sess-empty">vnStat is collecting — history appears shortly.</p>'; return; }
 
     const KEY = { fiveminute: 'fiveminutes', minute: 'fiveminutes', hour: 'hours', day: 'days', week: 'days', month: 'months' };
-    vh.innerHTML = vn.interfaces.map((i) => {
+    const histIfaces = vn.interfaces.filter((i) => pageRenderers.network._showVirtual || !/^(br-|docker|virbr)/.test(i.name));
+    vh.innerHTML = histIfaces.map((i) => {
       let buckets = histPeriod === 'hour' ? i.hours
         : histPeriod === 'month' ? i.months
         : i.days;
@@ -1092,7 +1102,7 @@ pageRenderers.network = (() => {
           ${expandedSvc === s.service ? `<div class="net-conns">${
             s.conns.map((c) => `<div class="net-conn">
               <span>${esc(c.comm || '?')}${c.pid ? ` <small>${c.pid}</small>` : ''}</span>
-              <span class="net-conn-peer">:${c.localPort ?? '?'} → ${esc(c.peer)}:${c.peerPort ?? '?'}</span>
+              <span class="net-conn-peer">:${c.localPort ?? '?'} → ${esc(c.peerHost || c.peer)}:${c.peerPort ?? '?'}</span>
             </div>`).join('')
           }</div>` : ''}
         </div>`).join('') : '<p class="sess-empty">No active connections</p>');
@@ -1154,6 +1164,9 @@ pageRenderers.network = (() => {
       html = `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
         <div class="set-kv"><span>Cache hits</span><b>${(d.cacheHits ?? 0).toLocaleString()}</b></div>
         <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>`;
+    } else if (d.resolver) {
+      html = `<div class="set-kv"><span>Active resolver</span><b>${esc(d.resolver)}</b></div>
+        <p class="net-dns-note">This Pi resolves DNS through ${esc(d.resolver)}. Per-domain query history isn\u2019t exposed by this resolver; connection peers are reverse-resolved to hostnames in the Protocols panel instead.</p>`;
     } else {
       html = '<p class="sess-empty">No DNS data available from this Pi\u2019s resolver.</p>';
     }
