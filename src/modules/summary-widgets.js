@@ -18,11 +18,13 @@ export const SUMMARY_WIDGETS = [
     id: 'sum-sessions', title: 'Active Sessions', icon: iconUsers, nav: '#/sessions',
     async load(elv) {
       const d = await getJSON('/api/sessions');
-      const active = (d.active || d.sessions || []).filter((s) => !s.ended_at && !s.endedAt);
-      const ssh = active.filter((s) => (s.kind || '').toLowerCase() === 'ssh').length;
-      const vnc = active.filter((s) => (s.kind || '').toLowerCase() === 'vnc').length;
-      const ts = active.filter((s) => (s.kind || '').toLowerCase() === 'tailscale').length;
-      setBig(elv, active.length, 'active now');
+      const ssh = (d.ssh || []).length;
+      const vnc = (d.vnc || []).length;
+      // tailscale is an object with a peers array (active peers)
+      const ts = (d.tailscale?.peers || []).filter((p) => p.active || p.online).length
+        || (Array.isArray(d.tailscale) ? d.tailscale.length : 0);
+      const total = ssh + vnc + ts;
+      setBig(elv, total, total ? 'active now' : 'none active');
       setRow(elv, [['SSH', ssh], ['VNC', vnc], ['Tailscale', ts]]);
     },
   },
@@ -50,9 +52,16 @@ export const SUMMARY_WIDGETS = [
   {
     id: 'sum-health', title: 'Health Score', icon: iconHeart, nav: '#/reports',
     async load(elv) {
-      const d = await getJSON('/api/reports/daily?days=1');
-      const day = (d.days || [])[0] || (d.days || [])[(d.days || []).length - 1];
-      const score = day?.payload?.health?.score ?? day?.health?.score;
+      let score;
+      try {
+        const t = await getJSON('/api/reports/today');
+        score = t?.health?.overall ?? t?.health?.score;
+      } catch { /* fall back to latest daily */ }
+      if (score == null) {
+        const d = await getJSON('/api/reports/daily?days=1');
+        const day = (d.days || [])[0];
+        score = day?.payload?.health?.overall ?? day?.payload?.health?.score;
+      }
       if (score == null) { setBig(elv, '—', 'no data yet'); return; }
       const tone = score >= 80 ? 'ok' : score >= 50 ? 'warn' : 'crit';
       setBig(elv, Math.round(score), 'out of 100', tone);
@@ -96,7 +105,9 @@ export const SUMMARY_WIDGETS = [
       const d = await getJSON('/api/network');
       const doms = d.dns?.domains || [];
       if (!doms.length) {
-        setBig(elv, '—', 'DNS logging off');
+        // no per-domain history (resolver doesn't expose it / logging off)
+        setBig(elv, '—', 'logging off');
+        setRow(elv, [['Resolver', shortResolver(d.dns?.resolver)]]);
         return;
       }
       setBig(elv, doms.length, 'domains');
@@ -106,6 +117,11 @@ export const SUMMARY_WIDGETS = [
 ];
 
 // --- helpers ---------------------------------------------------------------
+
+function shortResolver(r) {
+  if (!r) return '—';
+  return String(r).replace(/^https?:\/\//, '').split('/')[0].slice(0, 18);
+}
 
 async function getJSON(url) {
   const r = await fetch(url, { credentials: 'same-origin' });
@@ -155,7 +171,7 @@ function iconUsers() { return svg('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-
 function iconDownload() { return svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>'); }
 function iconBell() { return svg('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'); }
 function iconHeart() { return svg('<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/>'); }
-function iconFan() { return svg('<path d="M12 12m0 0a4 4 0 0 0 4-4c0-2-1-4-4-4s-4 4-4 4a4 4 0 0 0 4 4z"/><circle cx="12" cy="12" r="1.5"/>'); }
+function iconFan() { return svg('<path d="M12 12c0-3 .5-6 3-6s3 3 0 4.5"/><path d="M12 12c3 0 6 .5 6 3s-3 3-4.5 0"/><path d="M12 12c0 3-.5 6-3 6s-3-3 0-4.5"/><path d="M12 12c-3 0-6-.5-6-3s3-3 4.5 0"/><circle cx="12" cy="12" r="1.5"/>'); }
 function iconBolt() { return svg('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'); }
 function iconShuffle() { return svg('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>'); }
 function iconGlobe() { return svg('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'); }

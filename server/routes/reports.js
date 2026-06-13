@@ -11,6 +11,13 @@ export function reportsRouter({ reports, reportsRepo }) {
     res.json({ days: reportsRepo.recentDays(n) });
   });
 
+  // Live "today" summary incl. a current health score, computed on demand so
+  // the overview health widget shows a value before the nightly job runs.
+  r.get('/today', (req, res) => {
+    try { res.json(reports.materializeDay(Date.now())); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Weekly / monthly aggregation.
   r.get('/weekly', (req, res) => res.json(reports.aggregate('week')));
   r.get('/monthly', (req, res) => res.json(reports.aggregate('month')));
