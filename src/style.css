@@ -5388,3 +5388,36 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 /* summary value font shrinks for longer text values (protocols, resolver) */
 .sw-value.sw-value-sm { font-size: 24px; }
 .sw-value.sw-value-xs { font-size: 17px; line-height: 1.2; }
+
+/* ---------------------------------------------------------------------------
+   Mobile / narrow viewport: a 12-column grid is unusable below ~760px (each
+   column is too thin and content scales tiny). Rather than use GridStack's
+   lossy column remap (which zeroed widths), we override the grid with CSS to
+   stack every widget full-width vertically. GridStack v11 positions items via
+   computed CSS from gs-* attributes, so neutralizing position/left/width here
+   makes them flow naturally.
+   --------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+  body.layout-grid-active .rapisys-grid.grid-stack {
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  body.layout-grid-active .rapisys-grid .grid-stack-item {
+    position: relative !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 220px;
+    transform: none !important;
+    margin-bottom: 12px;
+  }
+  /* content fills the stacked widget naturally; no scaling needed full-width */
+  body.layout-grid-active .rapisys-grid .gs-body[data-fit="scale"] .gs-scale {
+    transform: none !important;
+    width: 100% !important;
+  }
+  body.layout-grid-active .rapisys-grid .gs-body { align-items: stretch; }
+}
