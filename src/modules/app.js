@@ -1667,7 +1667,7 @@ pageRenderers.updates = (() => {
     if (refresh) refresh.onclick = () => {
       if (streaming) { toast('info', 'Updates', 'A check is already running'); return; }
       streaming = true;
-      refresh.disabled = true; refresh.classList.add('up-btn-busy');
+      refresh.disabled = true; refresh.classList.add('up-btn-busy', 'up-btn-glow');
       refresh.innerHTML = '<span class="up-spinner-sm"></span><span>Checking…</span>';
       const setProg = (label) => {
         // single source of truth: a compact chip + the animated bar, no
@@ -1683,8 +1683,8 @@ pageRenderers.updates = (() => {
         else if (p.phase === 'listing') setProg('Listing upgradable packages…');
         else if (p.phase === 'scanning') setProg(`Scanning changelogs for security fixes… ${p.done || 0}/${p.total || '?'}${p.pkg ? ' (' + p.pkg + ')' : ''}`);
       });
-      ev.addEventListener('done', async () => { ev.close(); streaming = false; await load(host); toast('success', 'Updates', 'Check complete'); });
-      ev.addEventListener('error', (e) => { let m = 'check failed'; try { m = JSON.parse(e.data).message; } catch { /* */ } ev.close(); streaming = false; toast('error', 'Updates', m); render(host); });
+      ev.addEventListener('done', async () => { ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); await load(host); toast('success', 'Updates', 'Check complete'); });
+      ev.addEventListener('error', (e) => { let m = 'check failed'; try { m = JSON.parse(e.data).message; } catch { /* */ } ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); toast('error', 'Updates', m); render(host); });
     };
     const sec = $('[data-up=security]', host);
     if (sec) sec.onclick = () => confirmUpgrade(host, { packages: updates.filter((u) => u.security).map((u) => u.package), label: 'security updates' });

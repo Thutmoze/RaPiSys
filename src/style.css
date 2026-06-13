@@ -5072,3 +5072,11 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-dl-meta { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .up-dl-prog .up-scanbar { height: 4px; }
 .up-dl-prog .up-scanbar span { transition: width 0.2s ease; }
+
+/* Updates: glowing "Checking…" button while a scan is active */
+.up-btn-glow { border-color: var(--accent-cyan) !important; color: var(--accent-cyan) !important;
+  animation: up-glow 1.3s ease-in-out infinite; }
+@keyframes up-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(0,212,255,0.3), 0 0 8px rgba(0,212,255,0.15); }
+  50% { box-shadow: 0 0 10px rgba(0,212,255,0.6), 0 0 20px rgba(0,212,255,0.3); }
+}

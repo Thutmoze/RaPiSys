@@ -8,14 +8,13 @@
 
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
-// Up to the second dpkg changelog header = the newest (candidate) entry.
+// Security signals can live in a LATER sub-entry — e.g. the upstream
+// "trixie-security; urgency=high" block that follows the benign rpt1 repackage
+// block. The fetched changelog is already trimmed to the candidate's recent
+// notes (~150 lines), so scan the whole fetched text rather than only the
+// first version block.
 function firstEntry(text) {
-  const lines = String(text || '').split('\n');
-  let end = lines.length, seen = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\S.*\([^)]+\)\s/.test(lines[i])) { if (seen) { end = i; break; } seen = true; }
-  }
-  return lines.slice(0, end).join('\n');
+  return String(text || '');
 }
 
 export function createUpdatesCollector({ updatesRepo } = {}) {
