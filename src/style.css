@@ -4994,3 +4994,28 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .inv-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border-color);
   border-top-color: var(--accent-cyan); border-radius: 50%; animation: inv-spin 0.6s linear infinite; }
 @keyframes inv-spin { to { transform: rotate(360deg); } }
+
+/* Updates page (F8) */
+.up-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.up-chip { font-size: 12px; padding: 6px 14px; border-radius: 999px; background: var(--bg-secondary);
+  color: var(--text-secondary); border: 1px solid var(--border-color); }
+.up-chip-sec { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
+.up-chip-kern { color: #a855f7; border-color: rgba(168,85,247,0.4); }
+.up-chip-fw { color: var(--accent-cyan); border-color: rgba(0,212,255,0.4); }
+.up-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.up-act-sec { color: #f59e0b !important; border-color: rgba(245,158,11,0.4) !important; }
+.up-act-danger { color: var(--accent-red, #ef4444) !important; border-color: rgba(239,68,68,0.35) !important; }
+.up-act-fw { color: var(--accent-cyan) !important; }
+.up-table th input, .up-cb { cursor: pointer; }
+.up-new { color: #10b981; font-weight: 600; }
+.up-tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; margin-right: 4px; }
+.up-tag-sec { color: #f59e0b; border: 1px solid rgba(245,158,11,0.4); }
+.up-tag-kern { color: #a855f7; border: 1px solid rgba(168,85,247,0.4); }
+.up-link { background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 12px; font-family: inherit; padding: 0; }
+.up-link:hover { text-decoration: underline; }
+.up-progress { margin: 14px 0; padding: 14px; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); }
+.up-progress-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.up-log { font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5; max-height: 320px;
+  overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); margin: 0; }
+.up-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-color);
+  border-top-color: var(--accent-cyan); border-radius: 50%; animation: inv-spin 0.6s linear infinite; }

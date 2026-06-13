@@ -23,6 +23,8 @@ import { createReportsRepo } from './repositories/reports.js';
 import { createReports } from './services/reports.js';
 import { createInventoryCollector } from './collectors/inventory.js';
 import { createInventoryRepo } from './repositories/inventory.js';
+import { createUpdatesCollector } from './collectors/updates.js';
+import { createUpdatesRepo } from './repositories/updates.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
@@ -38,6 +40,7 @@ import { sessionsRouter } from './routes/sessions.js';
 import { networkRouter } from './routes/network.js';
 import { reportsRouter } from './routes/reports.js';
 import { inventoryRouter } from './routes/inventory.js';
+import { updatesRouter } from './routes/updates.js';
 import { authRouter } from './routes/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,7 +66,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
@@ -72,6 +75,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     sessionsRepo = createSessionsRepo(getDb());
     reportsRepo = createReportsRepo(getDb());
     inventoryRepo = createInventoryRepo(getDb());
+    updatesRepo = createUpdatesRepo(getDb());
   }
   rebuildRepos();
 
@@ -128,6 +132,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   reports.backfill(14);
   const inventory = createInventoryCollector();
   const inventoryRepoFacade = new Proxy({}, { get: (_, m) => (...a) => inventoryRepo[m](...a) });
+  const updates = createUpdatesCollector();
+  const updatesRepoFacade = new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) });
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
     eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
@@ -194,6 +200,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/network', networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
   app.use('/api/reports', reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/updates', updatesRouter({ updates, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,

@@ -314,7 +314,7 @@ const PAGES = [
   { id: 'sessions', label: 'Sessions' },
   { id: 'network', label: 'Network' },
   { id: 'reports', label: 'Reports' },
-  { id: 'updates', label: 'Updates', soon: true },
+  { id: 'updates', label: 'Updates' },
   { id: 'inventory', label: 'Inventory' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'settings', label: 'Settings' },
@@ -1435,10 +1435,10 @@ pageRenderers.inventory = (() => {
     total = data.total;
     const rows = data.rows;
     const head = kind === 'package'
-      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th></th>'
+      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th class="inv-actions">Action</th>'
       : kind === 'service'
-      ? '<th>Service</th><th>Status</th><th>Description</th><th></th>'
-      : '<th>Container</th><th>Image</th><th>Status</th><th></th>';
+      ? '<th>Service</th><th>Status</th><th>Description</th><th class="inv-actions">Action</th>'
+      : '<th>Container</th><th>Image</th><th>Status</th><th class="inv-actions">Action</th>';
 
     $('[data-inv=table]', host).innerHTML = rows.length ? `
       <table class="inv-table">
@@ -1563,6 +1563,191 @@ pageRenderers.inventory = (() => {
       loadSummary(host); loadRows(host);
     },
     unmount() { clearTimeout(searchTimer); },
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Updates page (F8) — apt + firmware updates with live progress & history
+// ---------------------------------------------------------------------------
+
+pageRenderers.updates = (() => {
+  let updates = [], firmware = null, selected = new Set();
+  let streaming = false;
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  async function load(host) {
+    let data;
+    try { data = await api('/updates'); } catch { return; }
+    updates = data.updates || [];
+    firmware = await api('/updates/firmware').catch(() => null);
+    render(host);
+  }
+
+  function render(host) {
+    const sec = updates.filter((u) => u.security).length;
+    const kern = updates.filter((u) => u.kernel).length;
+    const fw = firmware?.updateAvailable;
+
+    $('[data-up=chips]', host).innerHTML = `
+      <span class="up-chip">${updates.length} update${updates.length !== 1 ? 's' : ''}</span>
+      ${sec ? `<span class="up-chip up-chip-sec">${sec} security</span>` : ''}
+      ${kern ? `<span class="up-chip up-chip-kern">${kern} kernel</span>` : ''}
+      <span class="up-chip ${fw ? 'up-chip-fw' : ''}">firmware ${fw ? 'update available' : 'ok'}</span>`;
+
+    $('[data-up=actions]', host).innerHTML = `
+      <button class="net-toggle" data-up="refresh">Check for updates</button>
+      ${sec ? '<button class="net-toggle up-act-sec" data-up="security">Install security updates</button>' : ''}
+      <button class="net-toggle" data-up="selected" disabled>Update selected (0)</button>
+      <button class="net-toggle up-act-danger" data-up="full">Full upgrade…</button>
+      ${fw ? '<button class="net-toggle up-act-fw" data-up="firmware">Update firmware</button>' : ''}`;
+    wireActions(host);
+
+    $('[data-up=table]', host).innerHTML = updates.length ? `
+      <table class="inv-table up-table">
+        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Installed</th><th>Available</th><th>Tags</th><th>Changelog</th></tr></thead>
+        <tbody>${updates.map((u) => `
+          <tr>
+            <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
+            <td><b>${esc(u.package)}</b></td>
+            <td class="inv-dim">${esc(u.installed || '—')}</td>
+            <td class="up-new">${esc(u.candidate)}</td>
+            <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
+            <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
+          </tr>`).join('')}</tbody>
+      </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
+    wireTable(host);
+  }
+
+  function wireActions(host) {
+    const refresh = $('[data-up=refresh]', host);
+    if (refresh) refresh.onclick = async () => {
+      refresh.textContent = 'Checking…'; refresh.disabled = true;
+      try { await api('/updates/refresh', { method: 'POST', body: {} }); await load(host); toast('success', 'Updates', 'Checked'); }
+      catch (e) { toast('error', 'Updates', e.message); refresh.textContent = 'Check for updates'; refresh.disabled = false; }
+    };
+    const sec = $('[data-up=security]', host);
+    if (sec) sec.onclick = () => startUpgrade(host, { packages: updates.filter((u) => u.security).map((u) => u.package), label: 'security updates' });
+    const selBtn = $('[data-up=selected]', host);
+    if (selBtn) selBtn.onclick = () => startUpgrade(host, { packages: [...selected], label: `${selected.size} package(s)` });
+    const full = $('[data-up=full]', host);
+    if (full) full.onclick = () => confirmFull(host);
+    const fw = $('[data-up=firmware]', host);
+    if (fw) fw.onclick = () => startFirmware(host);
+  }
+
+  function wireTable(host) {
+    const all = $('[data-up=all]', host);
+    if (all) all.onclick = () => {
+      if (all.checked) updates.forEach((u) => selected.add(u.package)); else selected.clear();
+      render(host);
+    };
+    host.querySelectorAll('.up-cb').forEach((cb) => cb.onclick = () => {
+      if (cb.checked) selected.add(cb.dataset.pkg); else selected.delete(cb.dataset.pkg);
+      const b = $('[data-up=selected]', host);
+      if (b) { b.disabled = selected.size === 0; b.textContent = `Update selected (${selected.size})`; }
+    });
+    host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
+    const b = $('[data-up=selected]', host);
+    if (b) { b.disabled = selected.size === 0; b.textContent = `Update selected (${selected.size})`; }
+  }
+
+  async function showChangelog(host, pkg) {
+    const panel = $('[data-up=progress]', host);
+    panel.style.display = 'block';
+    panel.innerHTML = `<div class="up-progress-head"><b>Changelog: ${esc(pkg)}</b><button class="up-link" data-up="closepanel">close</button></div><pre class="up-log">Loading…</pre>`;
+    $('[data-up=closepanel]', host).onclick = () => { panel.style.display = 'none'; };
+    try { const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`); panel.querySelector('.up-log').textContent = r.changelog || 'No changelog.'; }
+    catch (e) { panel.querySelector('.up-log').textContent = 'Error: ' + e.message; }
+  }
+
+  async function confirmFull(host) {
+    // typed confirmation for the big hammer
+    const ov = el('div', 'wizard-overlay');
+    ov.innerHTML = `<div class="wizard card rconfirm">
+      <p class="rconfirm-msg">Full system upgrade (<b>apt dist-upgrade</b>) can install, remove, and change many packages at once. Type <b>UPGRADE</b> to confirm.</p>
+      <input class="inv-search" data-up="typed" placeholder="Type UPGRADE" autocomplete="off" style="margin-bottom:12px">
+      <div class="wz-row"><button class="action-btn rconfirm-danger" data-up="go" disabled>Full upgrade</button><button class="action-btn" data-up="cancel">Cancel</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    const typed = ov.querySelector('[data-up=typed]'), go = ov.querySelector('[data-up=go]');
+    typed.oninput = () => { go.disabled = typed.value.trim() !== 'UPGRADE'; };
+    go.onclick = () => { ov.remove(); startUpgrade(host, { full: true, label: 'full system upgrade' }); };
+    ov.querySelector('[data-up=cancel]').onclick = () => ov.remove();
+    ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => typed.focus(), 50);
+  }
+
+  function startUpgrade(host, { packages = null, full = false, label }) {
+    if (streaming) { toast('info', 'Updates', 'An upgrade is already running'); return; }
+    if (!full && (!packages || !packages.length)) return;
+    streaming = true;
+    const panel = $('[data-up=progress]', host);
+    panel.style.display = 'block';
+    panel.innerHTML = `<div class="up-progress-head"><b>Upgrading: ${esc(label)}</b><span class="up-spinner"></span></div><pre class="up-log" data-up="log"></pre>`;
+    const logEl = panel.querySelector('[data-up=log]');
+    const qs = full ? 'full=1' : `packages=${encodeURIComponent((packages || []).join(','))}`;
+    const ev = new EventSource(`/api/updates/stream?${qs}`);
+    ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
+    ev.addEventListener('done', (e) => {
+      const d = JSON.parse(e.data);
+      panel.querySelector('.up-spinner')?.remove();
+      logEl.textContent += `\n${d.ok ? '✓ Completed successfully' : '✗ Finished with errors (code ' + d.code + ')'}\n`;
+      toast(d.ok ? 'success' : 'error', 'Updates', d.ok ? 'Upgrade complete' : 'Upgrade had errors');
+      ev.close(); streaming = false; selected.clear(); load(host);
+    });
+    ev.addEventListener('error', (e) => {
+      let m = 'stream error'; try { m = JSON.parse(e.data).message; } catch { /* */ }
+      logEl.textContent += `\n✗ ${m}\n`; panel.querySelector('.up-spinner')?.remove();
+      ev.close(); streaming = false;
+    });
+  }
+
+  function startFirmware(host) {
+    if (streaming) return;
+    streaming = true;
+    const panel = $('[data-up=progress]', host);
+    panel.style.display = 'block';
+    panel.innerHTML = `<div class="up-progress-head"><b>Updating firmware (rpi-eeprom)</b><span class="up-spinner"></span></div><pre class="up-log" data-up="log"></pre>`;
+    const logEl = panel.querySelector('[data-up=log]');
+    const ev = new EventSource('/api/updates/firmware/stream');
+    ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
+    ev.addEventListener('done', (e) => { const d = JSON.parse(e.data); logEl.textContent += `\n✓ ${d.note || 'done'}\n`; toast('success', 'Firmware', d.note || 'Staged'); ev.close(); streaming = false; });
+    ev.addEventListener('error', () => { logEl.textContent += '\n✗ error\n'; ev.close(); streaming = false; });
+  }
+
+  async function loadHistory(host) {
+    let h;
+    try { h = await api('/updates/history'); } catch { return; }
+    $('[data-up=history]', host).innerHTML = h.history.length ? `
+      <table class="inv-table"><thead><tr><th>When</th><th>Package</th><th>Result</th></tr></thead>
+      <tbody>${h.history.map((e) => `<tr>
+        <td class="inv-dim">${new Date(e.ts).toLocaleString()}</td>
+        <td><b>${esc(e.package)}</b></td>
+        <td><span class="inv-badge ${e.result === 'success' ? 'inv-ok' : 'inv-err'}">${esc(e.result)}</span></td>
+      </tr>`).join('')}</tbody></table>` : '<p class="sess-empty">No update history yet.</p>';
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></div><span class="card-title">Software Updates</span></div>
+          <div class="card-body">
+            <div class="up-chips" data-up="chips"></div>
+            <div class="up-actions" data-up="actions"></div>
+            <div class="up-progress" data-up="progress" style="display:none"></div>
+            <div data-up="table"></div>
+          </div>
+        </div>
+        <div class="card sess-span">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z"/></svg></div><span class="card-title">Update History</span></div>
+          <div class="card-body" data-up="history"></div>
+        </div>
+      </div>`;
+      load(host); loadHistory(host);
+    },
+    unmount() { streaming = false; },
   };
 })();
 
