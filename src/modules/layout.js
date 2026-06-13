@@ -74,16 +74,55 @@ function makeItem(widget, placement, { editable }) {
     const bar = document.createElement('div');
     bar.className = 'gs-edit-bar';
     bar.innerHTML = `<span class="gs-edit-title">${widget.title}</span>
+      <span class="gs-size-ctrl">
+        <input type="number" class="gs-size-w" min="1" max="12" value="${placement.w}" title="Width (columns)">
+        <span class="gs-size-x">×</span>
+        <input type="number" class="gs-size-h" min="2" max="60" value="${placement.h}" title="Height (rows)">
+      </span>
       <button class="gs-hide-btn" data-hide="${widget.id}" title="Hide widget">✕</button>`;
     content.appendChild(bar);
   }
   const body = document.createElement('div');
   body.className = 'gs-body';
+  const scale = document.createElement('div');
+  scale.className = 'gs-scale';
   if (node.parentNode) node.parentNode.removeChild(node);
-  body.appendChild(node);
+  scale.appendChild(node);
+  body.appendChild(scale);
   content.appendChild(body);
   item.appendChild(content);
+  observeScale(body, scale);
   return item;
+}
+
+// Scale each widget's content to fit its cell using a CSS transform, so EVERY
+// piece of content (fonts, charts, gauges, spacing) shrinks/grows together —
+// the only general way to make arbitrary card internals resize with the widget.
+const scaleObservers = new WeakMap();
+function observeScale(body, scale) {
+  const apply = () => {
+    // natural (unscaled) content size
+    const prev = scale.style.transform;
+    scale.style.transform = 'none';
+    const naturalW = scale.scrollWidth || scale.offsetWidth;
+    const naturalH = scale.scrollHeight || scale.offsetHeight;
+    scale.style.transform = prev;
+    const availW = body.clientWidth - 8;   // minus padding
+    const availH = body.clientHeight - 8;
+    if (naturalW <= 0 || naturalH <= 0 || availW <= 0 || availH <= 0) return;
+    // fit by the tighter dimension; never upscale past 1 to avoid blurriness on
+    // bitmap content, but allow a little growth for sparse widgets.
+    const s = Math.min(availW / naturalW, availH / naturalH, 1.25);
+    scale.style.transform = `scale(${s})`;
+    scale.style.width = `${naturalW}px`;
+    scale.style.height = `${naturalH}px`;
+  };
+  const ro = new ResizeObserver(() => requestAnimationFrame(apply));
+  ro.observe(body);
+  scaleObservers.set(body, ro);
+  // initial pass after layout settles
+  requestAnimationFrame(apply);
+  setTimeout(apply, 120);
 }
 
 /** Measure a widget's natural height in grid rows (for default sizing). */
@@ -148,10 +187,18 @@ function buildGrid({ editable }) {
 /** Restore all widget nodes to their home containers and remove the grid. */
 function teardownGrid() {
   const grids = document.querySelectorAll('.grid-stack.rapisys-grid');
+  // disconnect scale observers
+  grids.forEach((g) => g.querySelectorAll('.gs-body').forEach((b) => {
+    const ro = scaleObservers.get(b); if (ro) { ro.disconnect(); scaleObservers.delete(b); }
+  }));
   document.querySelectorAll('[data-rapisys-widget]').forEach((node) => {
     const id = node.getAttribute('data-rapisys-widget');
     const widget = WById[id];
     const home = widget ? document.querySelector(widget.home) : null;
+    // clear any inline styles applied while gridded
+    node.style.removeProperty('transform');
+    node.style.removeProperty('width');
+    node.style.removeProperty('height');
     if (home) home.appendChild(node);
   });
   grids.forEach((g) => g.remove());
@@ -205,6 +252,32 @@ async function enterEditMode() {
   grid = buildGrid({ editable: true });
   buildEditToolbar();
   wireHideButtons();
+  wireSizeInputs();
+  // keep the W×H inputs in sync when the user drags-resizes
+  grid.on('change', (e, nodes) => {
+    for (const n of nodes || []) {
+      const el = n.el;
+      const wi = el.querySelector('.gs-size-w'); const hi = el.querySelector('.gs-size-h');
+      if (wi) wi.value = n.w; if (hi) hi.value = n.h;
+    }
+  });
+}
+
+function wireSizeInputs() {
+  document.querySelectorAll('.gs-size-ctrl').forEach((ctrl) => {
+    const item = ctrl.closest('.grid-stack-item');
+    const wi = ctrl.querySelector('.gs-size-w');
+    const hi = ctrl.querySelector('.gs-size-h');
+    const apply = () => {
+      const w = Math.min(12, Math.max(1, Number(wi.value) || 1));
+      const h = Math.min(60, Math.max(2, Number(hi.value) || 2));
+      if (grid && item) grid.update(item, { w, h });
+    };
+    wi.onchange = apply; hi.onchange = apply;
+    // don't let clicks on the inputs start a drag
+    ctrl.addEventListener('mousedown', (e) => e.stopPropagation());
+    ctrl.addEventListener('pointerdown', (e) => e.stopPropagation());
+  });
 }
 
 function ensureParking() {
