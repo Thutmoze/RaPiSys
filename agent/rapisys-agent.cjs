@@ -683,10 +683,29 @@ WantedBy=multi-user.target
   },
   async 'apt.changelog'({ pkg }) {
     assert(PKG_RE.test(pkg), 'invalid package name');
-    const { stdout } = await run('apt-get', ['changelog', '--print-uris', pkg], 15000).catch(() => ({ stdout: '' }));
-    const r = await run('apt', ['changelog', pkg], 20000).catch(() => ({ stdout: '' }));
-    const text = (r.stdout || stdout || '').split('\n').slice(0, 60).join('\n');
-    return { changelog: text || 'No changelog available.' };
+    // The local changelog (installed under /usr/share/doc) is the reliable
+    // source: `apt changelog` fetches over the network and frequently fails
+    // on Trixie / rpt1-repackaged packages. Read the gzipped local copy.
+    const docDir = `/usr/share/doc/${pkg}`;
+    const candidates = ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog'];
+    let text = '';
+    try {
+      for (const f of candidates) {
+        const p = path.join(docDir, f);
+        if (!fs.existsSync(p)) continue;
+        const buf = fs.readFileSync(p);
+        text = f.endsWith('.gz') ? require('zlib').gunzipSync(buf).toString('utf-8') : buf.toString('utf-8');
+        break;
+      }
+    } catch { /* fall through */ }
+    if (!text) {
+      // last resort: network fetch (may fail, that's fine)
+      const r = await run('apt', ['changelog', pkg], 15000).catch(() => ({ stdout: '' }));
+      text = r.stdout || '';
+    }
+    if (!text) return { changelog: 'No changelog available (none installed locally and network fetch failed).' };
+    // Trim to the most recent entries so the UI stays snappy.
+    return { changelog: text.split('\n').slice(0, 120).join('\n') };
   },
   async 'apt.upgrade'({ packages, simulate = false, full = false }, send) {
     let args;

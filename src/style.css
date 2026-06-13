@@ -5041,3 +5041,9 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-chip-kern { background: rgba(168,85,247,0.08); border-style: solid; }
 .up-confirm-list { display: inline-block; font-size: 12px; color: var(--text-secondary);
   line-height: 1.6; word-break: break-word; max-height: 120px; overflow-y: auto; }
+
+/* Updates: inline changelog row */
+.up-log-row td { padding: 0 !important; background: var(--bg-primary); }
+.up-inline-log { padding: 12px 14px; border-left: 2px solid var(--accent-cyan); margin: 4px 0 10px; }
+.up-inline-log pre { font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); margin: 0; max-height: 280px; overflow-y: auto; }

@@ -1572,7 +1572,7 @@ pageRenderers.inventory = (() => {
 
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set();
-  let streaming = false;
+  let streaming = false, expandedLog = null, logCache = {};
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // inline glyphs (stroke icons matching the app's Lucide-style set)
   const ICN = {
@@ -1630,8 +1630,9 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${esc(u.installed || '—')}</td>
             <td class="up-new">${esc(u.candidate)}</td>
             <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
-            <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
-          </tr>`).join('')}</tbody>
+            <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
+          </tr>
+          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log"><pre>${esc(logCache[u.package] || 'Loading changelog…')}</pre></div></td></tr>` : ''}`).join('')}</tbody>
       </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
   }
@@ -1673,12 +1674,15 @@ pageRenderers.updates = (() => {
   }
 
   async function showChangelog(host, pkg) {
-    const panel = $('[data-up=progress]', host);
-    panel.style.display = 'block';
-    panel.innerHTML = `<div class="up-progress-head"><b>Changelog: ${esc(pkg)}</b><button class="up-link" data-up="closepanel">close</button></div><pre class="up-log">Loading…</pre>`;
-    $('[data-up=closepanel]', host).onclick = () => { panel.style.display = 'none'; };
-    try { const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`); panel.querySelector('.up-log').textContent = r.changelog || 'No changelog.'; }
-    catch (e) { panel.querySelector('.up-log').textContent = 'Error: ' + e.message; }
+    // toggle inline row directly under the clicked package
+    if (expandedLog === pkg) { expandedLog = null; render(host); return; }
+    expandedLog = pkg;
+    render(host);
+    if (logCache[pkg] === undefined) {
+      try { const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`); logCache[pkg] = r.changelog || 'No changelog available.'; }
+      catch (e) { logCache[pkg] = 'Error: ' + e.message; }
+      if (expandedLog === pkg) render(host);   // still open → paint it
+    }
   }
 
   async function confirmFull(host) {
