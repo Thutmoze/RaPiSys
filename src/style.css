@@ -4803,3 +4803,9 @@ body.ultra .al-btn, body.ultra .sess-kick { padding: 4px 9px; font-size: 10px; }
 .rsel-filter:focus { border-color: rgba(0, 212, 255, 0.45); }
 .rsel-items { max-height: 200px; overflow-y: auto; }
 .rsel-none { padding: 10px; font-size: 12px; color: var(--text-muted); }
+
+/* Flex buttons eat whitespace between text nodes: give multi-part button
+   labels (Set / 42 / %, icon + Disconnect) an explicit gap. */
+.hw-fan-btn, .sess-kick { display: inline-flex; align-items: center; gap: 5px; }
+.hw-fan-btn [data-fan=pct] { font-variant-numeric: tabular-nums; min-width: 1.6em; text-align: right; }
+.sess-kick svg { flex: none; }

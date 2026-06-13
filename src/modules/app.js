@@ -476,7 +476,7 @@ pageRenderers.hardware = (() => {
             <div class="hw-controls hw-fan-controls">
               <button class="action-btn hw-fan-btn" data-fan="auto">Auto</button>
               <input type="range" min="0" max="100" value="50" data-fan="slider" aria-label="Manual fan duty">
-              <button class="action-btn hw-fan-btn" data-fan="apply">Set <span data-fan="pct">50</span> %</button>
+              <button class="action-btn hw-fan-btn" data-fan="apply"><span>Set</span><span data-fan="pct">50</span><span>%</span></button>
             </div>
             <p class="hw-hint">Manual control requires the RaPiSys host agent.</p>
           </div>
@@ -518,16 +518,27 @@ pageRenderers.hardware = (() => {
       $('[data-hw=range]', host).addEventListener('change', (e) => {
         range = e.target.value; localStorage.setItem('hwRange', range); refreshHistory(host);
       });
-      $('[data-fan=slider]', host).addEventListener('input', (e) => {
-        $('[data-fan=pct]', host).textContent = e.target.value;
+      const slider = $('[data-fan=slider]', host);
+      const pctEl = $('[data-fan=pct]', host);
+      slider.addEventListener('input', (e) => {
+        slider.dataset.touched = Date.now();   // pause auto-mirror while dragging
+        pctEl.textContent = e.target.value;
       });
+      // In auto mode the slider mirrors the live duty so the knob tracks the
+      // governor; paused for 8s after the user last moved it.
+      pageRenderers.hardware._syncSlider = (dutyPercent) => {
+        if (document.activeElement === slider) return;
+        if (Date.now() - Number(slider.dataset.touched || 0) < 8000) return;
+        slider.value = Math.round(dutyPercent);
+        pctEl.textContent = Math.round(dutyPercent);
+      };
       $('[data-fan=auto]', host).addEventListener('click', async () => {
         await setFan({ mode: 'auto' });
-        slider.dataset.touched = 0;        // mirror the governor immediately
+        slider.dataset.touched = 0;            // allow immediate mirroring
         refreshLive(host);
       });
       $('[data-fan=apply]', host).addEventListener('click', () =>
-        setFan({ dutyPercent: Number($('[data-fan=slider]', host).value) }));
+        setFan({ dutyPercent: Number(slider.value) }));
 
       refreshLive(host); refreshHistory(host);
       timer = setInterval(() => { refreshLive(host); }, 3000);
@@ -566,7 +577,7 @@ pageRenderers.sessions = (() => {
           `<b>${esc(s.username)}</b> <span class="sess-tty">${esc(s.meta?.tty || '')}</span>`,
           esc(s.source), fmtDur(now - s.startedAt),
           s.meta?.sessionId
-            ? `<button class="action-btn sess-kick" data-kick="${esc(s.meta.sessionId)}" data-who="${esc(s.username)}@${esc(s.source)}">Disconnect</button>`
+            ? `<button class="action-btn sess-kick" data-kick="${esc(s.meta.sessionId)}" data-who="${esc(s.username)}@${esc(s.source)}"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg><span>Disconnect</span></button>`
             : (s.idleMs != null ? `idle ${fmtDur(s.idleMs)}` : '—'),
         ])).join('')
       : '<p class="sess-empty">No active SSH sessions</p>';
