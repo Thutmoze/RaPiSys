@@ -4831,3 +4831,40 @@ body.ultra .al-btn, body.ultra .sess-kick { padding: 4px 9px; font-size: 10px; }
 .set-pill:hover { border-color: var(--accent-cyan); box-shadow: var(--glow-cyan); }
 .set-pill-danger { color: var(--accent-red, #ef4444); border-color: rgba(239, 68, 68, 0.35); }
 .set-pill-danger:hover { border-color: var(--accent-red, #ef4444); box-shadow: 0 0 12px rgba(239, 68, 68, 0.3); }
+
+/* Network analytics page */
+.net-chart { width: 100%; height: 140px; display: block; }
+.net-headline { margin-left: auto; font-size: 13px; display: flex; gap: 14px; }
+.net-dl b { color: var(--accent-cyan); }
+.net-ul b { color: var(--accent-purple); }
+.net-ifaces { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.net-iface { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 10px; align-items: center;
+  font-size: 12px; padding: 7px 0; border-bottom: 1px solid var(--border-color); }
+.net-iface-name { font-weight: 600; color: var(--text-primary); }
+.net-iface-rates { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.net-iface-total { color: var(--text-muted); text-align: right; }
+
+.net-hist-iface { margin-bottom: 14px; }
+.net-hist-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; }
+.net-hist-head b { color: var(--text-primary); }
+.net-hist-head span { color: var(--text-muted); }
+.net-bars { display: flex; align-items: flex-end; gap: 3px; height: 44px; }
+.net-bar { flex: 1; min-height: 2px; border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, var(--accent-cyan), var(--accent-purple)); opacity: 0.8; }
+.net-bar:hover { opacity: 1; }
+
+.net-proto-summary { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.net-proto-row { display: grid; grid-template-columns: 80px 1fr 32px; gap: 8px; align-items: center;
+  font-size: 12px; padding: 4px 0; }
+.net-proto-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
+.net-proto-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); }
+.net-proto-n { text-align: right; color: var(--text-secondary); }
+
+.net-proc-row { display: flex; justify-content: space-between; font-size: 12px;
+  padding: 6px 0; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); }
+.net-proc-row b { color: var(--text-primary); }
+.net-proc-row small { color: var(--text-muted); }
+
+body.compact .net-chart { height: 110px; }
+body.ultra .net-chart { height: 90px; }
+body.ultra .net-iface { font-size: 11px; padding: 5px 0; }

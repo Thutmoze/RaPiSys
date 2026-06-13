@@ -17,6 +17,7 @@ import { createAlertsRepo } from './repositories/alerts.js';
 import { createSessionsRepo } from './repositories/sessions.js';
 import { createHardwareCollector } from './collectors/hardware.js';
 import { createSessionsCollector } from './collectors/sessions.js';
+import { createNetworkCollector } from './collectors/network.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
@@ -29,6 +30,7 @@ import { setupRouter } from './routes/setup.js';
 import { hardwareRouter } from './routes/hardware.js';
 import { alertsRouter } from './routes/alerts.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { networkRouter } from './routes/network.js';
 import { authRouter } from './routes/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +109,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   });
 
   const sessions = createSessionsCollector();
+  const network = createNetworkCollector();
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
     eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
@@ -130,6 +133,15 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('retention', 3600e3, () => retention.runOnce());
   scheduler.register('alert-engine', 30e3, () => alertEngine.evaluateOnce());
   scheduler.register('session-tracker', 60e3, () => sessionTracker.trackOnce(), { runNow: true });
+  scheduler.register('net-sampler', 10e3, () => {
+    const t = network.throughput();
+    const rows = [];
+    for (const [iface, v] of Object.entries(t.interfaces)) {
+      rows.push({ metric: `net.${iface}.rx`, value: v.rxRate });
+      rows.push({ metric: `net.${iface}.tx`, value: v.txRate });
+    }
+    if (rows.length) metricsFacade.writeBatch(t.ts, rows);
+  }, { runNow: true });
   scheduler.register('auth-session-purge', 6 * 3600e3, () => auth.purgeExpired());
 
   // ---- routes ----------------------------------------------------------------------
@@ -139,6 +151,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/auth', authRouter({ auth, loadSettings }));
   app.use('/api/alerts', alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
   app.use('/api/sessions', sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
+  app.use('/api/network', networkRouter({ network, metricsRepo: metricsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,

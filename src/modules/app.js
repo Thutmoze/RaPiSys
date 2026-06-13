@@ -309,7 +309,7 @@ const PAGES = [
   { id: 'overview', label: 'Overview' },
   { id: 'hardware', label: 'Hardware' },
   { id: 'sessions', label: 'Sessions' },
-  { id: 'network', label: 'Network', soon: true },
+  { id: 'network', label: 'Network' },
   { id: 'reports', label: 'Reports', soon: true },
   { id: 'updates', label: 'Updates', soon: true },
   { id: 'inventory', label: 'Inventory', soon: true },
@@ -946,6 +946,170 @@ pageRenderers.settings = (() => {
       load(host);
     },
     unmount() {},
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Network analytics page
+// ---------------------------------------------------------------------------
+
+pageRenderers.network = (() => {
+  let timer = null, chart = null, chartSeries = null;
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  const fmtRate = (bps) => {
+    const bits = bps * 8;
+    if (bits >= 1e9) return `${(bits / 1e9).toFixed(2)} Gb/s`;
+    if (bits >= 1e6) return `${(bits / 1e6).toFixed(1)} Mb/s`;
+    if (bits >= 1e3) return `${(bits / 1e3).toFixed(0)} kb/s`;
+    return `${Math.round(bits)} b/s`;
+  };
+  const fmtBytes = (b) => {
+    if (b == null) return '—';
+    if (b >= 1e12) return `${(b / 1e12).toFixed(2)} TB`;
+    if (b >= 1e9) return `${(b / 1e9).toFixed(2)} GB`;
+    if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
+    if (b >= 1e3) return `${(b / 1e3).toFixed(0)} KB`;
+    return `${b} B`;
+  };
+
+  async function refreshLive(host) {
+    let t;
+    try { t = await api('/network/throughput'); } catch { return; }
+    const ifaces = Object.entries(t.interfaces);
+    // headline = busiest interface
+    let totalRx = 0, totalTx = 0;
+    ifaces.forEach(([, v]) => { totalRx += v.rxRate; totalTx += v.txRate; });
+    $('[data-net=down]', host).textContent = fmtRate(totalRx);
+    $('[data-net=up]', host).textContent = fmtRate(totalTx);
+    if (chartSeries) { chartSeries.rx.append(Date.now(), totalRx * 8 / 1e6); chartSeries.tx.append(Date.now(), totalTx * 8 / 1e6); }
+
+    $('[data-net=ifaces]', host).innerHTML = ifaces.length
+      ? ifaces.map(([name, v]) => `
+        <div class="net-iface">
+          <span class="net-iface-name">${esc(name)}</span>
+          <span class="net-iface-rates">▼ ${fmtRate(v.rxRate)} &nbsp; ▲ ${fmtRate(v.txRate)}</span>
+          <span class="net-iface-total">${fmtBytes(v.rxBytes + v.txBytes)} total</span>
+        </div>`).join('')
+      : '<p class="sess-empty">No active interfaces</p>';
+  }
+
+  async function refreshSlow(host) {
+    let snap;
+    try { snap = await api('/network'); } catch { return; }
+
+    // vnStat history
+    const vn = snap.vnstat;
+    const vh = $('[data-net=history]', host);
+    if (!vn.available) {
+      vh.innerHTML = '<p class="sess-empty">vnStat not installed — run deploy.sh or <code>apt install vnstat</code> for bandwidth history.</p>';
+    } else if (!vn.interfaces.length) {
+      vh.innerHTML = '<p class="sess-empty">vnStat is collecting — history appears after a few minutes.</p>';
+    } else {
+      vh.innerHTML = vn.interfaces.map((i) => {
+        const today = i.today ? fmtBytes((i.today.rx || 0) + (i.today.tx || 0)) : '—';
+        const total = i.total ? fmtBytes((i.total.rx || 0) + (i.total.tx || 0)) : '—';
+        const days = i.days.slice(-14);
+        const max = Math.max(1, ...days.map((d) => (d.rx || 0) + (d.tx || 0)));
+        const bars = days.map((d) => {
+          const tot = (d.rx || 0) + (d.tx || 0);
+          const h = Math.round((tot / max) * 40);
+          const lbl = d.date ? `${d.date.month}/${d.date.day}` : '';
+          return `<div class="net-bar" style="height:${Math.max(2, h)}px" title="${lbl}: ${fmtBytes(tot)}"></div>`;
+        }).join('');
+        return `
+          <div class="net-hist-iface">
+            <div class="net-hist-head"><b>${esc(i.name)}</b><span>today ${today} · total ${total}</span></div>
+            <div class="net-bars">${bars}</div>
+          </div>`;
+      }).join('');
+    }
+
+    // protocols
+    const proto = snap.protocols;
+    const ports = Object.entries(proto.byPort).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const maxP = Math.max(1, ...ports.map(([, n]) => n));
+    $('[data-net=proto]', host).innerHTML = `
+      <div class="net-proto-summary">TCP ${proto.tcp} · UDP ${proto.udp}</div>
+      ${ports.length ? ports.map(([name, n]) => `
+        <div class="net-proto-row">
+          <span>${esc(name)}</span>
+          <span class="net-proto-bar"><span style="width:${(n / maxP) * 100}%"></span></span>
+          <span class="net-proto-n">${n}</span>
+        </div>`).join('') : '<p class="sess-empty">No classified connections</p>'}`;
+
+    // top processes
+    $('[data-net=procs]', host).innerHTML = snap.processes.length
+      ? snap.processes.map((p) => `
+        <div class="net-proc-row">
+          <span><b>${esc(p.comm)}</b> <small>pid ${p.pid}</small></span>
+          <span>${p.sockets} socket${p.sockets > 1 ? 's' : ''}</span>
+        </div>`).join('')
+      : '<p class="sess-empty">No socket-owning processes visible</p>';
+
+    // DNS
+    const d = snap.dns;
+    $('[data-net=dns]', host).innerHTML = d.available
+      ? `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
+         <div class="set-kv"><span>Cache hits</span><b>${(d.cacheHits ?? 0).toLocaleString()}</b></div>
+         <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>
+         <div class="set-kv"><span>In flight</span><b>${d.current ?? 0}</b></div>`
+      : '<p class="sess-empty">No resolver statistics (systemd-resolved not active). DNS analytics will use Pi-hole/dnsmasq logs when present.</p>';
+  }
+
+  function initChart(host) {
+    const canvas = $('[data-net=chart]', host);
+    if (!canvas || typeof SmoothieChart === 'undefined') return;
+    chart = new SmoothieChart({
+      millisPerPixel: 60, grid: { fillStyle: 'transparent', strokeStyle: 'rgba(255,255,255,0.05)', millisPerLine: 10000, verticalSections: 4 },
+      labels: { fillStyle: '#8b8b9e', fontSize: 11 }, responsive: true,
+      tooltip: false, minValue: 0,
+    });
+    chartSeries = { rx: new TimeSeries(), tx: new TimeSeries() };
+    chart.addTimeSeries(chartSeries.rx, { strokeStyle: '#00d4ff', fillStyle: 'rgba(0,212,255,0.12)', lineWidth: 2 });
+    chart.addTimeSeries(chartSeries.tx, { strokeStyle: '#a855f7', fillStyle: 'rgba(168,85,247,0.10)', lineWidth: 2 });
+    chart.streamTo(canvas, 1000);
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><span class="card-title">Live Throughput</span>
+            <span class="net-headline" data-net="counts"><span class="net-dl">▼ <b data-net="down">—</b></span> <span class="net-ul">▲ <b data-net="up">—</b></span></span>
+          </div>
+          <div class="card-body">
+            <canvas data-net="chart" class="net-chart"></canvas>
+            <div class="net-ifaces" data-net="ifaces"></div>
+          </div>
+        </div>
+        <div class="card sess-span">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg></div><span class="card-title">Bandwidth History (14 days)</span></div>
+          <div class="card-body" data-net="history"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div><span class="card-title">Protocols</span></div>
+          <div class="card-body" data-net="proto"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><span class="card-title">Top Processes</span></div>
+          <div class="card-body" data-net="procs"></div>
+        </div>
+        <div class="card sess-span">
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><path d="M12 7v5l3 3"/></svg></div><span class="card-title">DNS</span></div>
+          <div class="card-body" data-net="dns"></div>
+        </div>
+      </div>`;
+      initChart(host);
+      refreshLive(host); refreshSlow(host);
+      timer = setInterval(() => { refreshLive(host); }, 1000);
+      this._slow = setInterval(() => refreshSlow(host), 15000);
+    },
+    unmount() {
+      clearInterval(timer); clearInterval(this._slow);
+      if (chart) { chart.stop(); chart = null; chartSeries = null; }
+    },
   };
 })();
 
