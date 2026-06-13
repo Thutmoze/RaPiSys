@@ -61,15 +61,22 @@ function vercmp(x, y, defaultEpoch = 0) {
 function newerThanInstalledWindow(text, installedVersion, candidateVersion) {
   const body = String(text || '');
   if (!installedVersion) return body;            // unknown — fall back to full
-  const candEpoch = parseVer(candidateVersion || installedVersion).epoch || 0;
+  // Default epoch for epoch-less changelog headers: take it from whichever of
+  // the candidate/installed versions actually carries an epoch (the .deb
+  // filename that candidateVersion is derived from DROPS the epoch, so the
+  // installed version is the reliable source).
+  const candE = parseVer(candidateVersion).epoch;
+  const instE = parseVer(installedVersion).epoch;
+  const defaultEpoch = (candE != null ? candE : (instE != null ? instE : 0));
   const lines = body.split('\n');
   const headerRe = /^\S+\s+\(([^)]+)\)/;
   const keep = [];
   let include = true;
   for (const line of lines) {
     const m = line.match(headerRe);
-    // entries that omit the epoch inherit the candidate's epoch for comparison
-    if (m) { include = vercmp(m[1], installedVersion, candEpoch) > 0; }
+    // entries that omit the epoch inherit defaultEpoch; the installed version
+    // we compare against also uses it if IT is epoch-less.
+    if (m) { include = vercmp(m[1], installedVersion, defaultEpoch) > 0; }
     if (include) keep.push(line);
   }
   return keep.join('\n');
