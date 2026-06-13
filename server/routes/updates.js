@@ -21,7 +21,7 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     try {
       const out = await updates.refresh((p) => send('progress', p));
-      send('done', { count: out.updates?.length || 0, checkedAt: out.checkedAt });
+      send('done', { count: out.updates?.length || 0, checkedAt: out.checkedAt, unscanned: out.unscanned || [] });
     } catch (err) { send('error', { message: err.message }); }
     res.end();
   });
@@ -30,6 +30,31 @@ export function updatesRouter({ updates, updatesRepo, requireControl, events }) 
   r.post('/refresh', requireControl, async (req, res) => {
     try { res.json(await updates.refresh()); }
     catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
+  // Full-download security scan for the large packages the quick scan skipped.
+  // Streams overall progress (pkg N/M) plus per-package download %.
+  r.get('/scan-large/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const pkgs = String(req.query.packages || '').split(',').filter(Boolean);
+    send('start', { total: pkgs.length });
+    let i = 0;
+    for (const pkg of pkgs) {
+      i++;
+      send('pkg', { pkg, index: i, total: pkgs.length });
+      try {
+        const out = await updates.changelogFull(pkg, (p) => send('progress', { pkg, index: i, total: pkgs.length, ...p }));
+        if (out.changelog) {
+          const tag = updates.tagSecurityFromChangelog(pkg, out.candidateVersion, out.changelog, installedOf(pkg));
+          send('tagged', { pkg, security: tag.security, cves: tag.cves, urgency: tag.urgency });
+        }
+      } catch (err) { send('pkgerror', { pkg, message: err.message }); }
+    }
+    send('done', {});
+    res.end();
   });
 
   // Firmware (rpi-eeprom) status.

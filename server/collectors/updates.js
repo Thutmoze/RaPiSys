@@ -107,10 +107,15 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       const installedMap = {};
       for (const u of updates) installedMap[u.package] = u.installed;
       const res = await securityScan(toScan, installedMap, (p) => onProgress?.({ phase: 'scanning', total: p.total, done: p.done, pkg: p.pkg }));
-      for (const u of updates) { const r = res[u.package]; if (r) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; } }
+      for (const u of updates) { const r = res[u.package]; if (r && r.scanned) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; } }
     }
     updatesRepo?.saveCache(updates);
-    return { available: true, updates, checkedAt: Date.now() };
+    // report packages whose changelog couldn't be range-scanned (large pkgs)
+    const tags = updatesRepo?.getSecurityTags?.() || {};
+    const unscanned = updates
+      .filter((u) => { const k = tags[u.package]; return !(k && k.candidate === u.candidate); })
+      .map((u) => u.package);
+    return { available: true, updates, checkedAt: Date.now(), unscanned };
   }
 
   // Inspect a single candidate changelog's security signals (called lazily
@@ -175,10 +180,13 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
           const um = head.match(/urgency=(\w+)/i);
           const urgency = um ? um[1].toLowerCase() : null;
           const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
-          out[pkg] = { security, cves, urgency };
+          out[pkg] = { security, cves, urgency, scanned: true };
           updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency });
+        } else {
+          // range-fetch couldn't reach the changelog (docs past budget = large pkg)
+          out[pkg] = { scanned: false };
         }
-      } catch { /* skip */ }
+      } catch { out[pkg] = { scanned: false }; }
       done++;
       onProgress?.({ done, total: packages.length, pkg });
     }

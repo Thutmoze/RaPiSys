@@ -5116,3 +5116,9 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 /* Updates: highlight CVE ids and security markers in the changelog */
 .up-cve { color: #ef4444 !important; font-weight: 700; }
 .up-sec-mark { color: #ef4444 !important; font-weight: 700; }
+
+
+/* Site-wide button label casing: Title Case via capitalize, with a keep-case
+   opt-out for acronym labels (CSV/JSON/PDF/SMTP/etc). */
+.action-btn, .net-toggle, .up-btn, .wz-primary, .pill-btn { text-transform: capitalize; }
+.keep-case { text-transform: none !important; }

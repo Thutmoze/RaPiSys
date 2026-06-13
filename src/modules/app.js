@@ -1359,9 +1359,9 @@ pageRenderers.reports = (() => {
           <div class="card-body">
             <div class="rep-actions">
               <button class="net-toggle" data-rep="rebuild">Rebuild now</button>
-              <a class="net-toggle" href="/api/reports/export.csv?days=30" download>Export CSV</a>
-              <a class="net-toggle" href="/api/reports/export.json?days=30" download>Export JSON</a>
-              <button class="net-toggle" data-rep="print">Export PDF (print)</button>
+              <a class="net-toggle keep-case" href="/api/reports/export.csv?days=30" download>Export CSV</a>
+              <a class="net-toggle keep-case" href="/api/reports/export.json?days=30" download>Export JSON</a>
+              <button class="net-toggle keep-case" data-rep="print">Export PDF (print)</button>
             </div>
             <div data-rep="body"></div>
           </div>
@@ -1702,7 +1702,13 @@ pageRenderers.updates = (() => {
         else if (p.phase === 'listing') setProg('Listing upgradable packages…');
         else if (p.phase === 'scanning') setProg(`Scanning ${p.pkg || ''}`.trim(), p.done || 0, p.total || 0);
       });
-      ev.addEventListener('done', async () => { ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); await load(host); toast('success', 'Updates', 'Check complete'); });
+      ev.addEventListener('done', async (e) => {
+        ev.close(); streaming = false; refresh.classList.remove('up-btn-glow');
+        let unscanned = []; try { unscanned = JSON.parse(e.data).unscanned || []; } catch { /* */ }
+        await load(host);
+        toast('success', 'Updates', 'Check complete');
+        if (unscanned.length) promptLargeScan(host, unscanned);
+      });
       ev.addEventListener('error', (e) => { let m = 'check failed'; try { m = JSON.parse(e.data).message; } catch { /* */ } ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); toast('error', 'Updates', m); render(host); });
     };
     const sec = $('[data-up=security]', host);
@@ -1731,6 +1737,29 @@ pageRenderers.updates = (() => {
     host.querySelectorAll('[data-older]').forEach((b) => b.onclick = () => { const p = b.dataset.older; oldExpanded.has(p) ? oldExpanded.delete(p) : oldExpanded.add(p); render(host); });
     const b = $('[data-up=selected]', host);
     if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
+  }
+
+  function promptLargeScan(host, pkgs) {
+    const list = pkgs.slice(0, 8).map(esc).join(', ') + (pkgs.length > 8 ? `, +${pkgs.length - 8} more` : '');
+    const msg = `<b>${pkgs.length}</b> large package(s) couldn't be scanned for security info from the archive headers and need a full download to check:`
+      + `<br><br><span class="up-confirm-list">${list}</span>`
+      + `<br><br>Download them now to complete security tagging?`;
+    rapisysConfirm(msg, { confirmLabel: `Download ${pkgs.length}`, html: true }).then((ok) => { if (ok) scanLarge(host, pkgs); });
+  }
+
+  function scanLarge(host, pkgs) {
+    if (streaming) return;
+    streaming = true;
+    const panel = $('[data-up=progress]', host);
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="up-progress-head"><b>Scanning large packages…</b><span class="up-spinner"></span></div><div class="up-scanlarge" data-up="sl"></div>';
+    const slEl = panel.querySelector('[data-up=sl]');
+    const ev = new EventSource(`/api/updates/scan-large/stream?packages=${encodeURIComponent(pkgs.join(','))}`);
+    ev.addEventListener('pkg', (e) => { const p = JSON.parse(e.data); slEl.innerHTML = `<div class="up-sl-row"><span>${esc(p.pkg)} (${p.index}/${p.total})</span><span class="up-sl-pct" data-pct>starting…</span></div><div class="up-progbar"><span data-bar style="width:0%"></span></div>`; });
+    ev.addEventListener('progress', (e) => { const p = JSON.parse(e.data); const pct = p.pct || 0; const bar = slEl.querySelector('[data-bar]'); const pc = slEl.querySelector('[data-pct]'); if (bar) bar.style.width = pct + '%'; if (pc) pc.textContent = `${pct}% · ${(p.downloaded/1e6).toFixed(1)}/${p.total?(p.total/1e6).toFixed(1):'?'} MB`; });
+    ev.addEventListener('tagged', (e) => { const t = JSON.parse(e.data); const u = updates.find((x) => x.package === t.pkg); if (u) { u.security = t.security; u.cves = t.cves; u.urgency = t.urgency; } });
+    ev.addEventListener('done', () => { ev.close(); streaming = false; panel.style.display = 'none'; load(host); toast('success', 'Updates', 'Large packages scanned'); });
+    ev.addEventListener('error', () => { ev.close(); streaming = false; });
   }
 
   function downloadFullChangelog(host, pkg) {
