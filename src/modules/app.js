@@ -1635,17 +1635,19 @@ pageRenderers.updates = (() => {
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
       <table class="inv-table up-table">
-        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Installed</th><th>Available</th><th>Tags</th><th>Changelog</th></tr></thead>
+        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Last updated</th><th>Tags</th><th>Changelog</th></tr></thead>
         <tbody>${updates.map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
             <td><b>${esc(u.package)}</b></td>
+            <td class="inv-dim inv-desc">${esc(u.description || '')}</td>
             <td class="inv-dim">${esc(u.installed || '—')}</td>
             <td class="up-new">${esc(u.candidate)}</td>
+            <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
             <td>${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>
-          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="6"><div class="up-inline-log">${(() => {
+          ${expandedLog === u.package ? `<tr class="up-log-row"><td colspan="8"><div class="up-inline-log">${(() => {
             const c = logCache[u.package];
             if (c === undefined) return '<div class="up-log-loading"><span class="up-spinner-sm"></span>Fetching new version changelog…<div class="up-scanbar up-scanbar-active"><span></span></div></div>';
             if (c.plain) return `<pre class="up-log-text">${esc(c.plain)}</pre>`;

@@ -670,14 +670,31 @@ WantedBy=multi-user.target
       [...sim.stdout.matchAll(/^Inst (\S+) .*-security/gm)].map((m) => m[1])
     );
     const updates = [];
+    const names = [];
     for (const line of stdout.split('\n')) {
       const m = line.match(/^([^/]+)\/(\S+)\s+(\S+)\s+\S+(?:\s+\[upgradable from:\s+([^\]]+)\])?/);
       if (!m) continue;
+      names.push(m[1]);
       updates.push({
         package: m[1], pocket: m[2], candidate: m[3], installed: m[4] || null,
         security: securityPkgs.has(m[1]),
         kernel: /^linux-image|^linux-headers|^raspberrypi-kernel/.test(m[1]),
       });
+    }
+    // Descriptions (one dpkg-query call for all upgradable packages) and the
+    // install date of the currently-installed version (.list mtime).
+    const desc = {};
+    if (names.length) {
+      const dq = await run('dpkg-query', ['-W', '-f=${Package}\t${binary:Summary}\n', ...names], 30000).catch(() => ({ stdout: '' }));
+      for (const line of (dq.stdout || '').split('\n')) {
+        const i = line.indexOf('\t');
+        if (i > 0) desc[line.slice(0, i)] = line.slice(i + 1);
+      }
+    }
+    for (const u of updates) {
+      u.description = desc[u.package] || '';
+      try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
+      catch { u.installedAt = null; }
     }
     return { updates };
   },
