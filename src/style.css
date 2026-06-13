@@ -5133,3 +5133,8 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-urg-badge.up-urg-medium { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.4); }
 .up-urg-badge.up-urg-low { background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4); }
 .up-urg-badge.up-urg-other { background: var(--bg-secondary); border: 1px solid var(--border-color); }
+
+/* Updates: separated security + CVE tag capsules */
+.up-tags-cell { white-space: nowrap; }
+.up-tags-cell .up-tag { margin-right: 4px; }
+.up-tag-cve { color: #ef4444; border: 1px solid rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }

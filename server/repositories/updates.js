@@ -16,17 +16,23 @@ export function createUpdatesRepo(db) {
   }
 
   // Per-package security tags learned lazily from viewed changelogs.
-  db.exec(`CREATE TABLE IF NOT EXISTS update_sectags (package TEXT PRIMARY KEY, candidate TEXT, security INTEGER, cves INTEGER, urgency TEXT)`);
-  function saveSecurityTag(pkg, { candidate, security, cves, urgency }) {
-    db.prepare(`INSERT INTO update_sectags (package, candidate, security, cves, urgency) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, security=excluded.security, cves=excluded.cves, urgency=excluded.urgency`)
-      .run(pkg, candidate || null, security ? 1 : 0, cves || 0, urgency || null);
+  db.exec(`CREATE TABLE IF NOT EXISTS update_sectags (package TEXT PRIMARY KEY, candidate TEXT, security INTEGER, cves INTEGER, urgency TEXT, changelog TEXT)`);
+  // add changelog column if upgrading from an older schema
+  try { db.exec(`ALTER TABLE update_sectags ADD COLUMN changelog TEXT`); } catch { /* already exists */ }
+  function saveSecurityTag(pkg, { candidate, security, cves, urgency, changelog }) {
+    db.prepare(`INSERT INTO update_sectags (package, candidate, security, cves, urgency, changelog) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, security=excluded.security, cves=excluded.cves, urgency=excluded.urgency, changelog=COALESCE(excluded.changelog, update_sectags.changelog)`)
+      .run(pkg, candidate || null, security ? 1 : 0, cves || 0, urgency || null, changelog || null);
     // also reflect into the cached list so the table updates on next load
     try {
       const c = getCache();
       const u = c.updates.find((x) => x.package === pkg);
       if (u) { u.security = !!security; u.cves = cves || 0; u.urgency = urgency || null; saveCache(c.updates); }
     } catch { /* */ }
+  }
+  function getCachedChangelog(pkg) {
+    const row = db.prepare(`SELECT candidate, changelog FROM update_sectags WHERE package=?`).get(pkg);
+    return row && row.changelog ? { candidateVersion: row.candidate, changelog: row.changelog } : null;
   }
   function getSecurityTags() {
     const rows = db.prepare(`SELECT package, candidate, security, cves, urgency FROM update_sectags`).all();
@@ -48,5 +54,5 @@ export function createUpdatesRepo(db) {
     return db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log
                        FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
   }
-  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags };
+  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog };
 }

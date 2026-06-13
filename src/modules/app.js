@@ -1663,7 +1663,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${esc(u.installed || '—')}</td>
             <td class="up-new">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
-            <td>${u.security ? `<span class="up-tag up-tag-sec">security${u.cves ? ' · ' + u.cves + ' CVE' + (u.cves > 1 ? 's' : '') : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
+            <td class="up-tags-cell">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">${expandedLog === u.package ? 'hide' : 'view'}</button></td>
           </tr>

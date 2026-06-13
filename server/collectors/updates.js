@@ -43,6 +43,15 @@ function cmpPart(a, b) {
   }
   return 0;
 }
+// Pick the highest-severity urgency mentioned in a changelog window (a single
+// version's notes can hold several urgency= markers; the security one wins).
+const URGENCY_RANK = { emergency: 4, critical: 3, high: 2, medium: 1, low: 0 };
+function highestUrgency(text) {
+  const all = [...String(text || '').matchAll(/urgency=(\w+)/gi)].map((m) => m[1].toLowerCase());
+  if (!all.length) return null;
+  return all.sort((a, b) => (URGENCY_RANK[b] ?? -1) - (URGENCY_RANK[a] ?? -1))[0];
+}
+
 function vercmp(x, y, defaultEpoch = 0) {
   const a = parseVer(x), b = parseVer(y);
   // Changelog entry headers often omit the epoch; inherit the candidate's so
@@ -123,8 +132,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
   function tagSecurityFromChangelog(pkg, candidate, changelogText, installed) {
     const head = newerThanInstalledWindow(changelogText, installed, candidate);
     const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
-    const um = head.match(/urgency=(\w+)/i);
-    const urgency = um ? um[1].toLowerCase() : null;
+    const urgency = highestUrgency(head);
     const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
     updatesRepo?.saveSecurityTag?.(pkg, { candidate, security, cves, urgency });
     return { security, cves, urgency };
@@ -147,7 +155,10 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
   async function changelog(pkg, candidate = true) {
     if (!agentConfigured()) return { changelog: 'agent unavailable' };
     if (candidate) {
-      // Try the partial range-fetch first (a few hundred KB for most packages).
+      // Reuse the changelog the scan already fetched (consistent + instant).
+      const cached = updatesRepo?.getCachedChangelog?.(pkg);
+      if (cached && cached.changelog) return { changelog: cached.changelog, candidateVersion: cached.candidateVersion, source: 'candidate' };
+      // Otherwise try the partial range-fetch.
       try {
         const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
         if (r && r.changelog) return r;
@@ -177,11 +188,10 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
         if (r && r.changelog) {
           const head = newerThanInstalledWindow(r.changelog, installedMap?.[pkg], r.candidateVersion);
           const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
-          const um = head.match(/urgency=(\w+)/i);
-          const urgency = um ? um[1].toLowerCase() : null;
+          const urgency = highestUrgency(head);
           const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
           out[pkg] = { security, cves, urgency, scanned: true };
-          updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency });
+          updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency, changelog: r.changelog });
         } else {
           // range-fetch couldn't reach the changelog (docs past budget = large pkg)
           out[pkg] = { scanned: false };
