@@ -1179,7 +1179,12 @@ pageRenderers.network = (() => {
       if (!await rapisysConfirm('Insert a local DNS logging forwarder in front of ' + esc(d.resolver) + '? This installs dnsmasq (if needed), repoints the Pi\u2019s resolver to a local logging proxy, and is fully reversible. Queries will then appear here.', { confirmLabel: 'Enable logging' })) return;
       fwdOn.textContent = 'Setting up… (may install dnsmasq)'; fwdOn.disabled = true;
       try { await api('/network/dns/forwarder', { method: 'POST', body: { enable: true } }); toast('success', 'DNS', 'Logging forwarder active'); setTimeout(() => refreshDns(host), 2500); }
-      catch (e) { toast('error', 'DNS', e.message); fwdOn.textContent = 'Enable query logging (local forwarder)'; fwdOn.disabled = false; }
+      catch (e) {
+        toast('error', 'DNS', 'Could not enable query logging');
+        const cta = fwdOn.parentElement;
+        fwdOn.remove();
+        const note = el('p', 'net-dns-note'); note.textContent = e.message; cta.appendChild(note);
+      }
     };
   }
 
