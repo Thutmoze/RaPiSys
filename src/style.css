@@ -5186,45 +5186,54 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-table td.up-tags-cell { padding-top: 8px; }
 
 /* ===========================================================================
-   F6 — Dashboard layout
-   Normal view renders natively (unchanged). A saved layout only reorders /
-   hides widgets via CSS order + DOM order. GridStack styles load lazily with
-   the editor, so the normal view is untouched. The styles below apply ONLY
-   while editing (body.layout-editing).
+   F6 — Dashboard layout (true 12-col GridStack, option 1)
+   The grid renders the saved layout (locked) and powers edit mode. The
+   `.gs-body` scroll container is the clipping fix: content that exceeds the
+   widget's size scrolls WITHIN the widget rather than overflowing the page.
+   With no saved layout the dashboard is pure native (these styles unused).
    =========================================================================== */
-body.layout-editing .rapisys-grid.grid-stack { background: transparent; }
-body.layout-editing .grid-stack-item-content {
+.rapisys-grid.grid-stack { background: transparent; }
+.rapisys-grid .grid-stack-item-content {
   inset: 0;
-  background: var(--bg-card);
-  border: 1px dashed var(--accent-cyan);
+  background: transparent;
+  border: none;
   border-radius: var(--radius);
   overflow: hidden;
   display: flex;
   flex-direction: column;
   padding: 0;
 }
+/* the scroll body holds the real card/section and fills the remaining height */
+.rapisys-grid .gs-body { flex: 1; min-height: 0; overflow: auto; }
+.rapisys-grid .gs-body > .card,
+.rapisys-grid .gs-body > section {
+  margin: 0; width: 100%; min-height: 100%; height: auto;
+}
+.rapisys-grid .gs-body > section { margin-bottom: 0; }
+/* tidy scrollbars inside widgets */
+.rapisys-grid .gs-body::-webkit-scrollbar { width: 6px; height: 6px; }
+.rapisys-grid .gs-body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+/* --- edit-mode chrome (only while body.layout-editing) --- */
+body.layout-editing .rapisys-grid .grid-stack-item-content {
+  background: var(--bg-card);
+  border: 1px dashed var(--accent-cyan);
+}
 body.layout-editing .gs-edit-bar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 10px; background: rgba(0, 212, 255, 0.08);
-  border-bottom: 1px solid var(--border-color); cursor: move;
-  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-color); cursor: move; flex-shrink: 0;
 }
+.gs-edit-bar { display: none; }            /* hidden in locked view */
+body.layout-editing .gs-edit-bar { display: flex; }
 body.layout-editing .gs-edit-title { font-size: 12px; font-weight: 600; color: var(--accent-cyan); }
 body.layout-editing .gs-hide-btn {
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   font-size: 13px; line-height: 1; padding: 2px 6px; border-radius: 4px;
 }
 body.layout-editing .gs-hide-btn:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
-/* the wrapped card/section fills the remaining item space, clipped while editing */
-body.layout-editing .grid-stack-item-content > .card,
-body.layout-editing .grid-stack-item-content > section {
-  flex: 1; margin: 0; width: 100%; min-height: 0; overflow: auto;
-}
-body.layout-editing .grid-stack-item-content > section { margin-bottom: 0; }
-/* GridStack resize handle visible in cyan */
-body.layout-editing .grid-stack-item > .ui-resizable-se { filter: hue-rotate(160deg); }
 
-/* The editing toolbar pinned to the bottom */
+/* editing toolbar */
 .layout-toolbar {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px;
   z-index: 1000; max-width: calc(100vw - 32px);
@@ -5244,5 +5253,16 @@ body.layout-editing .grid-stack-item > .ui-resizable-se { filter: hue-rotate(160
   border-radius: 999px; cursor: pointer;
 }
 .layout-chip:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
-.layout-toolbar-actions { display: flex; gap: 8px; }
+.layout-toolbar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.layout-toolbar-actions .lt-btn {
+  white-space: nowrap; padding: 8px 16px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border-color); background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.layout-toolbar-actions .lt-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.layout-toolbar-actions .lt-save { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); }
+.layout-toolbar-actions .lt-save:hover { filter: brightness(1.1); color: #04121a; }
+.layout-toolbar-actions .lt-reset { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
+
 
