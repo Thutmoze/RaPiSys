@@ -5150,16 +5150,25 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-cl-nav { width: 200px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border-color);
   padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
 .up-cl-navitem { text-align: left; background: none; border: none; color: var(--text-secondary);
-  font-family: ui-monospace, monospace; font-size: 11px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+  font-family: ui-monospace, monospace; font-size: 13px; padding: 8px 10px; border-radius: 6px; cursor: pointer; line-height: 1.4; }
 .up-cl-navitem:hover { background: var(--bg-secondary); color: var(--text-primary); }
-.up-cl-nav-new { color: var(--accent-cyan); font-weight: 600; }
+.up-cl-nav-new { color: var(--accent-cyan); }
+.up-cl-nav-active { font-weight: 700; background: var(--bg-secondary); }
 .up-cl-newdot { color: #10b981; font-size: 8px; }
 .up-cl-content { flex: 1; overflow-y: auto; padding: 16px 20px; }
-.up-cl-sec { margin-bottom: 8px; scroll-margin-top: 10px; }
+.up-cl-sec { margin-bottom: 6px; scroll-margin-top: 10px; }
 .up-cl-sec-new { border-left: 2px solid var(--accent-cyan); padding-left: 12px; margin-left: -2px; }
+.up-cl-sechead { width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  display: flex; align-items: baseline; gap: 8px; padding: 6px 0; font-family: ui-monospace, monospace;
+  font-size: 12px; color: var(--text-primary); }
+.up-cl-sechead:hover { color: var(--accent-cyan); }
+.up-cl-caret { color: var(--text-muted); font-size: 10px; flex-shrink: 0; }
+.up-cl-sechdr { white-space: pre-wrap; word-break: break-word; }
 .up-cl-pre { font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5; white-space: pre-wrap;
-  word-break: break-word; color: var(--text-secondary); margin: 0; }
+  word-break: break-word; color: var(--text-secondary); margin: 4px 0 0 18px; }
 .up-cl-pre-new { color: #e8e8f0; }
+.up-cl-pre-cyan { color: var(--accent-cyan); }
+.up-cl-inst { color: var(--text-muted); font-weight: 400; font-size: 12px; }
 .up-cl-empty { color: var(--text-muted); font-size: 13px; padding: 20px; text-align: center; }
 .up-cl-needfull { padding: 16px 20px; }
 .up-cl-needfull p { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }

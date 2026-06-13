@@ -1849,6 +1849,8 @@ pageRenderers.updates = (() => {
     // data: { changelog, candidateVersion, needsFull, error }
     const ov = el('div', 'wizard-overlay up-cl-overlay');
     const close = () => ov.remove();
+    const expanded = new Set();        // version indices currently expanded
+    let activeIdx = null;
     const renderBody = () => {
       if (data.error) return `<p class="up-cl-empty">${esc(data.error)}</p>`;
       if (data.needsFull) {
@@ -1859,27 +1861,40 @@ pageRenderers.updates = (() => {
             <pre class="up-cl-pre">${hlSec(data.changelog || '')}</pre>
           </div>`;
       }
-      // split into version sections, build a jump-nav + highlighted body
       const candE = parseVerEpoch(data.candidateVersion);
       const instE = parseVerEpoch(installed);
       const de = candE != null ? candE : (instE != null ? instE : 0);
-      const sections = parseSections(data.changelog);
-      const nav = sections.filter((s) => s.version !== '(header)').map((s, i) => {
+      const sections = parseSections(data.changelog).filter((s) => s.version !== '(header)');
+      // newest = first section; expand it by default on first render
+      if (activeIdx === null && sections.length) { activeIdx = 0; expanded.add(0); }
+      const nav = sections.map((s, i) => {
         const isNew = installed ? cVercmp(s.version, installed, de) > 0 : false;
-        return `<button class="up-cl-navitem ${isNew ? 'up-cl-nav-new' : ''}" data-jump="sec${i}">${esc(s.version)}${isNew ? ' <span class="up-cl-newdot">●</span>' : ''}</button>`;
+        const isActive = i === activeIdx;
+        return `<button class="up-cl-navitem ${isNew ? 'up-cl-nav-new' : ''} ${isActive ? 'up-cl-nav-active' : ''}" data-nav="${i}">${esc(s.version)}${isNew ? ' <span class="up-cl-newdot">●</span>' : ''}</button>`;
       }).join('');
       const bodyHtml = sections.map((s, i) => {
-        const isNew = s.version !== '(header)' && installed && cVercmp(s.version, installed, de) > 0;
-        return `<div class="up-cl-sec ${isNew ? 'up-cl-sec-new' : ''}" id="sec${i}"><pre class="up-cl-pre ${isNew ? 'up-cl-pre-new' : ''}">${hlSec(s.lines.join('\n'))}</pre></div>`;
+        const isNew = installed && cVercmp(s.version, installed, de) > 0;
+        const isNewest = i === 0;          // the candidate's own entry
+        const open = expanded.has(i);
+        const headerLine = s.lines[0] || s.version;
+        const restLines = s.lines.slice(1).join('\n');
+        return `<div class="up-cl-sec ${isNew ? 'up-cl-sec-new' : ''} ${isNewest ? 'up-cl-sec-newest' : ''}" id="sec${i}">
+            <button class="up-cl-sechead ${open ? 'open' : ''}" data-sec="${i}">
+              <span class="up-cl-caret">${open ? '▾' : '▸'}</span>
+              <span class="up-cl-sechdr">${hlSec(headerLine)}</span>
+            </button>
+            ${open ? `<pre class="up-cl-pre ${isNewest ? 'up-cl-pre-cyan' : ''}">${hlSec(restLines)}</pre>` : ''}
+          </div>`;
       }).join('');
       return `<div class="up-cl-layout">
           <div class="up-cl-nav">${nav || '<span class="up-cl-empty">No versions</span>'}</div>
           <div class="up-cl-content" data-cl="content">${bodyHtml}</div>
         </div>`;
     };
+    const instTitle = installed ? ` <span class="up-cl-inst">(installed: ${esc(installed)})</span>` : '';
     ov.innerHTML = `<div class="wizard card up-cl-modal">
         <div class="up-cl-head">
-          <div><b>${esc(pkg)}</b> <span class="inv-dim">changelog</span>${data.candidateVersion ? ` <span class="up-cl-ver">→ ${esc(decodeURIComponent(data.candidateVersion))}</span>` : ''}</div>
+          <div><b>${esc(pkg)}</b> <span class="inv-dim">changelog</span>${data.candidateVersion ? ` <span class="up-cl-ver">→ ${esc(decodeURIComponent(data.candidateVersion))}</span>` : ''}${instTitle}</div>
           <button class="up-link" data-cl="close">close ✕</button>
         </div>
         <div class="up-cl-main" data-cl="main">${data.changelog || data.needsFull || data.error ? renderBody() : '<div class="up-log-loading"><span class="up-spinner-sm"></span>Loading changelog…</div>'}</div>
@@ -1887,9 +1902,20 @@ pageRenderers.updates = (() => {
     document.body.appendChild(ov);
     const wire = () => {
       ov.querySelector('[data-cl=close]').onclick = close;
-      ov.querySelectorAll('[data-jump]').forEach((b) => b.onclick = () => {
-        const t = ov.querySelector('#' + b.dataset.jump);
+      // sidebar nav: set active, expand it, scroll to it
+      ov.querySelectorAll('[data-nav]').forEach((b) => b.onclick = () => {
+        const i = Number(b.dataset.nav);
+        activeIdx = i; expanded.add(i);
+        ov.querySelector('[data-cl=main]').innerHTML = renderBody(); wire();
+        const t = ov.querySelector('#sec' + i);
         if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      // section header: toggle expand/collapse
+      ov.querySelectorAll('[data-sec]').forEach((b) => b.onclick = () => {
+        const i = Number(b.dataset.sec);
+        expanded.has(i) ? expanded.delete(i) : expanded.add(i);
+        activeIdx = i;
+        ov.querySelector('[data-cl=main]').innerHTML = renderBody(); wire();
       });
       const dl = ov.querySelector('[data-cl=dl]');
       if (dl) dl.onclick = () => downloadFullToModal(host, pkg, ov, installed);
@@ -1897,8 +1923,7 @@ pageRenderers.updates = (() => {
     wire();
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
     ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-    // expose re-render for the download path
-    ov._rerender = (newData) => { Object.assign(data, newData); ov.querySelector('[data-cl=main]').innerHTML = renderBody(); wire(); };
+    ov._rerender = (newData) => { Object.assign(data, newData); activeIdx = null; expanded.clear(); ov.querySelector('[data-cl=main]').innerHTML = renderBody(); wire(); };
     return ov;
   }
 
