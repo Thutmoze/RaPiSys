@@ -5204,20 +5204,33 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   padding: 0;
 }
 /* the scroll body holds the real card/section and fills the remaining height */
-.rapisys-grid .gs-body { flex: 1; min-height: 0; overflow: auto; }
+.rapisys-grid .gs-body { flex: 1; min-height: 0; display: flex; }
 .rapisys-grid .gs-body > .card,
 .rapisys-grid .gs-body > section {
-  margin: 0; width: 100%; min-height: 100%; height: auto;
+  margin: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  overflow: auto;          /* content that can't shrink scrolls within the card */
 }
 .rapisys-grid .gs-body > section { margin-bottom: 0; }
+/* let the card body region flex to fill, so gauges/charts get the space */
+.rapisys-grid .gs-body > .card > .card-body { flex: 1; min-height: 0; }
 /* tidy scrollbars inside widgets */
-.rapisys-grid .gs-body::-webkit-scrollbar { width: 6px; height: 6px; }
-.rapisys-grid .gs-body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+.rapisys-grid .gs-body::-webkit-scrollbar,
+.rapisys-grid .gs-body > .card::-webkit-scrollbar,
+.rapisys-grid .gs-body > section::-webkit-scrollbar { width: 6px; height: 6px; }
+.rapisys-grid .gs-body::-webkit-scrollbar-thumb,
+.rapisys-grid .gs-body > .card::-webkit-scrollbar-thumb,
+.rapisys-grid .gs-body > section::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
 
 /* --- edit-mode chrome (only while body.layout-editing) --- */
 body.layout-editing .rapisys-grid .grid-stack-item-content {
   background: var(--bg-card);
   border: 1px dashed var(--accent-cyan);
+}
+/* in edit mode the inner card drops its own border/bg so the dashed cell shows */
+body.layout-editing .rapisys-grid .gs-body > .card,
+body.layout-editing .rapisys-grid .gs-body > section {
+  background: transparent; border-color: transparent;
 }
 body.layout-editing .gs-edit-bar {
   display: flex; align-items: center; justify-content: space-between;
@@ -5266,3 +5279,7 @@ body.layout-editing .gs-hide-btn:hover { color: #ef4444; background: rgba(239,68
 .layout-toolbar-actions .lt-reset { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
 
 
+
+/* When a grid layout is active (saved or editing), use the full viewport width
+   instead of the 1400px reading cap — the grid manages its own columns. */
+body.layout-grid-active .container { max-width: none; }

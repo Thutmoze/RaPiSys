@@ -141,6 +141,7 @@ function buildGrid({ editable }) {
     disableDrag: !editable,
     handle: '.gs-edit-bar',
   }, gridEl);
+  document.body.classList.add('layout-grid-active');
   return g;
 }
 
@@ -154,6 +155,7 @@ function teardownGrid() {
     if (home) home.appendChild(node);
   });
   grids.forEach((g) => g.remove());
+  document.body.classList.remove('layout-grid-active');
   const dashboard = document.querySelector('main.dashboard');
   if (dashboard) [...dashboard.children].forEach((c) => { c.style.removeProperty('display'); });
 }
