@@ -6,6 +6,7 @@
  * the original dashboard: index.js catches init errors and continues.
  */
 
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { openDatabase } from './core/db.js';
@@ -18,6 +19,8 @@ import { createSessionsRepo } from './repositories/sessions.js';
 import { createHardwareCollector } from './collectors/hardware.js';
 import { createSessionsCollector } from './collectors/sessions.js';
 import { createNetworkCollector } from './collectors/network.js';
+import { createReportsRepo } from './repositories/reports.js';
+import { createReports } from './services/reports.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
@@ -31,6 +34,7 @@ import { hardwareRouter } from './routes/hardware.js';
 import { alertsRouter } from './routes/alerts.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { networkRouter } from './routes/network.js';
+import { reportsRouter } from './routes/reports.js';
 import { authRouter } from './routes/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,13 +60,14 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
     secrets = createSecretsRepo(getDb());
     alertsRepo = createAlertsRepo(getDb());
     sessionsRepo = createSessionsRepo(getDb());
+    reportsRepo = createReportsRepo(getDb());
   }
   rebuildRepos();
 
@@ -110,6 +115,13 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   const sessions = createSessionsCollector();
   const network = createNetworkCollector();
+  const reportsFacade = new Proxy({}, { get: (_, m) => (...a) => reportsRepo[m](...a) });
+  const reports = createReports({
+    metricsRepo: metricsFacade, eventsRepo: eventsFacade, reportsRepo: reportsFacade,
+    getStorageInfo: () => { try { const st = fs.statfsSync ? fs.statfsSync('/app/data') : null;
+      if (st) { const used = (st.blocks - st.bfree) / st.blocks * 100; return { percentUsed: used }; } } catch { /* */ } return null; },
+  });
+  reports.backfill(14);
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
     eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
@@ -158,6 +170,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     } catch { /* nethogs absent or busy — skip silently */ }
   });
   scheduler.register('auth-session-purge', 6 * 3600e3, () => auth.purgeExpired());
+  // Nightly report materialization (runs the previous day's summary).
+  scheduler.register('reports-daily', 6 * 3600e3, () => { try { reports.materializeDay(); reports.backfill(7); } catch { /* */ } });
 
   // ---- routes ----------------------------------------------------------------------
   app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
@@ -167,6 +181,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/alerts', alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
   app.use('/api/sessions', sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
+  app.use('/api/reports', reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,

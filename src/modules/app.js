@@ -310,7 +310,7 @@ const PAGES = [
   { id: 'hardware', label: 'Hardware' },
   { id: 'sessions', label: 'Sessions' },
   { id: 'network', label: 'Network' },
-  { id: 'reports', label: 'Reports', soon: true },
+  { id: 'reports', label: 'Reports' },
   { id: 'updates', label: 'Updates', soon: true },
   { id: 'inventory', label: 'Inventory', soon: true },
   { id: 'alerts', label: 'Alerts' },
@@ -1248,6 +1248,137 @@ pageRenderers.network = (() => {
       if (chart) { chart.stop(); chart = null; }
       for (const k of Object.keys(series)) delete series[k];
     },
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Reports page — daily/weekly/monthly aggregation, health score, export
+// ---------------------------------------------------------------------------
+
+pageRenderers.reports = (() => {
+  let view = 'daily';
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const METRIC_LABEL = { 'cpu.usage': 'CPU %', 'mem.percent': 'Memory %', 'temp.cpu': 'CPU Temp °C', 'fan.rpm': 'Fan RPM', 'power.watts': 'Power W', 'load.avg1': 'Load 1m' };
+  const fix = (v) => (v == null ? '—' : (Math.round(v * 10) / 10).toLocaleString());
+
+  function healthRing(score) {
+    const col = score >= 80 ? '#10b981' : score >= 60 ? '#eab308' : '#ef4444';
+    const circ = 2 * Math.PI * 52;
+    const off = circ * (1 - score / 100);
+    return `<svg viewBox="0 0 120 120" class="rep-ring">
+      <circle cx="60" cy="60" r="52" fill="none" stroke="var(--border-color)" stroke-width="10"/>
+      <circle cx="60" cy="60" r="52" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
+        stroke-dasharray="${circ}" stroke-dashoffset="${off}" transform="rotate(-90 60 60)"/>
+      <text x="60" y="58" text-anchor="middle" class="rep-ring-score" fill="${col}">${score}</text>
+      <text x="60" y="76" text-anchor="middle" class="rep-ring-label">/ 100</text>
+    </svg>`;
+  }
+
+  function sparkline(values, col = '#00d4ff') {
+    if (!values.length) return '';
+    const max = Math.max(...values), min = Math.min(...values), rng = max - min || 1;
+    const w = 120, h = 28;
+    const pts = values.map((v, i) => `${(i / (values.length - 1 || 1)) * w},${h - ((v - min) / rng) * h}`).join(' ');
+    return `<svg viewBox="0 0 ${w} ${h}" class="rep-spark"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"/></svg>`;
+  }
+
+  async function load(host) {
+    if (view === 'daily') {
+      let data;
+      try { data = await api('/reports/daily?days=30'); } catch { return; }
+      const days = data.days;
+      if (!days.length) {
+        $('[data-rep=body]', host).innerHTML = '<p class="sess-empty">No daily summaries yet. Reports build overnight; click Rebuild to generate now.</p>';
+        return;
+      }
+      const latest = days[days.length - 1];
+      const health = latest.health || { overall: 0, factors: [] };
+      // sparkline series across days per metric
+      const series = {};
+      for (const m of Object.keys(METRIC_LABEL)) series[m] = days.map((d) => d.metrics?.[m]?.avg).filter((v) => v != null);
+
+      $('[data-rep=body]', host).innerHTML = `
+        <div class="rep-health">
+          <div class="rep-health-ring">${healthRing(health.overall)}<div class="rep-health-cap">Health · ${esc(latest.day)}</div></div>
+          <div class="rep-health-factors">
+            ${(health.factors || []).map((f) => `
+              <div class="rep-factor">
+                <span class="rep-factor-name">${esc(f.name)}</span>
+                <span class="rep-factor-bar"><span style="width:${f.score}%;background:${f.score >= 80 ? '#10b981' : f.score >= 60 ? '#eab308' : '#ef4444'}"></span></span>
+                <span class="rep-factor-detail">${esc(f.detail || '')}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+        <h4 class="sess-h">Metric trends (30 days, daily avg)</h4>
+        <div class="rep-metrics">
+          ${Object.entries(METRIC_LABEL).map(([m, label]) => {
+            const s = latest.metrics?.[m];
+            if (!s) return '';
+            return `<div class="rep-metric">
+              <div class="rep-metric-head"><b>${esc(label)}</b>${sparkline(series[m])}</div>
+              <div class="rep-metric-stats"><span>min ${fix(s.min)}</span><span>avg ${fix(s.avg)}</span><span>max ${fix(s.max)}</span><span>p95 ${fix(s.p95)}</span></div>
+            </div>`;
+          }).join('')}
+        </div>`;
+    } else {
+      let data;
+      try { data = await api(`/reports/${view}`); } catch { return; }
+      if (!data.days?.length) { $('[data-rep=body]', host).innerHTML = '<p class="sess-empty">Not enough daily data yet for this view.</p>'; return; }
+      $('[data-rep=body]', host).innerHTML = `
+        <div class="rep-health">
+          <div class="rep-health-ring">${healthRing(data.health?.overall || 0)}<div class="rep-health-cap">Avg health · ${view}</div></div>
+          <div class="rep-health-factors">
+            ${Object.entries(data.metrics).map(([m, s]) => `
+              <div class="rep-factor">
+                <span class="rep-factor-name">${esc(METRIC_LABEL[m] || m)}</span>
+                <span class="rep-factor-detail">min ${fix(s.min)} · avg ${fix(s.avg)} · max ${fix(s.max)} ${s.trend ? `· trend ${s.trend > 0 ? '▲' : '▼'} ${fix(Math.abs(s.trend))}` : ''}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+        <p class="net-hint">Aggregated from ${data.days.length} daily summaries.</p>`;
+    }
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header">
+            <div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></div>
+            <span class="card-title">Reports</span>
+            <div class="rep-tabs">
+              <button class="rep-tab active" data-rep-tab="daily">Daily</button>
+              <button class="rep-tab" data-rep-tab="weekly">Weekly</button>
+              <button class="rep-tab" data-rep-tab="monthly">Monthly</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="rep-actions">
+              <button class="net-toggle" data-rep="rebuild">Rebuild now</button>
+              <a class="net-toggle" href="/api/reports/export.csv?days=30" download>Export CSV</a>
+              <a class="net-toggle" href="/api/reports/export.json?days=30" download>Export JSON</a>
+              <button class="net-toggle" data-rep="print">Export PDF (print)</button>
+            </div>
+            <div data-rep="body"></div>
+          </div>
+        </div>
+      </div>`;
+      host.querySelectorAll('[data-rep-tab]').forEach((b) => b.onclick = () => {
+        view = b.dataset.repTab;
+        host.querySelectorAll('[data-rep-tab]').forEach((x) => x.classList.toggle('active', x === b));
+        load(host);
+      });
+      $('[data-rep=rebuild]', host).onclick = async () => {
+        const btn = $('[data-rep=rebuild]', host); btn.textContent = 'Rebuilding…'; btn.disabled = true;
+        try { await api('/reports/rebuild', { method: 'POST', body: {} }); toast('success', 'Reports', 'Summaries rebuilt'); load(host); }
+        catch (e) { toast('error', 'Reports', e.message); }
+        finally { btn.textContent = 'Rebuild now'; btn.disabled = false; }
+      };
+      $('[data-rep=print]', host).onclick = () => window.print();
+      load(host);
+    },
+    unmount() {},
   };
 })();
 

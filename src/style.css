@@ -4912,3 +4912,36 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-conn b, .net-conn span:first-child { color: var(--text-secondary); }
 .net-conn-peer { font-variant-numeric: tabular-nums; word-break: break-all; text-align: right; }
 .net-conn small { opacity: 0.6; }
+
+/* Reports page */
+.rep-tabs { display: flex; gap: 4px; margin-left: auto; }
+.rep-tab { font-size: 12px; padding: 6px 14px; border-radius: 999px; background: none;
+  border: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; font-family: inherit; }
+.rep-tab.active { color: var(--accent-cyan); border-color: var(--accent-cyan); background: rgba(0,212,255,0.06); }
+.rep-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.rep-actions a.net-toggle { text-decoration: none; display: inline-block; }
+.rep-health { display: flex; gap: 24px; align-items: center; padding: 8px 0 16px; flex-wrap: wrap; }
+.rep-health-ring { text-align: center; }
+.rep-ring { width: 120px; height: 120px; }
+.rep-ring-score { font-size: 30px; font-weight: 800; }
+.rep-ring-label { font-size: 11px; fill: var(--text-muted); }
+.rep-health-cap { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.rep-health-factors { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 8px; }
+.rep-factor { display: grid; grid-template-columns: 140px 1fr auto; gap: 10px; align-items: center; font-size: 12px; }
+.rep-factor-name { color: var(--text-secondary); }
+.rep-factor-bar { height: 7px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden; }
+.rep-factor-bar span { display: block; height: 100%; }
+.rep-factor-detail { color: var(--text-muted); text-align: right; }
+.rep-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.rep-metric { padding: 12px; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); }
+.rep-metric-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.rep-metric-head b { font-size: 13px; color: var(--text-primary); }
+.rep-spark { width: 120px; height: 28px; }
+.rep-metric-stats { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
+
+@media print {
+  .nav-rail, .rep-actions, .rep-tabs, .toast-container, .welcome-banner { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .card { break-inside: avoid; border: 1px solid #ccc !important; background: #fff !important; }
+  .rapisys-page { margin: 0 !important; }
+}

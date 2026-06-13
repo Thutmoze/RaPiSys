@@ -16,9 +16,18 @@ export function createEventsRepo(db) {
   function countSince(type, sinceTs) {
     return db.prepare(`SELECT COUNT(*) c FROM events WHERE type = ? AND ts >= ?`).get(type, sinceTs).c;
   }
+  function countByTypeBetween(fromTs, toTs) {
+    const rows = db.prepare(
+      `SELECT type, COUNT(*) AS n FROM events WHERE ts BETWEEN ? AND ? GROUP BY type`
+    ).all(fromTs, toTs);
+    const out = {};
+    for (const r of rows) out[r.type] = r.n;
+    return out;
+  }
+
   function purgeOlderThan(ts) {
     return db.prepare(`DELETE FROM events WHERE ts < ?`).run(ts);
   }
   const safeParse = (s) => { try { return JSON.parse(s); } catch { return s; } };
-  return { add, recent, countSince, purgeOlderThan };
+  return { add, recent, countSince, countByTypeBetween, purgeOlderThan };
 }
