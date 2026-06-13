@@ -1574,6 +1574,16 @@ pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set();
   let streaming = false;
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // inline glyphs (stroke icons matching the app's Lucide-style set)
+  const ICN = {
+    refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V5z"/><path d="m9 12 2 2 4-4"/></svg>',
+    download: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></svg>',
+    rocket: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0zM12 15l-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8zM9 12H4s.5-3 2-4 5 0 5 0M12 15v5s3-.5 4-2 0-5 0-5"/></svg>',
+    chip: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
+  };
+  const ACTION_BTN = (act, icon, label, cls = '') =>
+    `<button class="net-toggle up-btn ${cls}" data-up="${act}">${icon}<span>${label}</span></button>`;
 
   async function load(host) {
     let data;
@@ -1585,7 +1595,7 @@ pageRenderers.updates = (() => {
     if (updates.length || data.available) render(host);
     else {
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip">no cached results</span>';
-      $('[data-up=actions]', host).innerHTML = '<button class="net-toggle" data-up="refresh">Check for updates</button>';
+      $('[data-up=actions]', host).innerHTML = ACTION_BTN('refresh', ICN.refresh, 'Check for updates');
       wireActions(host);
     }
   }
@@ -1601,12 +1611,13 @@ pageRenderers.updates = (() => {
       ${kern ? `<span class="up-chip up-chip-kern">${kern} kernel</span>` : ''}
       <span class="up-chip ${fw ? 'up-chip-fw' : ''}">firmware ${fw ? 'update available' : 'ok'}</span>`;
 
-    $('[data-up=actions]', host).innerHTML = `
-      <button class="net-toggle" data-up="refresh">Check for updates</button>
-      ${sec ? '<button class="net-toggle up-act-sec" data-up="security">Install security updates</button>' : ''}
-      <button class="net-toggle" data-up="selected" disabled>Update selected (0)</button>
-      <button class="net-toggle up-act-danger" data-up="full">Full upgrade…</button>
-      ${fw ? '<button class="net-toggle up-act-fw" data-up="firmware">Update firmware</button>' : ''}`;
+    $('[data-up=actions]', host).innerHTML =
+      ACTION_BTN('refresh', ICN.refresh, 'Check for updates')
+      + (sec ? ACTION_BTN('security', ICN.shield, 'Install security updates', 'up-act-sec') : '')
+      + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel')
+      + ACTION_BTN('full', ICN.rocket, 'Full upgrade…', 'up-act-danger')
+      + (fw ? ACTION_BTN('firmware', ICN.chip, 'Update firmware', 'up-act-fw') : '');
+    const selInit = $('[data-up=selected]', host); if (selInit) selInit.disabled = selected.size === 0;
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
@@ -1628,9 +1639,12 @@ pageRenderers.updates = (() => {
   function wireActions(host) {
     const refresh = $('[data-up=refresh]', host);
     if (refresh) refresh.onclick = async () => {
-      refresh.textContent = 'Checking…'; refresh.disabled = true;
-      try { await api('/updates/refresh', { method: 'POST', body: {} }); await load(host); toast('success', 'Updates', 'Checked'); }
-      catch (e) { toast('error', 'Updates', e.message); refresh.textContent = 'Check for updates'; refresh.disabled = false; }
+      refresh.disabled = true; refresh.classList.add('up-btn-busy');
+      refresh.innerHTML = '<span class="up-spinner-sm"></span><span>Checking…</span>';
+      $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>scanning apt…</span>';
+      $('[data-up=table]', host).innerHTML = '<div class="up-scanbar up-scanbar-active"><span></span></div><p class="sess-empty">Running apt-get update…</p>';
+      try { await api('/updates/refresh', { method: 'POST', body: {} }); await load(host); toast('success', 'Updates', 'Up-to-date check complete'); }
+      catch (e) { toast('error', 'Updates', e.message); render(host); }
     };
     const sec = $('[data-up=security]', host);
     if (sec) sec.onclick = () => startUpgrade(host, { packages: updates.filter((u) => u.security).map((u) => u.package), label: 'security updates' });
@@ -1651,11 +1665,11 @@ pageRenderers.updates = (() => {
     host.querySelectorAll('.up-cb').forEach((cb) => cb.onclick = () => {
       if (cb.checked) selected.add(cb.dataset.pkg); else selected.delete(cb.dataset.pkg);
       const b = $('[data-up=selected]', host);
-      if (b) { b.disabled = selected.size === 0; b.textContent = `Update selected (${selected.size})`; }
+      if (b) { b.disabled = selected.size === 0; const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
     });
     host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
     const b = $('[data-up=selected]', host);
-    if (b) { b.disabled = selected.size === 0; b.textContent = `Update selected (${selected.size})`; }
+    if (b) { b.disabled = selected.size === 0; const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
   }
 
   async function showChangelog(host, pkg) {
@@ -1754,10 +1768,10 @@ pageRenderers.updates = (() => {
       </div>`;
       // Draw the action toolbar immediately so "Check for updates" is always
       // available, even before (or without) a cached upgrade list.
-      $('[data-up=chips]', host).innerHTML = '<span class="up-chip">checking…</span>';
-      $('[data-up=actions]', host).innerHTML = '<button class="net-toggle" data-up="refresh">Check for updates</button>';
+      $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>checking…</span>';
+      $('[data-up=actions]', host).innerHTML = ACTION_BTN('refresh', ICN.refresh, 'Check for updates');
       wireActions(host);
-      $('[data-up=table]', host).innerHTML = '<p class="sess-empty">Click \u201cCheck for updates\u201d to scan for available updates.</p>';
+      $('[data-up=table]', host).innerHTML = '<div class="up-scanbar"><span></span></div><p class="sess-empty">Click \u201cCheck for updates\u201d to scan for available updates.</p>';
       load(host); loadHistory(host);
     },
     unmount() { streaming = false; },

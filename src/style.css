@@ -5019,3 +5019,17 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); margin: 0; }
 .up-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-color);
   border-top-color: var(--accent-cyan); border-radius: 50%; animation: inv-spin 0.6s linear infinite; }
+
+/* Updates: glyph buttons + animated scanning state */
+.up-btn { display: inline-flex; align-items: center; gap: 7px; }
+.up-btn svg { flex-shrink: 0; }
+.up-btn-busy { cursor: progress; opacity: 0.8; }
+.up-checking { display: inline-flex; align-items: center; gap: 7px; animation: up-pulse 1.4s ease-in-out infinite; }
+@keyframes up-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.up-spinner-sm { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--border-color);
+  border-top-color: var(--accent-cyan); border-radius: 50%; animation: inv-spin 0.6s linear infinite; }
+.up-scanbar { height: 3px; background: var(--bg-secondary); border-radius: 2px; overflow: hidden; margin-bottom: 14px; }
+.up-scanbar span { display: block; height: 100%; width: 30%; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent); }
+.up-scanbar-active span { animation: up-scan 1.2s ease-in-out infinite; }
+@keyframes up-scan { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
