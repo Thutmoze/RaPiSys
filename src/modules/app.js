@@ -1621,6 +1621,13 @@ pageRenderers.updates = (() => {
     return { head, newBlock: newLines.join('\n').trim(), rest: oldLines.join('\n').trim(), plain: '' };
   }
 
+  const fmtBytes = (b) => {
+    if (!b) return '—';
+    if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
+    if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+    if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+    return b + ' B';
+  };
   const urgBadge = (u) => {
     if (!u) return '<span class="inv-dim">—</span>';
     const l = String(u).toLowerCase();
@@ -1681,7 +1688,7 @@ pageRenderers.updates = (() => {
     $('[data-up=table]', host).innerHTML = updates.length ? `
       <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
       <table class="inv-table up-table">
-        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>Changelog</th></tr></thead>
+        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>Changelog</th></tr></thead>
         <tbody>${updates.map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
@@ -1689,6 +1696,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim inv-desc">${esc(u.description || '')}</td>
             <td class="inv-dim">${esc(u.installed || '—')}</td>
             <td class="up-new">${esc(u.candidate)}</td>
+            <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
             <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
             <td class="up-tags-cell up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</td>
             <td>${urgBadge(u.urgency)}</td>

@@ -49,8 +49,13 @@ export function createUpdatesRepo(db) {
   function getChangelog(pkg, candidate) {
     const row = db.prepare(`SELECT candidate, changelog FROM update_changelogs WHERE package=?`).get(pkg);
     if (!row || !row.changelog) return null;
-    // only reuse if it's for the same candidate version we're upgrading to
-    if (candidate && row.candidate && row.candidate !== candidate) return null;
+    // Reuse if it's for the same candidate. The stored candidate comes from the
+    // .deb filename (epoch dropped, e.g. '149.0...') while the passed candidate
+    // comes from apt (with epoch, '1:149.0...'), so compare ignoring the epoch.
+    if (candidate && row.candidate) {
+      const strip = (v) => String(v).replace(/^\d+:/, '');
+      if (strip(row.candidate) !== strip(candidate)) return null;
+    }
     return { candidateVersion: row.candidate, changelog: row.changelog };
   }
   function getSecurityTags() {

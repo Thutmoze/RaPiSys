@@ -693,8 +693,22 @@ WantedBy=multi-user.target
         if (i > 0) desc[line.slice(0, i)] = line.slice(i + 1);
       }
     }
+    // Candidate download size: parse `apt-cache show` Size: fields (bytes of the
+    // .deb). One call for all upgradable packages; take the first (candidate) Size.
+    const sizeMap = {};
+    if (names.length) {
+      const sc = await run('apt-cache', ['show', ...names], 30000).catch(() => ({ stdout: '' }));
+      let curPkg = null;
+      for (const line of (sc.stdout || '').split('\n')) {
+        const pm = line.match(/^Package:\s*(\S+)/);
+        if (pm) { curPkg = pm[1]; continue; }
+        const zm = line.match(/^Size:\s*(\d+)/);
+        if (zm && curPkg && sizeMap[curPkg] == null) sizeMap[curPkg] = parseInt(zm[1], 10);
+      }
+    }
     for (const u of updates) {
       u.description = desc[u.package] || '';
+      u.sizeBytes = sizeMap[u.package] || null;
       try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
       catch { u.installedAt = null; }
     }

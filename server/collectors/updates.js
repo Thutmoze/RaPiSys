@@ -119,10 +119,11 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       for (const u of updates) { const r = res[u.package]; if (r && r.scanned) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; } }
     }
     updatesRepo?.saveCache(updates);
-    // report packages whose changelog couldn't be range-scanned (large pkgs)
-    const tags = updatesRepo?.getSecurityTags?.() || {};
+    // report packages whose changelog still isn't cached (large pkgs whose
+    // range-fetch couldn't reach the changelog). getChangelog handles the
+    // epoch-mismatch between apt's candidate and the stored one.
     const unscanned = updates
-      .filter((u) => { const k = tags[u.package]; return !(k && k.candidate === u.candidate); })
+      .filter((u) => !updatesRepo?.getChangelog?.(u.package, u.candidate))
       .map((u) => u.package);
     return { available: true, updates, checkedAt: Date.now(), unscanned };
   }
