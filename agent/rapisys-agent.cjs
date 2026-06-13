@@ -194,7 +194,52 @@ const OPS = {
   },
 
   // ---- Login sessions via systemd-logind (Trixie dropped utmp) ------------
-  async 'sessions.list'() {
+  // ---- software inventory (read-only host inspection) ---------------------
+  async 'inventory.packages'() {
+    // dpkg-query: name, version, status; install time from the .list mtime.
+    const r = await run('dpkg-query', ['-W', '-f=${Package}\t${Version}\t${Status}\t${Installed-Size}\n'], 15000)
+      .catch(() => ({ code: 1, stdout: '' }));
+    if (r.code !== 0) return { packages: [] };
+    const packages = [];
+    for (const line of r.stdout.split('\n')) {
+      const [name, version, status, size] = line.split('\t');
+      if (!name || !/installed/.test(status || '')) continue;
+      let installedAt = null;
+      try { installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${name}.list`).mtimeMs); } catch { /* */ }
+      packages.push({ name, version: version || '', installedAt, sizeKB: Number(size) || 0 });
+    }
+    return { packages };
+  },
+  async 'inventory.services'() {
+    // systemd units: load/active/sub state + since-timestamp.
+    const r = await run('systemctl',
+      ['list-units', '--type=service', '--all', '--no-legend', '--no-pager', '--plain'], 10000)
+      .catch(() => ({ code: 1, stdout: '' }));
+    if (r.code !== 0) return { services: [] };
+    const services = [];
+    for (const line of r.stdout.split('\n')) {
+      const cols = line.trim().split(/\s+/);
+      if (cols.length < 4) continue;
+      const [unit, load, active, sub] = cols;
+      services.push({ name: unit.replace(/\.service$/, ''), load, active, sub,
+        description: cols.slice(4).join(' ') });
+    }
+    return { services };
+  },
+  async 'inventory.serviceDetail'({ name }) {
+    assert(/^[a-zA-Z0-9@._\\-]{1,128}$/.test(name), 'invalid service name');
+    const r = await run('systemctl',
+      ['show', `${name}.service`, '-p', 'ActiveEnterTimestamp,MainPID,MemoryCurrent,ExecMainStartTimestamp,UnitFileState'], 6000)
+      .catch(() => ({ code: 1, stdout: '' }));
+    const out = {};
+    for (const line of (r.stdout || '').split('\n')) {
+      const i = line.indexOf('='); if (i < 0) continue;
+      out[line.slice(0, i)] = line.slice(i + 1);
+    }
+    return out;
+  },
+
+    async 'sessions.list'() {
     // --no-legend table is stable across systemd versions; `-o json` is not
     // supported for list-sessions on all builds (silently prints the table).
     const ls = await run('loginctl', ['list-sessions', '--no-legend'], 5000);

@@ -21,6 +21,8 @@ import { createSessionsCollector } from './collectors/sessions.js';
 import { createNetworkCollector } from './collectors/network.js';
 import { createReportsRepo } from './repositories/reports.js';
 import { createReports } from './services/reports.js';
+import { createInventoryCollector } from './collectors/inventory.js';
+import { createInventoryRepo } from './repositories/inventory.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
@@ -35,6 +37,7 @@ import { alertsRouter } from './routes/alerts.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { networkRouter } from './routes/network.js';
 import { reportsRouter } from './routes/reports.js';
+import { inventoryRouter } from './routes/inventory.js';
 import { authRouter } from './routes/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,7 +63,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
@@ -68,6 +71,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     alertsRepo = createAlertsRepo(getDb());
     sessionsRepo = createSessionsRepo(getDb());
     reportsRepo = createReportsRepo(getDb());
+    inventoryRepo = createInventoryRepo(getDb());
   }
   rebuildRepos();
 
@@ -122,6 +126,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       if (st) { const used = (st.blocks - st.bfree) / st.blocks * 100; return { percentUsed: used }; } } catch { /* */ } return null; },
   });
   reports.backfill(14);
+  const inventory = createInventoryCollector();
+  const inventoryRepoFacade = new Proxy({}, { get: (_, m) => (...a) => inventoryRepo[m](...a) });
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
     eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
@@ -174,6 +180,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('reports-daily', 6 * 3600e3, () => { try { reports.materializeDay(); reports.backfill(7); } catch { /* */ } });
   // Refresh today's partial report every 10 min so the Reports page stays live.
   scheduler.register('reports-today', 600e3, () => { try { reports.materializeDay(Date.now()); } catch { /* */ } });
+  scheduler.register('inventory-sync', 30 * 60e3, async () => {
+    try { const items = await inventory.collectAll(); inventoryRepoFacade.sync(items, ['package', 'service', 'container']); } catch { /* */ }
+  }, { runNow: true });
 
   // ---- routes ----------------------------------------------------------------------
   app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
@@ -184,6 +193,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/sessions', sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
   app.use('/api/reports', reportsRouter({ reports, reportsRepo: reportsFacade }));
+  app.use('/api/inventory', inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,

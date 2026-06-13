@@ -312,7 +312,7 @@ const PAGES = [
   { id: 'network', label: 'Network' },
   { id: 'reports', label: 'Reports' },
   { id: 'updates', label: 'Updates', soon: true },
-  { id: 'inventory', label: 'Inventory', soon: true },
+  { id: 'inventory', label: 'Inventory' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -1379,6 +1379,107 @@ pageRenderers.reports = (() => {
       load(host);
     },
     unmount() {},
+  };
+})();
+
+// ---------------------------------------------------------------------------
+// Inventory page — packages / services / containers, searchable & paginated
+// ---------------------------------------------------------------------------
+
+pageRenderers.inventory = (() => {
+  let kind = 'package', q = '', offset = 0, total = 0;
+  const LIMIT = 50;
+  let searchTimer = null;
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString() : '—';
+  const fmtSize = (kb) => kb ? (kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`) : '';
+
+  function statusBadge(kind, status) {
+    let cls = 'inv-badge';
+    if (kind === 'container') cls += status === 'running' ? ' inv-ok' : ' inv-off';
+    else if (kind === 'service') cls += /active\/running|active\/exited/.test(status) ? ' inv-ok' : /failed/.test(status) ? ' inv-err' : ' inv-off';
+    else cls += ' inv-neutral';
+    return `<span class="${cls}">${esc(status || '')}</span>`;
+  }
+
+  async function loadSummary(host) {
+    let s;
+    try { s = await api('/inventory/summary'); } catch { return; }
+    const c = s.counts || {};
+    $('[data-inv=chips]', host).innerHTML = `
+      <button class="inv-chip ${kind === 'package' ? 'active' : ''}" data-inv-kind="package">Packages <b>${c.package || 0}</b></button>
+      <button class="inv-chip ${kind === 'service' ? 'active' : ''}" data-inv-kind="service">Services <b>${c.service || 0}</b></button>
+      <button class="inv-chip ${kind === 'container' ? 'active' : ''}" data-inv-kind="container">Containers <b>${c.container || 0}</b></button>`;
+    host.querySelectorAll('[data-inv-kind]').forEach((b) => b.onclick = () => {
+      kind = b.dataset.invKind; offset = 0;
+      host.querySelectorAll('[data-inv-kind]').forEach((x) => x.classList.toggle('active', x === b));
+      loadRows(host);
+    });
+  }
+
+  async function loadRows(host) {
+    let data;
+    const params = new URLSearchParams({ kind, q, limit: LIMIT, offset });
+    try { data = await api(`/inventory?${params}`); } catch { return; }
+    total = data.total;
+    const rows = data.rows;
+    const head = kind === 'package'
+      ? '<th>Package</th><th>Version</th><th>Size</th><th>Installed</th>'
+      : kind === 'service'
+      ? '<th>Service</th><th>Status</th><th>Description</th>'
+      : '<th>Container</th><th>Image</th><th>Status</th><th>Created</th>';
+
+    $('[data-inv=table]', host).innerHTML = rows.length ? `
+      <table class="inv-table">
+        <thead><tr>${head}</tr></thead>
+        <tbody>${rows.map((r) => {
+          if (kind === 'package') return `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.version)}</td><td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td></tr>`;
+          if (kind === 'service') return `<tr><td><b>${esc(r.name)}</b></td><td>${statusBadge('service', r.status)}</td><td class="inv-dim">${esc(r.meta?.description || '')}</td></tr>`;
+          return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim">${esc(r.meta?.image || r.source)}</td><td>${statusBadge('container', r.status)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td></tr>`;
+        }).join('')}</tbody>
+      </table>` : '<p class="sess-empty">No matches.</p>';
+
+    const from = total ? offset + 1 : 0, to = Math.min(offset + LIMIT, total);
+    $('[data-inv=pager]', host).innerHTML = `
+      <span class="inv-count">${from}–${to} of ${total}</span>
+      <button class="net-toggle" data-inv=prev ${offset === 0 ? 'disabled' : ''}>Prev</button>
+      <button class="net-toggle" data-inv=next ${to >= total ? 'disabled' : ''}>Next</button>`;
+    const prev = $('[data-inv=prev]', host), next = $('[data-inv=next]', host);
+    if (prev) prev.onclick = () => { offset = Math.max(0, offset - LIMIT); loadRows(host); };
+    if (next) next.onclick = () => { offset += LIMIT; loadRows(host); };
+  }
+
+  return {
+    mount(host) {
+      host.innerHTML = `
+      <div class="rapisys-grid">
+        <div class="card sess-span">
+          <div class="card-header">
+            <div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/></svg></div>
+            <span class="card-title">Software Inventory</span>
+            <button class="net-toggle" data-inv="sync" style="margin-left:auto">Re-sync</button>
+          </div>
+          <div class="card-body">
+            <div class="inv-chips" data-inv="chips"></div>
+            <input class="inv-search" data-inv="search" placeholder="Search by name…" autocomplete="off">
+            <div data-inv="table"></div>
+            <div class="inv-pager" data-inv="pager"></div>
+          </div>
+        </div>
+      </div>`;
+      $('[data-inv=search]', host).addEventListener('input', (e) => {
+        q = e.target.value.trim(); offset = 0;
+        clearTimeout(searchTimer); searchTimer = setTimeout(() => loadRows(host), 250);
+      });
+      $('[data-inv=sync]', host).onclick = async () => {
+        const b = $('[data-inv=sync]', host); b.textContent = 'Syncing…'; b.disabled = true;
+        try { await api('/inventory/sync', { method: 'POST', body: {} }); toast('success', 'Inventory', 'Re-synced'); loadSummary(host); loadRows(host); }
+        catch (e) { toast('error', 'Inventory', e.message); }
+        finally { b.textContent = 'Re-sync'; b.disabled = false; }
+      };
+      loadSummary(host); loadRows(host);
+    },
+    unmount() { clearTimeout(searchTimer); },
   };
 })();
 
