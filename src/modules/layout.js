@@ -110,21 +110,23 @@ function observeScale(body, scale) {
     const availW = body.clientWidth;
     const availH = body.clientHeight;
     if (availW <= 0 || availH <= 0) return;
-    // Give the content the full cell WIDTH so it reflows naturally to fill
-    // horizontally (bars stretch, grids spread out) — no transform needed for
-    // width. Then measure its resulting height.
+    // First give the content the full cell width so it reflows to fill
+    // horizontally, then measure its REAL content size (scrollWidth/Height).
+    // Some content has a minimum width it won't shrink below (e.g. the process
+    // table's fixed columns, the 2-col services grid) — scrollWidth captures
+    // that overflow so we can scale it down to fit instead of clipping.
     scale.style.transform = 'none';
     scale.style.width = `${availW}px`;
     scale.style.height = 'auto';
+    const naturalW = Math.max(availW, scale.scrollWidth);
     const naturalH = scale.scrollHeight;
-    if (naturalH <= 0) return;
-    // Only scale DOWN if the (width-filled) content is taller than the cell.
-    // Never upscale (keeps text crisp); short content simply sits at the top
-    // and the cell's own height gives it breathing room.
-    const s = naturalH > availH ? availH / naturalH : 1;
+    if (naturalW <= 0 || naturalH <= 0) return;
+    // Fit by the tighter of width/height; never upscale (keeps text crisp).
+    const s = Math.min(availW / naturalW, availH / naturalH, 1);
+    // Lay the block out at its natural width, then scale the whole thing down
+    // uniformly so nothing (including the scrollbar) spills past the cell.
+    scale.style.width = `${naturalW}px`;
     scale.style.transform = s < 1 ? `scale(${s})` : 'none';
-    // when scaled down, widen so the scaled result still fills the cell width
-    scale.style.width = s < 1 ? `${availW / s}px` : `${availW}px`;
   };
   const ro = new ResizeObserver(() => requestAnimationFrame(apply));
   ro.observe(body);
