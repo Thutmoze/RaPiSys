@@ -108,25 +108,23 @@ const scaleObservers = new WeakMap();
 function observeScale(body, scale) {
   const apply = () => {
     const availW = body.clientWidth;
-    const availH = body.clientHeight;
-    if (availW <= 0 || availH <= 0) return;
-    // First give the content the full cell width so it reflows to fill
-    // horizontally, then measure its REAL content size (scrollWidth/Height).
-    // Some content has a minimum width it won't shrink below (e.g. the process
-    // table's fixed columns, the 2-col services grid) — scrollWidth captures
-    // that overflow so we can scale it down to fit instead of clipping.
+    if (availW <= 0) return;
+    // Width-only scaling: give the content the full cell width, measure its real
+    // width (scrollWidth captures min-width content like a wide table), and
+    // scale DOWN only if it can't fit horizontally. Vertical overflow is NOT
+    // scaled — it scrolls within the widget at native size, so text stays
+    // readable instead of shrinking to fit a short cell.
     scale.style.transform = 'none';
     scale.style.width = `${availW}px`;
     scale.style.height = 'auto';
     const naturalW = Math.max(availW, scale.scrollWidth);
-    const naturalH = scale.scrollHeight;
-    if (naturalW <= 0 || naturalH <= 0) return;
-    // Fit by the tighter of width/height; never upscale (keeps text crisp).
-    const s = Math.min(availW / naturalW, availH / naturalH, 1);
-    // Lay the block out at its natural width, then scale the whole thing down
-    // uniformly so nothing (including the scrollbar) spills past the cell.
+    if (naturalW <= 0) return;
+    const s = Math.min(availW / naturalW, 1);   // never upscale
     scale.style.width = `${naturalW}px`;
     scale.style.transform = s < 1 ? `scale(${s})` : 'none';
+    // when width-scaled, the block's laid-out height exceeds its visual height
+    // by 1/s; compensate so the scroll area matches what's actually shown.
+    scale.style.transformOrigin = 'top center';
   };
   const ro = new ResizeObserver(() => requestAnimationFrame(apply));
   ro.observe(body);
