@@ -5224,6 +5224,9 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .rapisys-grid .grid-stack-item-content {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
+  padding: 10px;          /* gap between the cell border and the content;
+                             body.clientWidth shrinks accordingly so the scale
+                             block fits inside with no overflow */
 }
 .rapisys-grid .gs-body { padding: 0; }
 /* the inner card/section then becomes frameless (the cell provides the frame) */
