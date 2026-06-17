@@ -6,16 +6,22 @@
  * lives in settings.rapisys.updateSchedule and is editable from the Updates UI.
  *
  *   updateSchedule = {
- *     enabled:       boolean,   // run the periodic check at all
- *     intervalHours: number,    // how often to check (default 24)
- *     emailEnabled:  boolean,   // email security updates when found
- *     emailTo:       string,    // recipient (falls back to SMTP "to")
- *     onlySecurity:  boolean,   // only email when there ARE security updates
+ *     enabled:      boolean,   // run the periodic check at all
+ *     frequency:    'daily'|'weekly'|'monthly',
+ *     time:         'HH:MM',   // local time of day to run
+ *     dayOfWeek:    0-6,       // for weekly (0 = Sunday)
+ *     dayOfMonth:   1-28,      // for monthly
+ *     emailEnabled: boolean,   // email security updates when found
+ *     emailTo:      string,    // recipient (falls back to SMTP "to")
+ *     onlySecurity: boolean,   // only email when there ARE security updates
  *   }
  */
 
 export function createUpdateScheduler({ updates, mailer, loadSettings, saveSettings, withFileLock, events }) {
-  const DEFAULTS = { enabled: false, intervalHours: 24, emailEnabled: true, emailTo: '', onlySecurity: true };
+  const DEFAULTS = {
+    enabled: false, frequency: 'daily', time: '03:00', dayOfWeek: 1, dayOfMonth: 1,
+    emailEnabled: true, emailTo: '', onlySecurity: true,
+  };
 
   async function getConfig() {
     const s = await loadSettings();
@@ -28,9 +34,14 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
       const s = await loadSettings();
       s.rapisys = s.rapisys || {};
       const cur = { ...DEFAULTS, ...(s.rapisys.updateSchedule || {}) };
+      const freq = ['daily', 'weekly', 'monthly'].includes(patch.frequency) ? patch.frequency : cur.frequency;
+      const time = /^([01]?\d|2[0-3]):[0-5]\d$/.test(patch.time || '') ? patch.time : cur.time;
       saved = {
         enabled: patch.enabled != null ? !!patch.enabled : cur.enabled,
-        intervalHours: Math.max(1, Math.min(720, Number(patch.intervalHours) || cur.intervalHours)),
+        frequency: freq,
+        time,
+        dayOfWeek: patch.dayOfWeek != null ? Math.max(0, Math.min(6, Number(patch.dayOfWeek))) : cur.dayOfWeek,
+        dayOfMonth: patch.dayOfMonth != null ? Math.max(1, Math.min(28, Number(patch.dayOfMonth))) : cur.dayOfMonth,
         emailEnabled: patch.emailEnabled != null ? !!patch.emailEnabled : cur.emailEnabled,
         emailTo: patch.emailTo != null ? String(patch.emailTo).slice(0, 254) : cur.emailTo,
         onlySecurity: patch.onlySecurity != null ? !!patch.onlySecurity : cur.onlySecurity,
@@ -92,16 +103,25 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
     return { checked: list.length, security: security.length, emailed, checkedAt: out.checkedAt };
   }
 
-  // The scheduler ticks on a fixed cadence; this gate runs the actual check
-  // only once the configured intervalHours has elapsed since the last one.
-  let lastRun = 0;
-  async function tick() {
+  // The scheduler ticks hourly; this decides whether the current wall-clock
+  // moment matches the configured schedule and the run hasn't fired yet today.
+  let lastFiredKey = null;   // 'YYYY-MM-DD-HH' of the last run, to fire once
+  function isDue(cfg, now = new Date()) {
+    const [h] = cfg.time.split(':').map(Number);
+    if (now.getHours() !== h) return false;            // only at the chosen hour
+    if (cfg.frequency === 'weekly' && now.getDay() !== cfg.dayOfWeek) return false;
+    if (cfg.frequency === 'monthly' && now.getDate() !== cfg.dayOfMonth) return false;
+    return true;
+  }
+  async function tick(now = new Date()) {
     const cfg = await getConfig();
     if (!cfg.enabled) return;
-    if (Date.now() - lastRun < cfg.intervalHours * 3600e3) return;
-    lastRun = Date.now();
+    if (!isDue(cfg, now)) return;
+    const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
+    if (key === lastFiredKey) return;                  // already fired this hour
+    lastFiredKey = key;
     try { await runOnce(); } catch (err) { events?.add?.('update.check.fail', 'warning', { error: err.message }); }
   }
 
-  return { getConfig, setConfig, runOnce, tick };
+  return { getConfig, setConfig, runOnce, tick, isDue };
 }

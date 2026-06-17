@@ -2502,10 +2502,33 @@ pageRenderers.updates = (() => {
       <p class="up-sec-hint">Periodically run a security check in the background and email you the list of new security updates that need patching. Uses the SMTP settings from Settings \u2192 Email (SMTP).</p>
       <div class="wz-form up-sched">
         <label class="wz-inline"><input type="checkbox" data-sch="enabled" ${cfg.enabled ? 'checked' : ''}> Enable automatic update checks</label>
-        <div class="al-form-row">
-          <label>Check every (hours) <input type="number" data-sch="interval" min="1" max="720" value="${esc(cfg.intervalHours)}"></label>
-          <label>Email security updates to <input data-sch="to" value="${esc(cfg.emailTo || '')}" placeholder="(falls back to SMTP recipient)"></label>
+
+        <div class="sched-row">
+          <label>Frequency
+            <select data-sch="freq">
+              <option value="daily" ${cfg.frequency === 'daily' ? 'selected' : ''}>Daily</option>
+              <option value="weekly" ${cfg.frequency === 'weekly' ? 'selected' : ''}>Weekly</option>
+              <option value="monthly" ${cfg.frequency === 'monthly' ? 'selected' : ''}>Monthly</option>
+            </select>
+          </label>
+          <label data-sch-dow ${cfg.frequency === 'weekly' ? '' : 'hidden'}>Day of week
+            <select data-sch="dow">
+              ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                .map((d, i) => `<option value="${i}" ${cfg.dayOfWeek === i ? 'selected' : ''}>${d}</option>`).join('')}
+            </select>
+          </label>
+          <label data-sch-dom ${cfg.frequency === 'monthly' ? '' : 'hidden'}>Day of month
+            <select data-sch="dom">
+              ${Array.from({ length: 28 }, (_, i) => i + 1).map((d) => `<option value="${d}" ${cfg.dayOfMonth === d ? 'selected' : ''}>${d}</option>`).join('')}
+            </select>
+          </label>
+          <label>Time <input type="time" data-sch="time" value="${esc(cfg.time || '03:00')}"></label>
         </div>
+
+        <label class="sched-email">Email security updates to
+          <input data-sch="to" value="${esc(cfg.emailTo || '')}" placeholder="you@example.com (falls back to SMTP recipient)" autocomplete="off">
+        </label>
+
         <label class="wz-inline"><input type="checkbox" data-sch="email" ${cfg.emailEnabled ? 'checked' : ''}> Send an email when updates are found</label>
         <label class="wz-inline"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}> Only email when there are security updates</label>
         <div class="set-actions">
@@ -2514,11 +2537,24 @@ pageRenderers.updates = (() => {
           <span data-sch="msg"></span>
         </div>
       </div>`;
+    enhanceSelects(host);
+    // show the day picker that matches the chosen frequency
+    const freqSel = $('[data-sch=freq]', host);
+    const syncFreq = () => {
+      const f = freqSel.value;
+      const dow = $('[data-sch-dow]', host), dom = $('[data-sch-dom]', host);
+      if (dow) dow.hidden = f !== 'weekly';
+      if (dom) dom.hidden = f !== 'monthly';
+    };
+    freqSel.addEventListener('change', syncFreq); syncFreq();
     const msg = $('[data-sch=msg]', host);
     $('[data-sch=save]', host).onclick = async () => {
       const body = {
         enabled: $('[data-sch=enabled]', host).checked,
-        intervalHours: Number($('[data-sch=interval]', host).value) || 24,
+        frequency: $('[data-sch=freq]', host).value,
+        time: $('[data-sch=time]', host).value || '03:00',
+        dayOfWeek: Number($('[data-sch=dow]', host).value),
+        dayOfMonth: Number($('[data-sch=dom]', host).value),
         emailEnabled: $('[data-sch=email]', host).checked,
         emailTo: $('[data-sch=to]', host).value.trim(),
         onlySecurity: $('[data-sch=onlysec]', host).checked,

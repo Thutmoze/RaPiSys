@@ -4971,7 +4971,13 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .inv-count { font-size: 12px; color: var(--text-muted); margin-right: auto; }
 
 /* Inventory descriptions + action buttons */
-.inv-desc { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-desc { color: var(--text-secondary); }
+/* the description column is the flexible one — it absorbs free horizontal
+   space and wraps rather than truncating, so the table fills the container */
+.inv-table { table-layout: auto; width: 100%; }
+.inv-table td.inv-desc { white-space: normal; word-break: break-word; width: 100%; min-width: 240px; }
+/* keep the other columns tight to their content so description gets the slack */
+.inv-table td:not(.inv-desc), .inv-table th:not(:nth-child(2)) { white-space: nowrap; }
 .inv-actions { text-align: right; width: 1%; white-space: nowrap; }
 .inv-act { background: none; border: 1px solid var(--border-color); color: var(--text-secondary);
   width: 28px; height: 28px; border-radius: 6px; cursor: pointer; display: inline-flex;
@@ -5642,3 +5648,14 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .inv-cap-cat { color: var(--accent-cyan); border-color: rgba(0,212,255,0.4); background: rgba(0,212,255,0.08); }
 .inv-cap-pri { color: #a855f7; border-color: rgba(168,85,247,0.4); background: rgba(168,85,247,0.08); }
 .inv-cap-sec { color: #10b981; border-color: rgba(16,185,129,0.4); background: rgba(16,185,129,0.08); }
+
+/* Updates — auto-check schedule form */
+.sched-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.sched-row label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.sched-row .rsel { min-width: 150px; }
+.sched-row input[type=time] { padding: 9px 12px; background: var(--bg-secondary); border: 2px solid var(--border-color);
+  border-radius: var(--radius-sm); color: var(--text-primary); font-family: inherit; font-size: 13px; color-scheme: dark; }
+.sched-email { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.sched-email input { width: 100%; padding: 10px 14px; background: var(--bg-secondary); border: 2px solid var(--border-color);
+  border-radius: var(--radius-sm); color: var(--text-primary); font-family: inherit; font-size: 13px; }
+.sched-email input:focus { outline: none; border-color: var(--accent-cyan); }

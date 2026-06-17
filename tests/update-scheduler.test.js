@@ -19,14 +19,19 @@ function fixture({ updatesList = [], smtpTo = 'admin@example.com' } = {}) {
 }
 
 describe('update scheduler', () => {
-  it('defaults to disabled and clamps interval on save', async () => {
+  it('defaults to disabled and validates frequency/time on save', async () => {
     const { sched } = fixture();
     expect((await sched.getConfig()).enabled).toBe(false);
-    const saved = await sched.setConfig({ enabled: true, intervalHours: 9999 });
+    expect((await sched.getConfig()).frequency).toBe('daily');
+    const saved = await sched.setConfig({ enabled: true, frequency: 'weekly', time: '09:30', dayOfWeek: 3 });
     expect(saved.enabled).toBe(true);
-    expect(saved.intervalHours).toBe(720);   // clamped to max
-    const saved2 = await sched.setConfig({ intervalHours: 1 });
-    expect(saved2.intervalHours).toBe(1);     // explicit minimum accepted
+    expect(saved.frequency).toBe('weekly');
+    expect(saved.time).toBe('09:30');
+    expect(saved.dayOfWeek).toBe(3);
+    // invalid values are rejected, keeping the current ones
+    const saved2 = await sched.setConfig({ frequency: 'hourly', time: '99:99' });
+    expect(saved2.frequency).toBe('weekly');   // unchanged
+    expect(saved2.time).toBe('09:30');         // unchanged
   });
 
   it('does nothing when disabled', async () => {
@@ -62,12 +67,24 @@ describe('update scheduler', () => {
     expect(mailer.send).not.toHaveBeenCalled();
   });
 
-  it('tick respects the configured interval', async () => {
+  it('tick fires only at the scheduled hour and once per hour', async () => {
     const { sched, updates } = fixture({ updatesList: [] });
-    await sched.setConfig({ enabled: true, intervalHours: 24 });
-    await sched.tick();                       // first tick runs
-    expect(updates.refresh).toHaveBeenCalledTimes(1);
-    await sched.tick();                       // immediate second tick is gated
-    expect(updates.refresh).toHaveBeenCalledTimes(1);
+    await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00' });
+    const at3 = new Date(2026, 0, 1, 3, 5, 0);   // 03:05 — matches hour 3
+    const at4 = new Date(2026, 0, 1, 4, 5, 0);   // 04:05 — wrong hour
+    await sched.tick(at4);
+    expect(updates.refresh).toHaveBeenCalledTimes(0);   // not the scheduled hour
+    await sched.tick(at3);
+    expect(updates.refresh).toHaveBeenCalledTimes(1);   // fires
+    await sched.tick(at3);
+    expect(updates.refresh).toHaveBeenCalledTimes(1);   // same hour, gated
+  });
+
+  it('isDue respects weekly day-of-week', async () => {
+    const { sched } = fixture();
+    const cfg = await sched.setConfig({ enabled: true, frequency: 'weekly', time: '03:00', dayOfWeek: 1 });
+    // 2026-01-05 is a Monday (getDay()===1)
+    expect(sched.isDue(cfg, new Date(2026, 0, 5, 3, 0))).toBe(true);
+    expect(sched.isDue(cfg, new Date(2026, 0, 6, 3, 0))).toBe(false);  // Tuesday
   });
 });
