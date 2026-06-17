@@ -5046,6 +5046,13 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   font-weight: 500; letter-spacing: 0.2px; }
 .up-chip-sec { background: rgba(245,158,11,0.08); border-style: solid; }
 .up-chip-kern { background: rgba(168,85,247,0.08); border-style: solid; }
+/* but filter chips ARE interactive — solid border, pointer, and a clear
+   active fill (these come after the passive rule so they win) */
+.up-chip.up-filter { border-style: solid; cursor: pointer; background: var(--bg-secondary); }
+.up-chip.up-filter:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.up-chip.up-filter.up-filter-active { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); font-weight: 600; }
+.up-chip.up-filter.up-filter-active.up-chip-sec { background: #f59e0b; color: #1a1204; border-color: #f59e0b; }
+.up-chip.up-filter.up-filter-active.up-chip-kern { background: #a855f7; color: #120420; border-color: #a855f7; }
 .up-confirm-list { display: inline-block; font-size: 12px; color: var(--text-secondary);
   line-height: 1.6; word-break: break-word; max-height: 120px; overflow-y: auto; }
 
@@ -5099,7 +5106,7 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   border: 1.5px solid var(--border-color); color: var(--text-primary);
   transition: border-color 0.15s, color 0.15s, background 0.15s, box-shadow 0.15s;
 }
-.up-btn svg { flex-shrink: 0; width: 16px; height: 16px; }
+.up-btn svg { flex-shrink: 0; width: 18px; height: 18px; }
 .up-btn:hover:not(:disabled) { border-color: var(--accent-cyan); color: var(--accent-cyan);
   background: rgba(0,212,255,0.06); }
 .up-act-sec:not(.up-btn-dim) { color: #f59e0b; border-color: rgba(245,158,11,0.5); }
@@ -5448,8 +5455,9 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 
 /* Updates table: allow horizontal scroll on narrow screens so all columns
    (description, version, tags, urgency, changelog) stay reachable */
-.up-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.up-table-scroll .up-table { min-width: 760px; }
+.up-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; }
+.up-table-scroll .up-table,
+.up-table-scroll .inv-table { width: 100%; min-width: 640px; }
 .up-table-scroll::-webkit-scrollbar { height: 8px; }
 .up-table-scroll::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
 
