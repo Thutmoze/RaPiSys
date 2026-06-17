@@ -2131,8 +2131,9 @@ pageRenderers.updates = (() => {
     $('[data-up=table]', host).innerHTML = updates.length ? `
       <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
       <div class="up-table-scroll">
-      <table class="inv-table up-table">
-        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>Changelog</th></tr></thead>
+      <table class="inv-table up-table inv-table-fixed">
+        <colgroup><col style="width:34px"><col style="width:15%"><col style="width:auto"><col style="width:11%"><col style="width:11%"><col style="width:64px"><col style="width:9%"><col style="width:11%"><col style="width:8%"><col style="width:58px"></colgroup>
+        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>View</th></tr></thead>
         <tbody>${filteredUpdates().map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
@@ -2526,6 +2527,25 @@ pageRenderers.updates = (() => {
       : `Monthly on day ${cfg.dayOfMonth}`;
     const timeText = `${t12.hour}:${String(t12.min).padStart(2, '0')} ${t12.ampm}`;
 
+    // compute the next fire time in the user's local timezone (matches how the
+    // server evaluates it: at the chosen hour, on the matching day)
+    const nextRunText = (() => {
+      const [H, M] = String(cfg.time || '03:00').split(':').map(Number);
+      const now = new Date();
+      const cand = new Date(now);
+      cand.setHours(H, M, 0, 0);
+      const bump = () => cand.setDate(cand.getDate() + 1);
+      if (cand <= now) bump();
+      // advance to the matching weekday / day-of-month
+      for (let i = 0; i < 366; i++) {
+        if (cfg.frequency === 'daily') break;
+        if (cfg.frequency === 'weekly' && cand.getDay() === cfg.dayOfWeek) break;
+        if (cfg.frequency === 'monthly' && cand.getDate() === cfg.dayOfMonth) break;
+        bump();
+      }
+      return cand.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    })();
+
     // run history list
     const history = cfg.runHistory || [];
     const historyHtml = history.length ? `
@@ -2548,6 +2568,7 @@ pageRenderers.updates = (() => {
           <div class="sched-sum-main">
             <div class="set-kv"><span>Status</span><b class="set-ok">● Enabled</b></div>
             <div class="set-kv"><span>Schedule</span><b>${scheduleText} at ${timeText}</b></div>
+            <div class="set-kv"><span>Next run</span><b class="sched-next">${nextRunText}</b></div>
             <div class="set-kv"><span>Email to</span><b>${esc(cfg.emailTo || '(SMTP recipient)')}</b></div>
             <div class="set-kv"><span>Last run</span><b>${cfg.lastRun ? `${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked}` : 'not yet'}</b></div>
           </div>
@@ -2663,14 +2684,29 @@ pageRenderers.updates = (() => {
     const runBtn = $('[data-sch=run]', host);
     if (!runBtn) return;
     const msg = $('[data-sch=msg]', host);
+    const original = runBtn.innerHTML;
     runBtn.onclick = async () => {
-      runBtn.disabled = true; if (msg) msg.textContent = 'Running check…';
+      runBtn.disabled = true;
+      runBtn.classList.add('up-btn-busy', 'up-btn-glow');
+      runBtn.innerHTML = '<span class="up-spinner-sm"></span><span>Checking…</span>';
+      if (msg) msg.textContent = '';
       try {
         const r = await api('/updates/schedule/run', { method: 'POST', body: {} });
-        if (r.skipped) { if (msg) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`; }
-        else { if (msg) msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`; setTimeout(() => loadSchedule(host), 1200); }
-      } catch (err) { if (msg) msg.textContent = `✗ ${err.message}`; }
-      finally { runBtn.disabled = false; }
+        if (r.skipped) {
+          if (msg) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`;
+          runBtn.innerHTML = original;
+        } else {
+          if (msg) msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`;
+          runBtn.innerHTML = '<span>✓ Done</span>';
+          setTimeout(() => loadSchedule(host), 1400);
+        }
+      } catch (err) {
+        if (msg) msg.textContent = `✗ ${err.message}`;
+        runBtn.innerHTML = original;
+      } finally {
+        runBtn.disabled = false;
+        runBtn.classList.remove('up-btn-busy', 'up-btn-glow');
+      }
     };
   }
 
