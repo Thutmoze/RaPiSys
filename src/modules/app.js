@@ -135,8 +135,11 @@ function enhanceSelects(root) {
       list.style.left = `${r.left}px`;
       list.style.width = `${r.width}px`;
       const below = window.innerHeight - r.bottom;
-      if (below < 260 && r.top > 260) { list.style.top = ''; list.style.bottom = `${window.innerHeight - r.top + 4}px`; }
-      else { list.style.bottom = ''; list.style.top = `${r.bottom + 4}px`; }
+      // NB: reset the unused edge to 'auto' (not ''), else the stylesheet's
+      // top: calc(100% + 4px) stays in force and, combined with an explicit
+      // bottom, stretches/crushes the list to a sliver.
+      if (below < 260 && r.top > 260) { list.style.top = 'auto'; list.style.bottom = `${window.innerHeight - r.top + 4}px`; }
+      else { list.style.bottom = 'auto'; list.style.top = `${r.bottom + 4}px`; }
     }
     const close = () => { list.hidden = true; btn.classList.remove('open'); filter.value = ''; };
     btn.onclick = () => {
@@ -1805,12 +1808,13 @@ pageRenderers.inventory = (() => {
     total = data.total;
     const rows = data.rows;
     const head = kind === 'package'
-      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th>Installed</th><th class="inv-actions">Action</th>'
+      ? '<th>Package</th><th>Description</th><th>Version</th><th>Category</th><th>Priority</th><th>Section</th><th>Size</th><th>Installed</th><th class="inv-actions">Action</th>'
       : kind === 'service'
       ? '<th>Service</th><th>Status</th><th>Description</th><th class="inv-actions">Action</th>'
       : '<th>Container</th><th>Image</th><th>Status</th><th class="inv-actions">Action</th>';
 
     $('[data-inv=table]', host).innerHTML = rows.length ? `
+      <div class="up-table-scroll">
       <table class="inv-table">
         <thead><tr>${head}</tr></thead>
         <tbody>${rows.map((r) => {
@@ -1821,7 +1825,12 @@ pageRenderers.inventory = (() => {
             const btn = ess
               ? `<span class="inv-protected" title="Essential/required — protected">protected</span>`
               : `<button class="inv-act inv-act-danger" data-act="pkg-remove" data-name="${esc(r.name)}" title="Uninstall">${trash}</button>`;
-            return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td>${esc(r.version)}</td><td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td><td class="inv-actions">${btn}</td></tr>`;
+            const cap = (v, cls) => v ? `<span class="inv-cap ${cls}">${esc(v)}</span>` : '<span class="inv-dim">—</span>';
+            return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td>${esc(r.version)}</td>`
+              + `<td>${cap(r.category, 'inv-cap-cat')}</td>`
+              + `<td>${cap(r.meta?.priority, 'inv-cap-pri')}</td>`
+              + `<td>${cap(r.meta?.section, 'inv-cap-sec')}</td>`
+              + `<td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td><td class="inv-actions">${btn}</td></tr>`;
           }
           if (kind === 'service') {
             const running = /active\/running/.test(r.status);
@@ -1831,7 +1840,7 @@ pageRenderers.inventory = (() => {
           const btn = `<button class="inv-act inv-act-danger" data-act="ctr-remove" data-name="${esc(r.name)}" title="Remove container">${trash}</button>`;
           return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim">${esc(r.meta?.image || r.source)}</td><td>${statusBadge('container', r.status)}</td><td class="inv-actions">${btn}</td></tr>`;
         }).join('')}</tbody>
-      </table>` : '<p class="sess-empty">No matches.</p>';
+      </table></div>` : '<p class="sess-empty">No matches.</p>';
 
     // action handlers
     host.querySelectorAll('[data-act=pkg-remove]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name, b));

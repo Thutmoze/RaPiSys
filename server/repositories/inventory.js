@@ -36,7 +36,7 @@ export function createInventoryRepo(db) {
     const order = sort === 'installed' ? 'installed_at DESC NULLS LAST' : sort === 'status' ? 'status, name' : 'name';
     const total = db.prepare(`SELECT COUNT(*) AS n FROM inventory ${wsql}`).get(...args).n;
     const rows = db.prepare(
-      `SELECT kind, name, version, installed_at AS installedAt, source, status, last_used AS lastUsed, meta
+      `SELECT kind, name, version, installed_at AS installedAt, source, status, last_used AS lastUsed, meta, category
        FROM inventory ${wsql} ORDER BY ${order} LIMIT ? OFFSET ?`
     ).all(...args, Math.min(limit, 200), offset);
     return { total, rows: rows.map((r) => ({ ...r, meta: r.meta ? JSON.parse(r.meta) : null })) };
