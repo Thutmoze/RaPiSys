@@ -1814,9 +1814,20 @@ pageRenderers.inventory = (() => {
       ? '<th>Service</th><th>Status</th><th>Description</th><th class="inv-actions">Action</th>'
       : '<th>Container</th><th>Image</th><th>Status</th><th class="inv-actions">Action</th>';
 
+    // Explicit column widths (table-layout:fixed). Description is left to absorb
+    // the remaining space ('auto'), the rest are sized to their content so the
+    // table fills the container without bloating short columns.
+    const cols = kind === 'package'
+      ? ['16%', 'auto', '11%', '7%', '8%', '8%', '8%', '9%', '64px']
+      : kind === 'service'
+      ? ['22%', '12%', 'auto', '64px']
+      : ['22%', '28%', 'auto', '64px'];
+    const colgroup = `<colgroup>${cols.map((w) => `<col style="width:${w}">`).join('')}</colgroup>`;
+
     $('[data-inv=table]', host).innerHTML = rows.length ? `
       <div class="up-table-scroll">
-      <table class="inv-table">
+      <table class="inv-table inv-table-fixed">
+        ${colgroup}
         <thead><tr>${head}</tr></thead>
         <tbody>${rows.map((r) => {
           const trash = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
