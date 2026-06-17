@@ -4980,7 +4980,8 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .inv-table-fixed { table-layout: fixed; }
 .inv-table td.inv-desc { white-space: normal; word-break: break-word; }
 /* non-description cells: keep on one line and ellipsize if a value is long */
-.inv-table-fixed td:not(.inv-desc) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-table-fixed td:not(.inv-desc):not(.inv-actions) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inv-table-fixed td.inv-actions { overflow: visible; }
 .inv-actions { text-align: right; width: 1%; white-space: nowrap; }
 .inv-act { background: none; border: 1px solid var(--border-color); color: var(--text-secondary);
   width: 28px; height: 28px; border-radius: 6px; cursor: pointer; display: inline-flex;
@@ -5676,3 +5677,8 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sched-lastrun b.sched-sec { color: #f59e0b; }
 .sched-lastrun-none { color: var(--text-muted); }
 .up-autocheck { color: var(--accent-cyan); border-left: 2px solid var(--border-color); padding-left: 12px; }
+
+/* Auto-check — configured-schedule summary card (view mode) */
+.sched-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.sched-summary .sched-sum-main { flex: 1; min-width: 0; }
+.sched-sum-acts { display: flex; gap: 6px; flex-shrink: 0; }

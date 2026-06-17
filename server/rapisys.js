@@ -167,7 +167,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('session-tracker', 60e3, () => sessionTracker.trackOnce(), { runNow: true });
   // Automatic update check (F8): ticks hourly, self-gates on the configured
   // intervalHours, and emails security updates when found.
-  scheduler.register('update-check', 3600e3, () => updateScheduler.tick());
+  scheduler.register('update-check', 600e3, () => updateScheduler.tick(), { runNow: true });
   scheduler.register('net-sampler', 10e3, () => {
     const t = network.throughput();
     const rows = [];

@@ -20,7 +20,7 @@
 export function createUpdateScheduler({ updates, mailer, loadSettings, saveSettings, withFileLock, events }) {
   const DEFAULTS = {
     enabled: false, frequency: 'daily', time: '03:00', dayOfWeek: 1, dayOfMonth: 1,
-    emailEnabled: true, emailTo: '', onlySecurity: true, lastRun: null,
+    tzOffsetMinutes: 0, emailEnabled: true, emailTo: '', onlySecurity: true, lastRun: null, runHistory: [],
   };
 
   async function getConfig() {
@@ -42,10 +42,12 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
         time,
         dayOfWeek: patch.dayOfWeek != null ? Math.max(0, Math.min(6, Number(patch.dayOfWeek))) : cur.dayOfWeek,
         dayOfMonth: patch.dayOfMonth != null ? Math.max(1, Math.min(28, Number(patch.dayOfMonth))) : cur.dayOfMonth,
+        tzOffsetMinutes: patch.tzOffsetMinutes != null ? Number(patch.tzOffsetMinutes) : cur.tzOffsetMinutes,
         emailEnabled: patch.emailEnabled != null ? !!patch.emailEnabled : cur.emailEnabled,
         emailTo: patch.emailTo != null ? String(patch.emailTo).slice(0, 254) : cur.emailTo,
         onlySecurity: patch.onlySecurity != null ? !!patch.onlySecurity : cur.onlySecurity,
         lastRun: cur.lastRun || null,   // preserve the last-run summary across edits
+        runHistory: cur.runHistory || [],
       };
       s.rapisys.updateSchedule = saved;
       await saveSettings(s);
@@ -102,31 +104,42 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
       }
     }
     const result = { ts: Date.now(), checked: list.length, security: security.length, emailed, checkedAt: out.checkedAt };
-    // persist the last-run summary so the UI can show "Auto-checked Xh ago"
+    // persist the last-run summary + a short history so the UI can show both
     await withFileLock(async () => {
       const s = await loadSettings();
       s.rapisys = s.rapisys || {};
-      s.rapisys.updateSchedule = { ...(s.rapisys.updateSchedule || {}), lastRun: result };
+      const cur = s.rapisys.updateSchedule || {};
+      const history = [result, ...(cur.runHistory || [])].slice(0, 10);
+      s.rapisys.updateSchedule = { ...cur, lastRun: result, runHistory: history };
       await saveSettings(s);
     });
     return { skipped: null, ...result };
   }
 
   // The scheduler ticks hourly; this decides whether the current wall-clock
-  // moment matches the configured schedule and the run hasn't fired yet today.
-  let lastFiredKey = null;   // 'YYYY-MM-DD-HH' of the last run, to fire once
+  // moment (in the USER's timezone) matches the configured schedule and the run
+  // hasn't fired yet this hour. The container clock is UTC, so we shift `now` by
+  // the stored tzOffsetMinutes (minutes to ADD to UTC to get local time) that
+  // the browser captured when the schedule was saved.
+  let lastFiredKey = null;
+  function localNow(cfg, now = new Date()) {
+    const offsetMin = Number(cfg.tzOffsetMinutes) || 0;
+    return new Date(now.getTime() + offsetMin * 60000);
+  }
   function isDue(cfg, now = new Date()) {
+    const local = localNow(cfg, now);
     const [h] = cfg.time.split(':').map(Number);
-    if (now.getHours() !== h) return false;            // only at the chosen hour
-    if (cfg.frequency === 'weekly' && now.getDay() !== cfg.dayOfWeek) return false;
-    if (cfg.frequency === 'monthly' && now.getDate() !== cfg.dayOfMonth) return false;
+    if (local.getUTCHours() !== h) return false;        // chosen hour, in local tz
+    if (cfg.frequency === 'weekly' && local.getUTCDay() !== cfg.dayOfWeek) return false;
+    if (cfg.frequency === 'monthly' && local.getUTCDate() !== cfg.dayOfMonth) return false;
     return true;
   }
   async function tick(now = new Date()) {
     const cfg = await getConfig();
     if (!cfg.enabled) return;
     if (!isDue(cfg, now)) return;
-    const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}`;
+    const local = localNow(cfg, now);
+    const key = `${local.getUTCFullYear()}-${local.getUTCMonth()}-${local.getUTCDate()}-${local.getUTCHours()}`;
     if (key === lastFiredKey) return;                  // already fired this hour
     lastFiredKey = key;
     try { await runOnce(); } catch (err) { events?.add?.('update.check.fail', 'warning', { error: err.message }); }

@@ -1818,10 +1818,10 @@ pageRenderers.inventory = (() => {
     // the remaining space ('auto'), the rest are sized to their content so the
     // table fills the container without bloating short columns.
     const cols = kind === 'package'
-      ? ['16%', 'auto', '11%', '7%', '8%', '8%', '8%', '9%', '64px']
+      ? ['16%', 'auto', '11%', '7%', '8%', '8%', '8%', '9%', '92px']
       : kind === 'service'
-      ? ['22%', '12%', 'auto', '64px']
-      : ['22%', '28%', 'auto', '64px'];
+      ? ['22%', '12%', 'auto', '92px']
+      : ['22%', '28%', 'auto', '92px'];
     const colgroup = `<colgroup>${cols.map((w) => `<col style="width:${w}">`).join('')}</colgroup>`;
 
     $('[data-inv=table]', host).innerHTML = rows.length ? `
@@ -1990,7 +1990,7 @@ pageRenderers.inventory = (() => {
 
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set(), activeFilter = 'all';
-  let streaming = false, expandedLog = null, logCache = {};
+  let streaming = false, expandedLog = null, logCache = {}, editSchedule = false;
   const oldExpanded = new Set();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // inline glyphs (stroke icons matching the app's Lucide-style set)
@@ -2520,14 +2520,60 @@ pageRenderers.updates = (() => {
       return { hour, min: M || 0, ampm };
     };
     const t12 = to12(cfg.time);
-    // a small "last run" summary line
-    const lr = cfg.lastRun;
-    const lastRunLine = lr
-      ? `<p class="sched-lastrun">Last checked ${fmtChecked(lr.ts)} \u2014 <b>${lr.checked}</b> update${lr.checked === 1 ? '' : 's'}, <b class="${lr.security ? 'sched-sec' : ''}">${lr.security}</b> security${lr.emailed ? ' \u00b7 emailed' : ''}.</p>`
-      : '<p class="sched-lastrun sched-lastrun-none">No automatic check has run yet.</p>';
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const scheduleText = cfg.frequency === 'daily' ? 'Daily'
+      : cfg.frequency === 'weekly' ? `Weekly on ${dayNames[cfg.dayOfWeek]}`
+      : `Monthly on day ${cfg.dayOfMonth}`;
+    const timeText = `${t12.hour}:${String(t12.min).padStart(2, '0')} ${t12.ampm}`;
+
+    // run history list
+    const history = cfg.runHistory || [];
+    const historyHtml = history.length ? `
+      <h4 class="sess-h">Run history</h4>
+      <div class="up-table-scroll">
+      <table class="inv-table"><thead><tr><th>When</th><th>Updates</th><th>Security</th><th>Emailed</th></tr></thead>
+      <tbody>${history.map((h) => `<tr>
+        <td class="inv-dim">${new Date(h.ts).toLocaleString()}</td>
+        <td><b>${h.checked}</b></td>
+        <td><b class="${h.security ? 'sched-sec' : ''}">${h.security}</b></td>
+        <td>${h.emailed ? '<span class="inv-badge inv-ok">sent</span>' : '<span class="inv-dim">—</span>'}</td>
+      </tr>`).join('')}</tbody></table></div>` : '<p class="sess-empty">No automatic checks have run yet.</p>';
+
+    // VIEW MODE: a schedule is configured and we're not editing → summary + glyphs
+    const showForm = editSchedule || !cfg.enabled;
+    if (!showForm) {
+      target.innerHTML = `
+        <p class="up-sec-hint">Periodically run a security check in the background and email you new security updates. Uses the SMTP settings from Settings \u2192 Email (SMTP).</p>
+        <div class="set-summary sched-summary">
+          <div class="sched-sum-main">
+            <div class="set-kv"><span>Status</span><b class="set-ok">● Enabled</b></div>
+            <div class="set-kv"><span>Schedule</span><b>${scheduleText} at ${timeText}</b></div>
+            <div class="set-kv"><span>Email to</span><b>${esc(cfg.emailTo || '(SMTP recipient)')}</b></div>
+            <div class="set-kv"><span>Last run</span><b>${cfg.lastRun ? `${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked}` : 'not yet'}</b></div>
+          </div>
+          <div class="sched-sum-acts">
+            <button class="inv-act" data-sch="edit" title="Edit schedule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
+            <button class="inv-act inv-act-danger" data-sch="disable" title="Disable schedule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></button>
+          </div>
+        </div>
+        <div class="set-actions" style="border:none;padding:0;margin:8px 0 18px">
+          <button class="set-btn set-btn-test" data-sch="run"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span>Run check now</span></button>
+          <span data-sch="msg"></span>
+        </div>
+        ${historyHtml}`;
+      $('[data-sch=edit]', host).onclick = () => { editSchedule = true; loadSchedule(host); };
+      $('[data-sch=disable]', host).onclick = async () => {
+        if (!await rapisysConfirm('Disable automatic update checks?', { danger: true, confirmLabel: 'Disable' })) return;
+        try { await api('/updates/schedule', { method: 'PUT', body: { enabled: false } }); toast('success', 'Updates', 'Auto-check disabled'); editSchedule = false; loadSchedule(host); }
+        catch (err) { toast('error', 'Updates', err.message); }
+      };
+      wireRunNow(host);
+      return;
+    }
+
+    // EDIT MODE: show the configuration form
     target.innerHTML = `
       <p class="up-sec-hint">Periodically run a security check in the background and email you the list of new security updates that need patching. Uses the SMTP settings from Settings \u2192 Email (SMTP).</p>
-      ${lastRunLine}
       <div class="wz-form up-sched">
         <label class="wz-inline"><input type="checkbox" data-sch="enabled" ${cfg.enabled ? 'checked' : ''}> Enable automatic update checks</label>
 
@@ -2541,8 +2587,7 @@ pageRenderers.updates = (() => {
           </label>
           <label data-sch-dow ${cfg.frequency === 'weekly' ? '' : 'hidden'}>Day of week
             <select data-sch="dow">
-              ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-                .map((d, i) => `<option value="${i}" ${cfg.dayOfWeek === i ? 'selected' : ''}>${d}</option>`).join('')}
+              ${dayNames.map((d, i) => `<option value="${i}" ${cfg.dayOfWeek === i ? 'selected' : ''}>${d}</option>`).join('')}
             </select>
           </label>
           <label data-sch-dom ${cfg.frequency === 'monthly' ? '' : 'hidden'}>Day of month
@@ -2571,11 +2616,14 @@ pageRenderers.updates = (() => {
         <label class="wz-inline"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}> Only email when there are security updates</label>
         <div class="set-actions">
           <button class="set-btn set-btn-primary" data-sch="save"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Save schedule</span></button>
+          ${cfg.enabled ? `<button class="set-btn" data-sch="cancel"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button>` : ''}
           <button class="set-btn set-btn-test" data-sch="run"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span>Run check now</span></button>
           <span data-sch="msg"></span>
         </div>
       </div>`;
     enhanceSelects(host);
+    const cancelBtn = $('[data-sch=cancel]', host);
+    if (cancelBtn) cancelBtn.onclick = () => { editSchedule = false; loadSchedule(host); };
     // show the day picker that matches the chosen frequency
     const freqSel = $('[data-sch=freq]', host);
     const syncFreq = () => {
@@ -2600,20 +2648,29 @@ pageRenderers.updates = (() => {
         emailEnabled: $('[data-sch=email]', host).checked,
         emailTo: $('[data-sch=to]', host).value.trim(),
         onlySecurity: $('[data-sch=onlysec]', host).checked,
+        // minutes to ADD to UTC to get local time (Doha UTC+3 → +180)
+        tzOffsetMinutes: -new Date().getTimezoneOffset(),
       };
       const b = $('[data-sch=save]', host); b.disabled = true; msg.textContent = 'Saving…';
-      try { await api('/updates/schedule', { method: 'PUT', body }); msg.textContent = '✓ saved'; toast('success', 'Updates', 'Auto-check schedule saved'); }
-      catch (err) { msg.textContent = `✗ ${err.message}`; }
-      finally { b.disabled = false; }
+      try { await api('/updates/schedule', { method: 'PUT', body }); toast('success', 'Updates', 'Auto-check schedule saved'); editSchedule = false; loadSchedule(host); }
+      catch (err) { msg.textContent = `✗ ${err.message}`; b.disabled = false; }
     };
-    $('[data-sch=run]', host).onclick = async () => {
-      const b = $('[data-sch=run]', host); b.disabled = true; msg.textContent = 'Running check…';
+    wireRunNow(host);
+  }
+
+  // shared "Run check now" wiring (used by both view and edit modes)
+  function wireRunNow(host) {
+    const runBtn = $('[data-sch=run]', host);
+    if (!runBtn) return;
+    const msg = $('[data-sch=msg]', host);
+    runBtn.onclick = async () => {
+      runBtn.disabled = true; if (msg) msg.textContent = 'Running check…';
       try {
         const r = await api('/updates/schedule/run', { method: 'POST', body: {} });
-        if (r.skipped) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`;
-        else { msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`; setTimeout(() => loadSchedule(host), 1200); }
-      } catch (err) { msg.textContent = `✗ ${err.message}`; }
-      finally { b.disabled = false; }
+        if (r.skipped) { if (msg) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`; }
+        else { if (msg) msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`; setTimeout(() => loadSchedule(host), 1200); }
+      } catch (err) { if (msg) msg.textContent = `✗ ${err.message}`; }
+      finally { runBtn.disabled = false; }
     };
   }
 
