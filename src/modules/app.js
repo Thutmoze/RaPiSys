@@ -709,9 +709,37 @@ pageRenderers.sessions = (() => {
 // ---------------------------------------------------------------------------
 
 pageRenderers.alerts = (() => {
-  let timer = null;
+  let timer = null, editingId = null;   // editingId: rule being edited (null = adding new)
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const SEV_CLASS = { info: 'sev-info', warning: 'sev-warning', critical: 'sev-critical' };
+
+  // Reflect add-vs-edit state in the rule form (title, button label, cancel).
+  function updateFormMode(host) {
+    const title = $('[data-new=formtitle]', host);
+    const addBtn = $('[data-new=add]', host);
+    const cancelBtn = $('[data-new=cancel]', host);
+    if (!addBtn) return;
+    if (editingId) {
+      if (title) title.textContent = 'Edit rule';
+      addBtn.textContent = 'Update rule';
+      if (cancelBtn) cancelBtn.style.display = '';
+    } else {
+      if (title) title.textContent = 'Add rule';
+      addBtn.textContent = 'Add rule';
+      if (cancelBtn) cancelBtn.style.display = 'none';
+    }
+  }
+  function resetForm(host) {
+    editingId = null;
+    ['name', 'threshold'].forEach((k) => { const e = $(`[data-new=${k}]`, host); if (e) e.value = ''; });
+    const metric = $('[data-new=metric]', host); if (metric) metric.value = '';
+    const sustain = $('[data-new=sustain]', host); if (sustain) sustain.value = 120;
+    const cooldown = $('[data-new=cooldown]', host); if (cooldown) cooldown.value = 900;
+    const sev = $('[data-new=severity]', host); if (sev) sev.value = 'warning';
+    const email = $('[data-new=email]', host); if (email) email.checked = false;
+    enhanceSelects(host);
+    updateFormMode(host);
+  }
 
   async function refresh(host) {
     let rules, active, history, metrics;
@@ -727,10 +755,16 @@ pageRenderers.alerts = (() => {
       const crit = active.active.filter((a) => a.severity === 'critical').length;
       const warn = active.active.filter((a) => a.severity === 'warning').length;
       const info = active.active.filter((a) => a.severity === 'info').length;
+      const allClear = active.active.length === 0;
+      const okGlyph = '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>';
+      const alertGlyph = '<svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
       summary.innerHTML = `
-        <div class="al-sum-card ${active.active.length ? (crit ? 'al-sum-crit' : 'al-sum-warn') : 'al-sum-ok'}">
-          <div class="al-sum-big">${active.active.length}</div>
-          <div class="al-sum-label">${active.active.length ? 'active alert' + (active.active.length === 1 ? '' : 's') : 'all clear'}</div>
+        <div class="al-sum-card ${allClear ? 'al-sum-ok' : (crit ? 'al-sum-crit' : 'al-sum-warn')}">
+          <div class="al-sum-glyph">${allClear ? okGlyph : alertGlyph}</div>
+          <div class="al-sum-text">
+            <div class="al-sum-big">${allClear ? 'All clear' : active.active.length}</div>
+            <div class="al-sum-label">${allClear ? 'No active alerts' : 'active alert' + (active.active.length === 1 ? '' : 's')}</div>
+          </div>
         </div>
         <div class="al-sum-breakdown">
           <div class="al-sum-stat"><span class="al-sum-dot al-dot-crit"></span>Critical <b>${crit}</b></div>
@@ -740,11 +774,11 @@ pageRenderers.alerts = (() => {
         </div>`;
     }
 
-    // active banner
+    // active banner (only when there ARE active alerts; all-clear is shown by the widget)
     const banner = $('[data-al=active]', host);
     banner.innerHTML = active.active.length
       ? active.active.map((a) => `<div class="al-banner ${SEV_CLASS[a.severity]}">⚠ <b>${esc(a.name)}</b> — firing since ${new Date(a.since).toLocaleTimeString()}</div>`).join('')
-      : '<div class="al-banner al-ok">✓ No active alerts</div>';
+      : '';
 
     // rules table
     $('[data-al=rules]', host).innerHTML = rules.rules.map((r) => `
@@ -752,6 +786,7 @@ pageRenderers.alerts = (() => {
         <span class="al-sev ${SEV_CLASS[r.severity]}">${esc(r.severity)}</span>
         <span class="al-name"><b>${esc(r.name)}</b><br><small>${esc(r.metric)} ${esc(r.op)} ${r.threshold} for ${r.sustain_s}s · ${(r.channels || []).join('+')}</small></span>
         <span class="al-actions">
+          <button class="inv-act" data-edit="${r.id}" title="Edit rule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
           <button class="inv-act" data-toggle="${r.id}" data-enabled="${r.enabled}" title="${r.enabled ? 'Disable rule' : 'Enable rule'}">${r.enabled
             ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>'
             : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14" opacity="0.0"/><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-5"/></svg>'}</button>
@@ -779,6 +814,23 @@ pageRenderers.alerts = (() => {
       : '<p class="sess-empty">No incidents recorded</p>';
 
     // wire row buttons
+    host.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => {
+      const rule = rules.rules.find((r) => r.id == b.dataset.edit);
+      if (!rule) return;
+      editingId = rule.id;
+      $('[data-new=name]', host).value = rule.name || '';
+      $('[data-new=metric]', host).value = rule.metric || '';
+      $('[data-new=op]', host).value = rule.op || '>';
+      $('[data-new=threshold]', host).value = rule.threshold ?? '';
+      $('[data-new=sustain]', host).value = rule.sustain_s ?? 120;
+      $('[data-new=severity]', host).value = rule.severity || 'warning';
+      $('[data-new=cooldown]', host).value = rule.cooldown_s ?? 900;
+      $('[data-new=email]', host).checked = (rule.channels || []).includes('email');
+      // re-sync any enhanced selects, then reflect edit mode in the form
+      enhanceSelects(host);
+      updateFormMode(host);
+      $('[data-new=name]', host).scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
     host.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => {
       const rule = rules.rules.find((r) => r.id == b.dataset.toggle);
       try {
@@ -807,7 +859,7 @@ pageRenderers.alerts = (() => {
           <div class="card-body" data-pane="rules" style="display:none">
             <h4 class="sess-h">Rules</h4>
             <div data-al="rules"></div>
-            <h4 class="sess-h">Add rule</h4>
+            <h4 class="sess-h" data-new="formtitle">Add rule</h4>
             <div class="al-form wz-form">
               <label>Name <input data-new="name" placeholder="High CPU temperature" maxlength="80"></label>
               <div class="al-form-row">
@@ -821,7 +873,7 @@ pageRenderers.alerts = (() => {
                 <label>Cooldown (s) <input data-new="cooldown" type="number" value="900"></label>
               </div>
               <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
-              <div class="wz-row"><button class="action-btn" data-new="add">Add rule</button><span data-new="status"></span></div>
+              <div class="wz-row"><button class="action-btn" data-new="add">Add rule</button><button class="action-btn" data-new="cancel" style="display:none">Cancel</button><span data-new="status"></span></div>
             </div>
             <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s.</p>
           </div>
@@ -834,21 +886,30 @@ pageRenderers.alerts = (() => {
 
       $('[data-new=add]', host).onclick = async () => {
         const stat = $('[data-new=status]', host);
+        const body = {
+          name: $('[data-new=name]', host).value.trim(),
+          metric: $('[data-new=metric]', host).value.trim(),
+          op: $('[data-new=op]', host).value,
+          threshold: Number($('[data-new=threshold]', host).value),
+          sustain_s: Number($('[data-new=sustain]', host).value),
+          severity: $('[data-new=severity]', host).value,
+          cooldown_s: Number($('[data-new=cooldown]', host).value),
+          channels: $('[data-new=email]', host).checked ? ['ui', 'email'] : ['ui'],
+        };
         try {
-          await api('/alerts/rules', { method: 'POST', body: {
-            name: $('[data-new=name]', host).value.trim(),
-            metric: $('[data-new=metric]', host).value.trim(),
-            op: $('[data-new=op]', host).value,
-            threshold: Number($('[data-new=threshold]', host).value),
-            sustain_s: Number($('[data-new=sustain]', host).value),
-            severity: $('[data-new=severity]', host).value,
-            cooldown_s: Number($('[data-new=cooldown]', host).value),
-            channels: $('[data-new=email]', host).checked ? ['ui', 'email'] : ['ui'],
-          }});
-          setStatus(stat, true, '✓ rule added');
+          if (editingId) {
+            await api(`/alerts/rules/${editingId}`, { method: 'PUT', body });
+            setStatus(stat, true, '✓ rule updated');
+          } else {
+            await api('/alerts/rules', { method: 'POST', body });
+            setStatus(stat, true, '✓ rule added');
+          }
+          editingId = null;
+          resetForm(host);
           refresh(host);
         } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
       };
+      $('[data-new=cancel]', host).onclick = () => { editingId = null; resetForm(host); };
 
       refresh(host);
       timer = setInterval(() => refresh(host), 15000);
@@ -865,7 +926,10 @@ pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
-  let editSmtp = false, editDb = false;
+  let editSmtp = false, editDb = false, editNas = false, editPw = false;
+  // shared glyphs for the colored edit / test buttons
+  const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+  const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
 
   async function load(host) {
     let st;
@@ -879,18 +943,21 @@ pageRenderers.settings = (() => {
     }
     const mounted = nasStatus?.mounted;
     $('[data-set=nas]', host).innerHTML = nas ? `
-      <div class="set-kv"><span>Label</span><b>${esc(nas.label)}</b></div>
-      <div class="set-kv"><span>Source</span><b>${esc(nas.proto)}://${esc(nas.host)}/${esc(nas.share)}</b></div>
-      <div class="set-kv"><span>Mountpoint</span><b>${esc(nas.mountpoint)}</b></div>
-      <div class="set-kv"><span>Status</span><b class="${mounted ? 'set-ok' : 'set-err'}">${mounted ? '● mounted' : '○ not mounted'}</b></div>
-      <div class="wz-row set-btn-row">
-        <button class="action-btn set-pill" data-set="remount">Remount</button>
-        <button class="action-btn set-pill set-pill-danger" data-set="unmount">Unmount</button>
-        <span data-set="nasmsg"></span>
+      <div class="set-summary">
+        <div class="set-kv"><span>Label</span><b>${esc(nas.label)}</b></div>
+        <div class="set-kv"><span>Source</span><b>${esc(nas.proto)}://${esc(nas.host)}/${esc(nas.share)}</b></div>
+        <div class="set-kv"><span>Mountpoint</span><b>${esc(nas.mountpoint)}</b></div>
+        <div class="set-kv"><span>Status</span><b class="${mounted ? 'set-ok' : 'set-err'}">${mounted ? '● Mounted' : '○ Not mounted'}</b></div>
+        <div class="wz-row set-btn-row">
+          <button class="action-btn set-edit-btn" data-set="nasedit">${EDIT_ICON}<span>Edit</span></button>
+          <button class="action-btn set-pill set-pill-danger" data-set="unmount">Unmount</button>
+          <span data-set="nasmsg"></span>
+        </div>
       </div>` : `<p class="sess-empty">No NAS share configured. Mount one below to store metrics off the SD card.</p>`;
 
-    // mount form (always available to add/replace)
-    $('[data-set=nasform]', host).innerHTML = `
+    // mount form — hidden behind Edit once a share is configured
+    const showNasForm = editNas || !nas;
+    $('[data-set=nasform]', host).innerHTML = showNasForm ? `
       <h4 class="sess-h">${nas ? 'Replace share' : 'Mount a share'}</h4>
       <div class="wz-form">
         <label>Label <input data-nf="label" value="${esc(nas?.label || 'mybook')}" maxlength="32"></label>
@@ -904,8 +971,8 @@ pageRenderers.settings = (() => {
         </select></label>
         <label>Username <input data-nf="user" placeholder="admin"></label>
         <label>Password <input data-nf="pass" type="password"></label>
-        <div class="wz-row"><button class="action-btn" data-nf="mount">Mount &amp; persist</button><span data-nf="msg"></span></div>
-      </div>`;
+        <div class="wz-row"><button class="action-btn" data-nf="mount">Mount &amp; persist</button>${nas ? '<button class="action-btn" data-nf="cancel">Cancel</button>' : ''}<span data-nf="msg"></span></div>
+      </div>` : '';
     if (nas?.smbVersion) { const sel = $('[data-nf=smb]', host); if (sel) sel.value = nas.smbVersion; }
     enhanceSelects(host);   // dynamic selects appear after this render
 
@@ -979,9 +1046,9 @@ pageRenderers.settings = (() => {
           <div class="set-kv"><span>Username</span><b>${esc(smtp.user || '—')}</b></div>
           <div class="set-kv"><span>From</span><b>${esc(smtp.from || '—')}</b></div>
           <div class="set-kv"><span>Send alerts to</span><b>${esc(smtp.to || '—')}</b></div>
-          <div class="wz-row set-btn-row">
-            <button class="action-btn" data-sm="edit">Edit</button>
-            <button class="action-btn" data-sm="test">Send test email</button>
+          <div class="wz-row set-btn-row set-actions">
+            <button class="action-btn set-edit-btn" data-sm="edit">${EDIT_ICON}<span>Edit</span></button>
+            <button class="action-btn set-test-btn" data-sm="test">${TEST_ICON}<span>Send test email</span></button>
             <span data-sm="msg"></span>
           </div>
         </div>` : `
@@ -1016,13 +1083,20 @@ pageRenderers.settings = (() => {
           <div class="set-kv"><span>Two-factor (2FA)</span><b class="${mfaOn ? 'set-ok' : ''}">${mfaOn ? '● Enabled' : '○ Disabled'}</b></div>
         </div>
 
-        <h4 class="sess-h" style="margin-top:20px">Change password</h4>
-        <div class="wz-form">
-          <label>Current password <input data-acc="cur" type="password" autocomplete="current-password"></label>
-          <label>New password <input data-acc="new" type="password" autocomplete="new-password" placeholder="at least 8 characters"></label>
-          <label>Confirm new password <input data-acc="new2" type="password" autocomplete="new-password"></label>
-          <div class="wz-row"><button class="action-btn" data-acc="pwsave">Update password</button><span data-acc="pwmsg"></span></div>
-        </div>
+        <h4 class="sess-h" style="margin-top:20px">Password</h4>
+        ${!editPw ? `
+          <div class="set-summary">
+            <div class="set-kv"><span>Password</span><b>•••••••• (set)</b></div>
+            <div class="wz-row set-btn-row set-actions">
+              <button class="action-btn set-edit-btn" data-acc="pwedit">${EDIT_ICON}<span>Edit</span></button>
+            </div>
+          </div>` : `
+          <div class="wz-form">
+            <label>Current password <input data-acc="cur" type="password" autocomplete="current-password"></label>
+            <label>New password <input data-acc="new" type="password" autocomplete="new-password" placeholder="at least 8 characters"></label>
+            <label>Confirm new password <input data-acc="new2" type="password" autocomplete="new-password"></label>
+            <div class="wz-row"><button class="action-btn" data-acc="pwsave">Update password</button><button class="action-btn" data-acc="pwcancel">Cancel</button><span data-acc="pwmsg"></span></div>
+          </div>`}
 
         <h4 class="sess-h" style="margin-top:24px">Two-factor authentication</h4>
         ${mfaOn ? `
@@ -1062,12 +1136,15 @@ pageRenderers.settings = (() => {
           password: $('[data-nf=pass]', host).value,
         }});
         setStatus(msg, true, '✓ mounted & set to mount on boot');
+        editNas = false;
         load(host);
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
     };
 
-    const remount = $('[data-set=remount]', host);
-    if (remount) remount.onclick = () => { $('[data-nf=host]', host).scrollIntoView({ behavior: 'smooth' }); toast('info', 'Remount', 'Re-enter the password and click Mount & persist.'); };
+    const nasEdit = $('[data-set=nasedit]', host);
+    if (nasEdit) nasEdit.onclick = () => { editNas = true; load(host); };
+    const nasCancel = $('[data-nf=cancel]', host);
+    if (nasCancel) nasCancel.onclick = () => { editNas = false; load(host); };
 
     const unmount = $('[data-set=unmount]', host);
     if (unmount) unmount.onclick = async () => {
@@ -1131,6 +1208,10 @@ pageRenderers.settings = (() => {
     };
 
     // ---- account: change password ----
+    const pwEdit = $('[data-acc=pwedit]', host);
+    if (pwEdit) pwEdit.onclick = () => { editPw = true; load(host); };
+    const pwCancel = $('[data-acc=pwcancel]', host);
+    if (pwCancel) pwCancel.onclick = () => { editPw = false; load(host); };
     const pwSave = $('[data-acc=pwsave]', host);
     if (pwSave) pwSave.onclick = async () => {
       const msg = $('[data-acc=pwmsg]', host);
@@ -1142,10 +1223,10 @@ pageRenderers.settings = (() => {
       pwSave.disabled = true; setStatus(msg, true, 'Updating…');
       try {
         await api('/auth/account/password', { method: 'POST', body: { currentPassword: cur, newPassword: nw } });
-        setStatus(msg, true, '✓ password updated');
-        $('[data-acc=cur]', host).value = $('[data-acc=new]', host).value = $('[data-acc=new2]', host).value = '';
-      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
-      finally { pwSave.disabled = false; }
+        editPw = false;
+        toast('success', 'Account', 'Password updated');
+        load(host);
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); pwSave.disabled = false; }
     };
 
     // ---- account: enable 2FA (begin -> show QR -> confirm) ----
@@ -1751,43 +1832,38 @@ pageRenderers.inventory = (() => {
     if (!bar) return;
     if (kind !== 'package' || !facetData) { bar.innerHTML = ''; return; }
 
-    // small facets (category, priority) render as inline chip toggles; the big
-    // one (section, 20+ values) stays a searchable dropdown.
-    const chipRow = (obj, active, allLabel) => {
-      const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
-      return `<button class="inv-fchip ${!active ? 'active' : ''}" data-val="">${allLabel}</button>` +
-        entries.map(([k, n]) => `<button class="inv-fchip ${active === k ? 'active' : ''}" data-val="${esc(k)}">${esc(k)} <span class="inv-fchip-n">${n}</span></button>`).join('');
-    };
+    // Compact, consistent dropdowns for all three facets (enhanceSelects turns
+    // them into searchable menus). Active selections appear as removable pills
+    // below so what's applied is always visible at a glance.
     const opt = (obj, sel, allLabel) => `<option value="">${allLabel}</option>` +
       Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
         .map(([k, n]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(k)} (${n})</option>`).join('');
 
-    const anyActive = fCategory || fPriority || fSection;
-    bar.innerHTML = `
-      <div class="inv-fgroup">
-        <span class="inv-filter-label">Category</span>
-        <div class="inv-fchips" data-facet="category">${chipRow(facetData.category, fCategory, 'All')}</div>
-      </div>
-      <div class="inv-fgroup">
-        <span class="inv-filter-label">Priority</span>
-        <div class="inv-fchips" data-facet="priority">${chipRow(facetData.priority, fPriority, 'All')}</div>
-      </div>
-      <div class="inv-fgroup">
-        <span class="inv-filter-label">Section</span>
-        <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'All sections')}</select>
-        ${anyActive ? '<button class="inv-clear" data-filter="clear">✕ Clear all filters</button>' : ''}
-      </div>`;
+    const active = [];
+    if (fCategory) active.push(['category', 'Category', fCategory]);
+    if (fPriority) active.push(['priority', 'Priority', fPriority]);
+    if (fSection) active.push(['section', 'Section', fSection]);
 
-    // chip handlers (category + priority)
-    bar.querySelectorAll('[data-facet] .inv-fchip').forEach((c) => {
-      c.onclick = () => {
-        const facet = c.closest('[data-facet]').dataset.facet;
-        const val = c.dataset.val;
-        if (facet === 'category') fCategory = val; else fPriority = val;
-        offset = 0; renderFilters(host); loadRows(host);
-      };
-    });
-    bar.querySelector('[data-filter=section]').onchange = (e) => { fSection = e.target.value; offset = 0; loadRows(host); };
+    bar.innerHTML = `
+      <div class="inv-fbar">
+        <span class="inv-filter-label">Refine</span>
+        <select class="inv-filter" data-filter="category" aria-label="Category">${opt(facetData.category, fCategory, 'Category')}</select>
+        <select class="inv-filter" data-filter="priority" aria-label="Priority">${opt(facetData.priority, fPriority, 'Priority')}</select>
+        <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'Section')}</select>
+      </div>
+      ${active.length ? `<div class="inv-pills">
+        ${active.map(([f, label, val]) => `<span class="inv-pill" data-pill="${f}"><span class="inv-pill-k">${label}:</span> ${esc(val)} <button class="inv-pill-x" data-pill-rm="${f}" title="Remove ${label} filter">✕</button></span>`).join('')}
+        <button class="inv-pill-clear" data-filter="clear">Clear all</button>
+      </div>` : ''}`;
+
+    const setFacet = (f, v) => {
+      if (f === 'category') fCategory = v; else if (f === 'priority') fPriority = v; else fSection = v;
+      offset = 0; renderFilters(host); loadRows(host);
+    };
+    bar.querySelector('[data-filter=category]').onchange = (e) => setFacet('category', e.target.value);
+    bar.querySelector('[data-filter=priority]').onchange = (e) => setFacet('priority', e.target.value);
+    bar.querySelector('[data-filter=section]').onchange = (e) => setFacet('section', e.target.value);
+    bar.querySelectorAll('[data-pill-rm]').forEach((b) => b.onclick = () => setFacet(b.dataset.pillRm, ''));
     const clr = bar.querySelector('[data-filter=clear]');
     if (clr) clr.onclick = () => { fCategory = fPriority = fSection = ''; offset = 0; renderFilters(host); loadRows(host); };
     enhanceSelects(host);
