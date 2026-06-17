@@ -2094,7 +2094,7 @@ pageRenderers.updates = (() => {
       host.innerHTML = `
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header up-page-head"><div class="card-icon up-page-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></div><span class="card-title up-page-title">Software Updates</span></div>
+          <div class="card-header up-page-head"><div class="card-icon up-page-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="card-title up-page-title">Software Updates</span></div>
           <div class="up-tabs">
             <button class="up-tab up-tab-active" data-tab="available">Available Updates</button>
             <button class="up-tab" data-tab="history">Update History</button>

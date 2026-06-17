@@ -5449,8 +5449,9 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 
 
 /* Updates page title — larger, with a matching larger glyph */
+.up-page-head { align-items: center; gap: 14px; }
 .up-page-title { font-size: 22px !important; font-weight: 700 !important; color: var(--text-primary) !important; }
-.up-page-icon { width: 48px !important; height: 48px !important; }
+.up-page-icon { width: 48px !important; height: 48px !important; background: rgba(0,212,255,0.1); color: var(--accent-cyan); }
 .up-page-icon svg { width: 28px; height: 28px; }
 
 /* Updates table: allow horizontal scroll on narrow screens so all columns
