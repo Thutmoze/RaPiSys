@@ -29,6 +29,7 @@ import { createUpdatesRepo } from './repositories/updates.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
+import { createUpdateScheduler } from './services/update-scheduler.js';
 import { createAlertEngine } from './services/alerting.js';
 import { createSessionTracker } from './services/session-tracker.js';
 import { createAuth } from './services/auth.js';
@@ -138,6 +139,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   const layoutsRepoFacade = new Proxy({}, { get: (_, m) => (...a) => layoutsRepo[m](...a) });
   const updatesRepoFacade = new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) });
   const updates = createUpdatesCollector({ updatesRepo: updatesRepoFacade });
+  const updateScheduler = createUpdateScheduler({
+    updates, mailer, loadSettings, saveSettings, withFileLock, events: eventsFacade,
+  });
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
     eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
@@ -161,6 +165,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('retention', 3600e3, () => retention.runOnce());
   scheduler.register('alert-engine', 30e3, () => alertEngine.evaluateOnce());
   scheduler.register('session-tracker', 60e3, () => sessionTracker.trackOnce(), { runNow: true });
+  // Automatic update check (F8): ticks hourly, self-gates on the configured
+  // intervalHours, and emails security updates when found.
+  scheduler.register('update-check', 3600e3, () => updateScheduler.tick());
   scheduler.register('net-sampler', 10e3, () => {
     const t = network.throughput();
     const rows = [];
@@ -204,7 +211,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/network', networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
   app.use('/api/reports', reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
-  app.use('/api/updates', updatesRouter({ updates, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/updates', updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/layouts', layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,

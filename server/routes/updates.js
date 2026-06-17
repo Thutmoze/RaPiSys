@@ -5,8 +5,22 @@
 
 import express from 'express';
 
-export function updatesRouter({ updates, updatesRepo, requireControl, events }) {
+export function updatesRouter({ updates, updateScheduler, updatesRepo, requireControl, events }) {
   const r = express.Router();
+
+  // -- automatic update check schedule (read public, write requires control) --
+  r.get('/schedule', async (req, res) => {
+    res.json(await updateScheduler.getConfig());
+  });
+  r.put('/schedule', requireControl, async (req, res) => {
+    try { res.json(await updateScheduler.setConfig(req.body || {})); }
+    catch (err) { res.status(400).json({ error: err.message }); }
+  });
+  // Run a scheduled check immediately (and email per the saved config).
+  r.post('/schedule/run', requireControl, async (req, res) => {
+    try { res.json(await updateScheduler.runOnce()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
 
   // Cached list (instant) — does NOT trigger a scan. Use /refresh to re-check.
   r.get('/', (req, res) => {

@@ -731,13 +731,14 @@ pageRenderers.alerts = (() => {
     const addBtn = $('[data-new=add]', host);
     const cancelBtn = $('[data-new=cancel]', host);
     if (!addBtn) return;
+    const addLabel = addBtn.querySelector('span') || addBtn;
     if (editingId) {
       if (title) title.textContent = 'Edit rule';
-      addBtn.textContent = 'Update rule';
+      addLabel.textContent = 'Update rule';
       if (cancelBtn) cancelBtn.style.display = '';
     } else {
       if (title) title.textContent = 'Add rule';
-      addBtn.textContent = 'Add rule';
+      addLabel.textContent = 'Add rule';
       if (cancelBtn) cancelBtn.style.display = 'none';
     }
   }
@@ -885,7 +886,7 @@ pageRenderers.alerts = (() => {
                 <label>Cooldown (s) <input data-new="cooldown" type="number" value="900"></label>
               </div>
               <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
-              <div class="wz-row"><button class="action-btn" data-new="add">Add rule</button><button class="action-btn" data-new="cancel" style="display:none">Cancel</button><span data-new="status"></span></div>
+              <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
             </div>
             <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s.</p>
           </div>
@@ -1808,7 +1809,7 @@ pageRenderers.inventory = (() => {
     total = data.total;
     const rows = data.rows;
     const head = kind === 'package'
-      ? '<th>Package</th><th>Description</th><th>Version</th><th>Category</th><th>Priority</th><th>Section</th><th>Size</th><th>Installed</th><th class="inv-actions">Action</th>'
+      ? '<th>Package</th><th>Description</th><th>Version</th><th>Size</th><th>Installed</th><th>Category</th><th>Priority</th><th>Section</th><th class="inv-actions">Action</th>'
       : kind === 'service'
       ? '<th>Service</th><th>Status</th><th>Description</th><th class="inv-actions">Action</th>'
       : '<th>Container</th><th>Image</th><th>Status</th><th class="inv-actions">Action</th>';
@@ -1827,10 +1828,11 @@ pageRenderers.inventory = (() => {
               : `<button class="inv-act inv-act-danger" data-act="pkg-remove" data-name="${esc(r.name)}" title="Uninstall">${trash}</button>`;
             const cap = (v, cls) => v ? `<span class="inv-cap ${cls}">${esc(v)}</span>` : '<span class="inv-dim">—</span>';
             return `<tr><td><b>${esc(r.name)}</b></td><td class="inv-dim inv-desc">${esc(r.meta?.description || '')}</td><td>${esc(r.version)}</td>`
+              + `<td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td>`
               + `<td>${cap(r.category, 'inv-cap-cat')}</td>`
               + `<td>${cap(r.meta?.priority, 'inv-cap-pri')}</td>`
               + `<td>${cap(r.meta?.section, 'inv-cap-sec')}</td>`
-              + `<td class="inv-dim">${fmtSize(r.meta?.sizeKB)}</td><td class="inv-dim">${fmtDate(r.installedAt)}</td><td class="inv-actions">${btn}</td></tr>`;
+              + `<td class="inv-actions">${btn}</td></tr>`;
           }
           if (kind === 'service') {
             const running = /active\/running/.test(r.status);
@@ -1878,9 +1880,11 @@ pageRenderers.inventory = (() => {
     bar.innerHTML = `
       <div class="inv-fbar">
         <span class="inv-filter-label">Refine</span>
-        <select class="inv-filter" data-filter="category" aria-label="Category">${opt(facetData.category, fCategory, 'Category')}</select>
-        <select class="inv-filter" data-filter="priority" aria-label="Priority">${opt(facetData.priority, fPriority, 'Priority')}</select>
-        <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'Section')}</select>
+        <div class="inv-fselects">
+          <select class="inv-filter" data-filter="category" aria-label="Category">${opt(facetData.category, fCategory, 'Category')}</select>
+          <select class="inv-filter" data-filter="priority" aria-label="Priority">${opt(facetData.priority, fPriority, 'Priority')}</select>
+          <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'Section')}</select>
+        </div>
       </div>
       ${active.length ? `<div class="inv-pills">
         ${active.map(([f, label, val]) => `<span class="inv-pill" data-pill="${f}"><span class="inv-pill-k">${label}:</span> ${esc(val)} <button class="inv-pill-x" data-pill-rm="${f}" title="Remove ${label} filter">✕</button></span>`).join('')}
@@ -2488,13 +2492,60 @@ pageRenderers.updates = (() => {
       }).join('')}</tbody></table></div>` : '<p class="sess-empty">No update history yet.</p>';
   }
 
+  // Auto-check schedule tab: read config, render a small form, wire save + run.
+  async function loadSchedule(host) {
+    const target = $('[data-up=schedule]', host);
+    if (!target) return;
+    let cfg;
+    try { cfg = await api('/updates/schedule'); } catch { target.innerHTML = '<p class="sess-empty">Could not load schedule.</p>'; return; }
+    target.innerHTML = `
+      <p class="up-sec-hint">Periodically run a security check in the background and email you the list of new security updates that need patching. Uses the SMTP settings from Settings \u2192 Email (SMTP).</p>
+      <div class="wz-form up-sched">
+        <label class="wz-inline"><input type="checkbox" data-sch="enabled" ${cfg.enabled ? 'checked' : ''}> Enable automatic update checks</label>
+        <div class="al-form-row">
+          <label>Check every (hours) <input type="number" data-sch="interval" min="1" max="720" value="${esc(cfg.intervalHours)}"></label>
+          <label>Email security updates to <input data-sch="to" value="${esc(cfg.emailTo || '')}" placeholder="(falls back to SMTP recipient)"></label>
+        </div>
+        <label class="wz-inline"><input type="checkbox" data-sch="email" ${cfg.emailEnabled ? 'checked' : ''}> Send an email when updates are found</label>
+        <label class="wz-inline"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}> Only email when there are security updates</label>
+        <div class="set-actions">
+          <button class="set-btn set-btn-primary" data-sch="save"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Save schedule</span></button>
+          <button class="set-btn set-btn-test" data-sch="run"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span>Run check now</span></button>
+          <span data-sch="msg"></span>
+        </div>
+      </div>`;
+    const msg = $('[data-sch=msg]', host);
+    $('[data-sch=save]', host).onclick = async () => {
+      const body = {
+        enabled: $('[data-sch=enabled]', host).checked,
+        intervalHours: Number($('[data-sch=interval]', host).value) || 24,
+        emailEnabled: $('[data-sch=email]', host).checked,
+        emailTo: $('[data-sch=to]', host).value.trim(),
+        onlySecurity: $('[data-sch=onlysec]', host).checked,
+      };
+      const b = $('[data-sch=save]', host); b.disabled = true; msg.textContent = 'Saving…';
+      try { await api('/updates/schedule', { method: 'PUT', body }); msg.textContent = '✓ saved'; toast('success', 'Updates', 'Auto-check schedule saved'); }
+      catch (err) { msg.textContent = `✗ ${err.message}`; }
+      finally { b.disabled = false; }
+    };
+    $('[data-sch=run]', host).onclick = async () => {
+      const b = $('[data-sch=run]', host); b.disabled = true; msg.textContent = 'Running check…';
+      try {
+        const r = await api('/updates/schedule/run', { method: 'POST', body: {} });
+        if (r.skipped) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`;
+        else { msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`; }
+      } catch (err) { msg.textContent = `✗ ${err.message}`; }
+      finally { b.disabled = false; }
+    };
+  }
+
   return {
     mount(host) {
       host.innerHTML = `
       <div class="rapisys-grid">
         <div class="card sess-span">
           ${pageHeader('updates', 'Software Updates')}
-          ${pageTabs([{ id: 'available', label: 'Available Updates' }, { id: 'history', label: 'Update History' }])}
+          ${pageTabs([{ id: 'available', label: 'Available Updates' }, { id: 'history', label: 'Update History' }, { id: 'schedule', label: 'Auto-Check' }])}
           <div class="card-body" data-pane="available">
             <div class="up-chips" data-up="chips"></div>
             <div class="up-actions" data-up="actions"></div>
@@ -2504,9 +2555,12 @@ pageRenderers.updates = (() => {
           <div class="card-body" data-pane="history" style="display:none">
             <div data-up="history"></div>
           </div>
+          <div class="card-body" data-pane="schedule" style="display:none">
+            <div data-up="schedule"></div>
+          </div>
         </div>
       </div>`;
-      wirePageTabs(host, (tab) => { if (tab === 'history') loadHistory(host); });
+      wirePageTabs(host, (tab) => { if (tab === 'history') loadHistory(host); if (tab === 'schedule') loadSchedule(host); });
       // Draw the action toolbar immediately so "Check for updates" is always
       // available, even before (or without) a cached upgrade list.
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>checking…</span>';
