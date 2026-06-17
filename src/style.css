@@ -5562,8 +5562,27 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .acc-qr { display: block; width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: 8px; margin-bottom: 10px; }
 .acc-enroll code { background: var(--bg-card); padding: 2px 6px; border-radius: 4px; font-size: 12px; word-break: break-all; }
 
-/* Settings — colored edit/test action buttons with glyphs, spaced from summary */
-.set-actions { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color); gap: 10px; }
+/* Settings — standardized action buttons + separated action row */
+.set-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 16px; padding-top: 16px; border-top: 2px solid var(--border-color); }
+/* base button — consistent size/shape everywhere */
+.set-btn { display: inline-flex; align-items: center; gap: 8px; width: auto; height: auto;
+  padding: 9px 16px; font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
+  border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-card);
+  color: var(--text-secondary); transition: border-color 0.15s, color 0.15s, background 0.15s; white-space: nowrap; }
+.set-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+.set-btn:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.set-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* variants */
+.set-btn-edit { color: var(--accent-cyan); border-color: rgba(0,212,255,0.45); background: rgba(0,212,255,0.1); }
+.set-btn-edit:hover { background: rgba(0,212,255,0.18); border-color: var(--accent-cyan); color: var(--accent-cyan); }
+.set-btn-primary { color: var(--accent-cyan); border-color: rgba(0,212,255,0.45); background: rgba(0,212,255,0.12); }
+.set-btn-primary:hover { background: rgba(0,212,255,0.2); border-color: var(--accent-cyan); color: var(--accent-cyan); }
+.set-btn-test { color: #10b981; border-color: rgba(16,185,129,0.45); background: rgba(16,185,129,0.1); }
+.set-btn-test:hover { background: rgba(16,185,129,0.18); border-color: #10b981; color: #10b981; }
+.set-btn-danger { color: #ef4444; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.1); }
+.set-btn-danger:hover { background: rgba(239,68,68,0.18); border-color: #ef4444; color: #ef4444; }
+/* legacy aliases kept so older markup still looks right */
 .set-edit-btn, .set-test-btn { display: inline-flex; align-items: center; gap: 8px; width: auto; height: auto;
   padding: 9px 16px; font-size: 13px; font-weight: 600; border-radius: 10px; }
 .set-edit-btn { color: var(--accent-cyan); border-color: rgba(0,212,255,0.45); background: rgba(0,212,255,0.1); }
@@ -5571,10 +5590,22 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .set-test-btn { color: #10b981; border-color: rgba(16,185,129,0.45); background: rgba(16,185,129,0.1); }
 .set-test-btn:hover { background: rgba(16,185,129,0.18); border-color: #10b981; }
 .set-edit-btn svg, .set-test-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+/* account 2FA toggle switch */
+.set-kv-toggle { display: flex; align-items: center; justify-content: space-between; }
+.set-switch { position: relative; display: inline-block; cursor: pointer; }
+.set-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.set-switch-track { display: block; width: 44px; height: 24px; border-radius: 999px; background: var(--bg-secondary);
+  border: 1px solid var(--border-color); transition: background 0.18s, border-color 0.18s; }
+.set-switch-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--text-muted); transition: transform 0.18s, background 0.18s; }
+.set-switch input:checked + .set-switch-track { background: rgba(0,212,255,0.25); border-color: var(--accent-cyan); }
+.set-switch input:checked + .set-switch-track .set-switch-thumb { transform: translateX(20px); background: var(--accent-cyan); }
+.set-switch input:disabled + .set-switch-track { opacity: 0.4; cursor: not-allowed; }
 
 /* Inventory filters — compact dropdown row + active-filter pills */
 .inv-fbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 .inv-fbar .inv-filter { min-width: 150px; }
+.inv-fbar .rsel { width: auto; flex: 1 1 150px; max-width: 220px; }
 .inv-pills { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .inv-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 6px 5px 12px;
   border-radius: 999px; background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.4); color: var(--accent-cyan); }

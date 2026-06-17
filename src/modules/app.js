@@ -78,6 +78,14 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', htm
 // ---------------------------------------------------------------------------
 
 function enhanceSelects(root) {
+  // Portaled dropdown lists live on <body> and outlive their <select> when a
+  // page re-renders. Prune any whose owning wrap has left the DOM, so they
+  // don't pile up and intercept clicks (the stale, absolutely-positioned list
+  // sits over the live one and swallows the mouse event).
+  document.querySelectorAll('body > .rsel-list').forEach((l) => {
+    if (!l._owner || !l._owner.isConnected) l.remove();
+  });
+
   root.querySelectorAll('select:not([data-rsel])').forEach((sel) => {
     sel.dataset.rsel = '1';
     const wrap = el('div', 'rsel');
@@ -101,6 +109,7 @@ function enhanceSelects(root) {
     filter.placeholder = 'Type to filter…';
     const items = el('div', 'rsel-items');
     list.appendChild(filter); list.appendChild(items);
+    list._owner = wrap;                       // back-reference for orphan pruning
     document.body.appendChild(list);
 
     function renderItems(q = '') {
@@ -930,6 +939,9 @@ pageRenderers.settings = (() => {
   // shared glyphs for the colored edit / test buttons
   const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
   const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+  const TRASH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+  const SAVE_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>';
+  const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
   async function load(host) {
     let st;
@@ -948,9 +960,9 @@ pageRenderers.settings = (() => {
         <div class="set-kv"><span>Source</span><b>${esc(nas.proto)}://${esc(nas.host)}/${esc(nas.share)}</b></div>
         <div class="set-kv"><span>Mountpoint</span><b>${esc(nas.mountpoint)}</b></div>
         <div class="set-kv"><span>Status</span><b class="${mounted ? 'set-ok' : 'set-err'}">${mounted ? '● Mounted' : '○ Not mounted'}</b></div>
-        <div class="wz-row set-btn-row">
-          <button class="action-btn set-edit-btn" data-set="nasedit">${EDIT_ICON}<span>Edit</span></button>
-          <button class="action-btn set-pill set-pill-danger" data-set="unmount">Unmount</button>
+        <div class="set-actions">
+          <button class="set-btn set-btn-edit" data-set="nasedit">${EDIT_ICON}<span>Edit</span></button>
+          <button class="set-btn set-btn-danger" data-set="unmount">${TRASH_ICON}<span>Unmount</span></button>
           <span data-set="nasmsg"></span>
         </div>
       </div>` : `<p class="sess-empty">No NAS share configured. Mount one below to store metrics off the SD card.</p>`;
@@ -971,7 +983,7 @@ pageRenderers.settings = (() => {
         </select></label>
         <label>Username <input data-nf="user" placeholder="admin"></label>
         <label>Password <input data-nf="pass" type="password"></label>
-        <div class="wz-row"><button class="action-btn" data-nf="mount">Mount &amp; persist</button>${nas ? '<button class="action-btn" data-nf="cancel">Cancel</button>' : ''}<span data-nf="msg"></span></div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-nf="mount">${SAVE_ICON}<span>Mount &amp; persist</span></button>${nas ? `<button class="set-btn" data-nf="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}<span data-nf="msg"></span></div>
       </div>` : '';
     if (nas?.smbVersion) { const sel = $('[data-nf=smb]', host); if (sel) sel.value = nas.smbVersion; }
     enhanceSelects(host);   // dynamic selects appear after this render
@@ -984,10 +996,10 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Filesystem</span><b>${esc(s.fsType || '—')} · ${esc(s.journalMode || '—')} journal</b></div>
       <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ Degraded (local fallback)' : '● Healthy'}</b></div>
       ${!editDb ? `
-        <div class="wz-row set-btn-row"><button class="action-btn" data-set="dbedit">Edit location</button></div>` : `
+        <div class="set-actions"><button class="set-btn set-btn-edit" data-set="dbedit">${EDIT_ICON}<span>Edit location</span></button></div>` : `
         <div class="wz-form">
           <label>Database directory <input data-set="dbdir" value="${esc(dbDirVal)}" placeholder="/mnt/rapisys/mybook"></label>
-          <div class="wz-row"><button class="action-btn" data-set="relocate">Relocate database</button><button class="action-btn" data-set="dbcancel">Cancel</button><span data-set="stmsg"></span></div>
+          <div class="set-actions"><button class="set-btn set-btn-primary" data-set="relocate">${SAVE_ICON}<span>Relocate database</span></button><button class="set-btn" data-set="dbcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-set="stmsg"></span></div>
         </div>`}`;
 
     // ---- services health pane (main tab) ----
@@ -1046,9 +1058,9 @@ pageRenderers.settings = (() => {
           <div class="set-kv"><span>Username</span><b>${esc(smtp.user || '—')}</b></div>
           <div class="set-kv"><span>From</span><b>${esc(smtp.from || '—')}</b></div>
           <div class="set-kv"><span>Send alerts to</span><b>${esc(smtp.to || '—')}</b></div>
-          <div class="wz-row set-btn-row set-actions">
-            <button class="action-btn set-edit-btn" data-sm="edit">${EDIT_ICON}<span>Edit</span></button>
-            <button class="action-btn set-test-btn" data-sm="test">${TEST_ICON}<span>Send test email</span></button>
+          <div class="set-actions">
+            <button class="set-btn set-btn-edit" data-sm="edit">${EDIT_ICON}<span>Edit</span></button>
+            <button class="set-btn set-btn-test" data-sm="test">${TEST_ICON}<span>Send test email</span></button>
             <span data-sm="msg"></span>
           </div>
         </div>` : `
@@ -1064,9 +1076,9 @@ pageRenderers.settings = (() => {
             <label>From address <input data-sm="from" value="${esc(smtp.from || '')}" placeholder="rapisys@example.com"></label>
             <label>Send alerts to <input data-sm="to" value="${esc(smtp.to || '')}" placeholder="you@example.com"></label>
           </div>
-          <div class="wz-row">
-            <button class="action-btn" data-sm="save">Save SMTP settings</button>
-            ${st.smtpConfigured ? '<button class="action-btn" data-sm="cancel">Cancel</button>' : ''}
+          <div class="set-actions">
+            <button class="set-btn set-btn-primary" data-sm="save">${SAVE_ICON}<span>Save SMTP settings</span></button>
+            ${st.smtpConfigured ? `<button class="set-btn" data-sm="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
             <span data-sm="msg"></span>
           </div>
         </div>`}`;
@@ -1080,34 +1092,29 @@ pageRenderers.settings = (() => {
       accEl.innerHTML = `
         <div class="set-summary">
           <div class="set-kv"><span>Username</span><b>${esc(me?.username || '—')}</b></div>
-          <div class="set-kv"><span>Two-factor (2FA)</span><b class="${mfaOn ? 'set-ok' : ''}">${mfaOn ? '● Enabled' : '○ Disabled'}</b></div>
+          <div class="set-kv"><span>Password</span><b>•••••••• (set)</b></div>
+          <div class="set-kv set-kv-toggle">
+            <span>Two-factor authentication (2FA)</span>
+            <label class="set-switch" title="${mfaOn ? 'Disable 2FA' : 'Enable 2FA'}">
+              <input type="checkbox" data-acc="mfatoggle" ${mfaOn ? 'checked' : ''} ${(!mfaOn && !st.encryption) ? 'disabled' : ''}>
+              <span class="set-switch-track"><span class="set-switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="set-actions">
+            <button class="set-btn set-btn-edit" data-acc="pwedit">${EDIT_ICON}<span>Edit password</span></button>
+          </div>
         </div>
 
-        <h4 class="sess-h" style="margin-top:20px">Password</h4>
-        ${!editPw ? `
-          <div class="set-summary">
-            <div class="set-kv"><span>Password</span><b>•••••••• (set)</b></div>
-            <div class="wz-row set-btn-row set-actions">
-              <button class="action-btn set-edit-btn" data-acc="pwedit">${EDIT_ICON}<span>Edit</span></button>
-            </div>
-          </div>` : `
-          <div class="wz-form">
+        ${editPw ? `
+          <div class="wz-form" style="margin-top:14px">
+            <h4 class="sess-h">Reset password</h4>
             <label>Current password <input data-acc="cur" type="password" autocomplete="current-password"></label>
             <label>New password <input data-acc="new" type="password" autocomplete="new-password" placeholder="at least 8 characters"></label>
             <label>Confirm new password <input data-acc="new2" type="password" autocomplete="new-password"></label>
-            <div class="wz-row"><button class="action-btn" data-acc="pwsave">Update password</button><button class="action-btn" data-acc="pwcancel">Cancel</button><span data-acc="pwmsg"></span></div>
-          </div>`}
+            <div class="set-actions"><button class="set-btn set-btn-primary" data-acc="pwsave">${SAVE_ICON}<span>Update password</span></button><button class="set-btn" data-acc="pwcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="pwmsg"></span></div>
+          </div>` : ''}
 
-        <h4 class="sess-h" style="margin-top:24px">Two-factor authentication</h4>
-        ${mfaOn ? `
-          <p class="hw-hint">2FA is active. Disabling it requires a current code from your authenticator app.</p>
-          <div class="wz-form">
-            <label>Authenticator code <input data-acc="discode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
-            <div class="wz-row"><button class="action-btn" data-acc="mfadisable">Disable 2FA</button><span data-acc="mfamsg"></span></div>
-          </div>` : `
-          <p class="hw-hint">Add an authenticator app (TOTP) for a second login factor. Requires SECRET_KEY to be set.</p>
-          <div data-acc="mfaenroll"></div>
-          <div class="wz-row"><button class="action-btn" data-acc="mfabegin" ${st.encryption ? '' : 'disabled'}>Enable 2FA</button><span data-acc="mfamsg"></span></div>`}`;
+        <div data-acc="mfazone"></div>`;
     }
 
     wire(host, nas);
@@ -1229,43 +1236,58 @@ pageRenderers.settings = (() => {
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); pwSave.disabled = false; }
     };
 
-    // ---- account: enable 2FA (begin -> show QR -> confirm) ----
-    const mfaBegin = $('[data-acc=mfabegin]', host);
-    if (mfaBegin) mfaBegin.onclick = async () => {
-      const msg = $('[data-acc=mfamsg]', host);
-      mfaBegin.disabled = true; setStatus(msg, true, 'Generating secret…');
-      try {
-        const r = await api('/auth/account/mfa/begin', { method: 'POST', body: {} });
-        const enroll = $('[data-acc=mfaenroll]', host);
-        enroll.innerHTML = `
+    // ---- account: 2FA toggle (on -> enroll + confirm; off -> code to disable) ----
+    const mfaToggle = $('[data-acc=mfatoggle]', host);
+    const mfazone = $('[data-acc=mfazone]', host);
+    if (mfaToggle) mfaToggle.onchange = async () => {
+      if (!mfazone) return;
+      if (mfaToggle.checked) {
+        // turning ON — begin enrollment
+        mfaToggle.disabled = true;
+        try {
+          const r = await api('/auth/account/mfa/begin', { method: 'POST', body: {} });
+          mfazone.innerHTML = `
+            <div class="acc-enroll">
+              <h4 class="sess-h">Enable two-factor authentication</h4>
+              <img src="${r.qrDataUrl}" alt="2FA QR code" class="acc-qr">
+              <p class="hw-hint">Scan with your authenticator app, or enter the secret manually: <code>${esc(r.secret)}</code></p>
+              <label>Enter the 6-digit code to confirm <input data-acc="enrollcode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
+              <div class="set-actions"><button class="set-btn set-btn-primary" data-acc="mfaconfirm">${SAVE_ICON}<span>Confirm &amp; activate</span></button><button class="set-btn" data-acc="mfaabort">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="mfamsg"></span></div>
+            </div>`;
+          const confirm = $('[data-acc=mfaconfirm]', host);
+          confirm.onclick = async () => {
+            const code = $('[data-acc=enrollcode]', host).value.trim();
+            const msg = $('[data-acc=mfamsg]', host);
+            confirm.disabled = true; setStatus(msg, true, 'Verifying…');
+            try { await api('/auth/account/mfa/confirm', { method: 'POST', body: { code } });
+              toast('success', '2FA', 'Two-factor authentication enabled'); load(host);
+            } catch (err) { setStatus(msg, false, `✗ ${err.message}`); confirm.disabled = false; }
+          };
+          // Cancel: the begin() call already flipped mfa_enabled on the server
+          // (unconfirmed); disabling without a code isn't allowed, so cancel
+          // just reloads — an unconfirmed secret doesn't gate login.
+          $('[data-acc=mfaabort]', host).onclick = () => load(host);
+        } catch (err) { toast('error', '2FA', err.message); load(host); }
+      } else {
+        // turning OFF — require a current code
+        mfazone.innerHTML = `
           <div class="acc-enroll">
-            <img src="${r.qrDataUrl}" alt="2FA QR code" class="acc-qr">
-            <p class="hw-hint">Scan with your authenticator app, or enter the secret manually: <code>${esc(r.secret)}</code></p>
-            <label>Enter the 6-digit code to confirm <input data-acc="enrollcode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
-            <div class="wz-row"><button class="action-btn" data-acc="mfaconfirm">Confirm &amp; activate</button></div>
+            <h4 class="sess-h">Disable two-factor authentication</h4>
+            <p class="hw-hint">Enter a current code from your authenticator app to confirm.</p>
+            <label>Authenticator code <input data-acc="discode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
+            <div class="set-actions"><button class="set-btn set-btn-danger" data-acc="mfadisable">${TRASH_ICON}<span>Disable 2FA</span></button><button class="set-btn" data-acc="mfaabort">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="mfamsg"></span></div>
           </div>`;
-        mfaBegin.style.display = 'none';
-        setStatus(msg, true, '');
-        const confirm = $('[data-acc=mfaconfirm]', host);
-        confirm.onclick = async () => {
-          const code = $('[data-acc=enrollcode]', host).value.trim();
-          confirm.disabled = true; setStatus(msg, true, 'Verifying…');
-          try { await api('/auth/account/mfa/confirm', { method: 'POST', body: { code } });
-            toast('success', '2FA', 'Two-factor authentication enabled'); load(host);
-          } catch (err) { setStatus(msg, false, `✗ ${err.message}`); confirm.disabled = false; }
+        const disable = $('[data-acc=mfadisable]', host);
+        disable.onclick = async () => {
+          const code = $('[data-acc=discode]', host).value.trim();
+          const msg = $('[data-acc=mfamsg]', host);
+          disable.disabled = true; setStatus(msg, true, 'Disabling…');
+          try { await api('/auth/account/mfa/disable', { method: 'POST', body: { code } });
+            toast('success', '2FA', 'Two-factor authentication disabled'); load(host);
+          } catch (err) { setStatus(msg, false, `✗ ${err.message}`); disable.disabled = false; }
         };
-      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); mfaBegin.disabled = false; }
-    };
-
-    // ---- account: disable 2FA ----
-    const mfaDisable = $('[data-acc=mfadisable]', host);
-    if (mfaDisable) mfaDisable.onclick = async () => {
-      const msg = $('[data-acc=mfamsg]', host);
-      const code = $('[data-acc=discode]', host).value.trim();
-      mfaDisable.disabled = true; setStatus(msg, true, 'Disabling…');
-      try { await api('/auth/account/mfa/disable', { method: 'POST', body: { code } });
-        toast('success', '2FA', 'Two-factor authentication disabled'); load(host);
-      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); mfaDisable.disabled = false; }
+        $('[data-acc=mfaabort]', host).onclick = () => load(host);
+      }
     };
   }
 
