@@ -5488,3 +5488,27 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 /* standalone page header above the card grid (not inside a card) */
 .page-lead { margin-bottom: 8px; }
 .page-lead .page-head { margin-bottom: 0; padding: 0; }
+
+/* Text buttons that reuse .action-btn (which is a 40x40 icon button) must not
+   be squished into a square. In form/action rows, render them as proper
+   auto-width text buttons. */
+.wz-row .action-btn,
+.set-btn-row .action-btn,
+.rconfirm-row .action-btn,
+.al-form .action-btn,
+.nas-form .action-btn {
+  width: auto; height: auto; min-height: 38px;
+  padding: 9px 18px; font-size: 13px; font-weight: 600;
+  font-family: inherit; gap: 8px; white-space: nowrap;
+}
+
+/* Inventory filter bar — clearer labels and an obvious clear control */
+.inv-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.inv-filter-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.inv-clear { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.35); color: #ef4444;
+  font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+.inv-clear:hover { background: rgba(239,68,68,0.16); }
+.inv-count-filtered { color: var(--accent-cyan); font-weight: 600; }
+/* search box with a leading magnifier */
+.inv-search { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' stroke-width='2' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 12px center; padding-left: 38px !important; }

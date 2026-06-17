@@ -616,7 +616,7 @@ pageRenderers.sessions = (() => {
           `<b>${esc(s.username)}</b> <span class="sess-tty">${esc(s.meta?.tty || '')}</span>`,
           esc(s.source), fmtDur(now - s.startedAt),
           s.meta?.sessionId
-            ? `<button class="action-btn sess-kick" data-kick="${esc(s.meta.sessionId)}" data-who="${esc(s.username)}@${esc(s.source)}"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg><span>Disconnect</span></button>`
+            ? `<button class="inv-act inv-act-danger sess-kick" data-kick="${esc(s.meta.sessionId)}" data-who="${esc(s.username)}@${esc(s.source)}" title="Disconnect ${esc(s.username)}@${esc(s.source)}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></button>`
             : (s.idleMs != null ? `idle ${fmtDur(s.idleMs)}` : '—'),
         ])).join('')
       : '<p class="sess-empty">No active SSH sessions</p>';
@@ -1495,8 +1495,9 @@ pageRenderers.inventory = (() => {
     host.querySelectorAll('[data-act=ctr-remove]').forEach((b) => b.onclick = () => ctrRemove(host, b.dataset.name));
 
     const from = total ? offset + 1 : 0, to = Math.min(offset + LIMIT, total);
+    const filtering = !!(q || fCategory || fPriority || fSection);
     $('[data-inv=pager]', host).innerHTML = `
-      <span class="inv-count">${from}–${to} of ${total}</span>
+      <span class="inv-count">${from}–${to} of ${total}${filtering ? ' <span class="inv-count-filtered">(filtered)</span>' : ''}</span>
       <button class="net-toggle" data-inv=prev ${offset === 0 ? 'disabled' : ''}>Prev</button>
       <button class="net-toggle" data-inv=next ${to >= total ? 'disabled' : ''}>Next</button>`;
     const prev = $('[data-inv=prev]', host), next = $('[data-inv=next]', host);
@@ -1512,10 +1513,11 @@ pageRenderers.inventory = (() => {
       Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
         .map(([k, n]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(k)} (${n})</option>`).join('');
     bar.innerHTML = `
-      <select class="inv-filter" data-filter="category">${opt(facetData.category, fCategory, 'All categories')}</select>
-      <select class="inv-filter" data-filter="priority">${opt(facetData.priority, fPriority, 'All priorities')}</select>
-      <select class="inv-filter" data-filter="section">${opt(facetData.section, fSection, 'All sections')}</select>
-      ${(fCategory || fPriority || fSection) ? '<button class="net-toggle" data-filter="clear">Clear</button>' : ''}`;
+      <span class="inv-filter-label">Filter:</span>
+      <select class="inv-filter" data-filter="category" aria-label="Category">${opt(facetData.category, fCategory, 'All categories')}</select>
+      <select class="inv-filter" data-filter="priority" aria-label="Priority">${opt(facetData.priority, fPriority, 'All priorities')}</select>
+      <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'All sections')}</select>
+      ${(fCategory || fPriority || fSection) ? '<button class="inv-clear" data-filter="clear">✕ Clear filters</button>' : ''}`;
     bar.querySelector('[data-filter=category]').onchange = (e) => { fCategory = e.target.value; offset = 0; loadRows(host); };
     bar.querySelector('[data-filter=priority]').onchange = (e) => { fPriority = e.target.value; offset = 0; loadRows(host); };
     bar.querySelector('[data-filter=section]').onchange = (e) => { fSection = e.target.value; offset = 0; loadRows(host); };
