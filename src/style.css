@@ -4978,7 +4978,7 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
    description gets the space instead of bloating short columns. */
 .inv-table { width: 100%; }
 .inv-table-fixed { table-layout: fixed; }
-.inv-table td.inv-desc { white-space: normal; word-break: break-word; }
+.inv-table td.inv-desc { white-space: normal; word-break: break-word; overflow: hidden; }
 /* non-description cells: keep on one line and ellipsize if a value is long */
 .inv-table-fixed td:not(.inv-desc):not(.inv-actions) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inv-table-fixed td.inv-actions { overflow: visible; }
@@ -5209,6 +5209,11 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 
 /* Updates table: keep version + size cells on one line so rows stay aligned */
 .up-table td.up-new, .up-table td.inv-dim { white-space: nowrap; }
+/* but the description cell (also tagged inv-dim) MUST wrap, not overflow into
+   the next column — win over the inv-dim nowrap rule above with more specificity */
+.up-table td.inv-dim.inv-desc, .up-table td.inv-desc {
+  white-space: normal; word-break: break-word; overflow: hidden;
+}
 
 /* Updates table: top-align every cell so rows with stacked tags (security +
    CVEs) keep all other columns aligned to the top instead of floating centered */
