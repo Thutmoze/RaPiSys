@@ -5659,3 +5659,17 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sched-email input { width: 100%; padding: 10px 14px; background: var(--bg-secondary); border: 2px solid var(--border-color);
   border-radius: var(--radius-sm); color: var(--text-primary); font-family: inherit; font-size: 13px; }
 .sched-email input:focus { outline: none; border-color: var(--accent-cyan); }
+
+/* Auto-check — typed time + AM/PM, last-run line, available-tab indicator */
+.sched-time { display: inline-flex; align-items: center; gap: 6px; }
+.sched-time input[type=number] { width: 56px; padding: 9px 8px; text-align: center;
+  background: var(--bg-secondary); border: 2px solid var(--border-color); border-radius: var(--radius-sm);
+  color: var(--text-primary); font-family: inherit; font-size: 13px; }
+.sched-time input:focus { outline: none; border-color: var(--accent-cyan); }
+.sched-colon { color: var(--text-muted); font-weight: 700; }
+.sched-lastrun { font-size: 13px; color: var(--text-secondary); margin: 4px 0 14px;
+  padding: 10px 14px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.sched-lastrun b { color: var(--text-primary); }
+.sched-lastrun b.sched-sec { color: #f59e0b; }
+.sched-lastrun-none { color: var(--text-muted); }
+.up-autocheck { color: var(--accent-cyan); border-left: 2px solid var(--border-color); padding-left: 12px; }

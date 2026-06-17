@@ -20,7 +20,7 @@
 export function createUpdateScheduler({ updates, mailer, loadSettings, saveSettings, withFileLock, events }) {
   const DEFAULTS = {
     enabled: false, frequency: 'daily', time: '03:00', dayOfWeek: 1, dayOfMonth: 1,
-    emailEnabled: true, emailTo: '', onlySecurity: true,
+    emailEnabled: true, emailTo: '', onlySecurity: true, lastRun: null,
   };
 
   async function getConfig() {
@@ -45,6 +45,7 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
         emailEnabled: patch.emailEnabled != null ? !!patch.emailEnabled : cur.emailEnabled,
         emailTo: patch.emailTo != null ? String(patch.emailTo).slice(0, 254) : cur.emailTo,
         onlySecurity: patch.onlySecurity != null ? !!patch.onlySecurity : cur.onlySecurity,
+        lastRun: cur.lastRun || null,   // preserve the last-run summary across edits
       };
       s.rapisys.updateSchedule = saved;
       await saveSettings(s);
@@ -100,7 +101,15 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
         events?.add?.('update.email.fail', 'warning', { error: err.message });
       }
     }
-    return { checked: list.length, security: security.length, emailed, checkedAt: out.checkedAt };
+    const result = { ts: Date.now(), checked: list.length, security: security.length, emailed, checkedAt: out.checkedAt };
+    // persist the last-run summary so the UI can show "Auto-checked Xh ago"
+    await withFileLock(async () => {
+      const s = await loadSettings();
+      s.rapisys = s.rapisys || {};
+      s.rapisys.updateSchedule = { ...(s.rapisys.updateSchedule || {}), lastRun: result };
+      await saveSettings(s);
+    });
+    return { skipped: null, ...result };
   }
 
   // The scheduler ticks hourly; this decides whether the current wall-clock

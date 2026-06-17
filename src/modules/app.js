@@ -2045,12 +2045,14 @@ pageRenderers.updates = (() => {
   const ACTION_BTN = (act, icon, label, cls = '', disabled = false) =>
     `<button class="up-btn ${cls} ${disabled ? 'up-btn-dim' : ''}" data-up="${act}"${disabled ? ' disabled' : ''}>${icon}<span>${label}</span></button>`;
 
-  let lastChecked = null;
+  let lastChecked = null, autoCheck = null;
   async function load(host) {
     let data;
     try { data = await api('/updates'); } catch { return; }
     updates = data.updates || [];
     lastChecked = data.checkedAt || null;
+    // pull the auto-check last-run summary so we can show "Auto-checked Xh ago"
+    autoCheck = await api('/updates/schedule').then((c) => c.lastRun || null).catch(() => null);
     firmware = await api('/updates/firmware').catch(() => null);
     if (data.available) render(host);   // we have a cached scan (even if 0 updates)
     else {
@@ -2103,7 +2105,8 @@ pageRenderers.updates = (() => {
       <button class="up-chip up-filter up-chip-sec" data-filter="security">Security (${sec})</button>
       <button class="up-chip up-filter up-chip-kern" data-filter="kernel">Kernel (${kern})</button>
       <button class="up-chip up-filter ${fw ? 'up-chip-fw' : ''}" data-filter="firmware">Firmware ${fw ? `(1)` : '(0)'}</button>
-      ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}`;
+      ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}
+      ${autoCheck ? `<span class="up-checked up-autocheck" title="Last automatic background check: ${autoCheck.checked} updates, ${autoCheck.security} security">Auto-checked ${fmtChecked(autoCheck.ts)}</span>` : ''}`;
     wireFilters(host);
 
     $('[data-up=actions]', host).innerHTML =
@@ -2498,8 +2501,22 @@ pageRenderers.updates = (() => {
     if (!target) return;
     let cfg;
     try { cfg = await api('/updates/schedule'); } catch { target.innerHTML = '<p class="sess-empty">Could not load schedule.</p>'; return; }
+    // present the stored 24h "HH:MM" as 12h hour/minute/AM-PM
+    const to12 = (hhmm) => {
+      const [H, M] = String(hhmm || '03:00').split(':').map(Number);
+      const ampm = H >= 12 ? 'PM' : 'AM';
+      const hour = ((H % 12) || 12);
+      return { hour, min: M || 0, ampm };
+    };
+    const t12 = to12(cfg.time);
+    // a small "last run" summary line
+    const lr = cfg.lastRun;
+    const lastRunLine = lr
+      ? `<p class="sched-lastrun">Last checked ${fmtChecked(lr.ts)} \u2014 <b>${lr.checked}</b> update${lr.checked === 1 ? '' : 's'}, <b class="${lr.security ? 'sched-sec' : ''}">${lr.security}</b> security${lr.emailed ? ' \u00b7 emailed' : ''}.</p>`
+      : '<p class="sched-lastrun sched-lastrun-none">No automatic check has run yet.</p>';
     target.innerHTML = `
       <p class="up-sec-hint">Periodically run a security check in the background and email you the list of new security updates that need patching. Uses the SMTP settings from Settings \u2192 Email (SMTP).</p>
+      ${lastRunLine}
       <div class="wz-form up-sched">
         <label class="wz-inline"><input type="checkbox" data-sch="enabled" ${cfg.enabled ? 'checked' : ''}> Enable automatic update checks</label>
 
@@ -2522,7 +2539,17 @@ pageRenderers.updates = (() => {
               ${Array.from({ length: 28 }, (_, i) => i + 1).map((d) => `<option value="${d}" ${cfg.dayOfMonth === d ? 'selected' : ''}>${d}</option>`).join('')}
             </select>
           </label>
-          <label>Time <input type="time" data-sch="time" value="${esc(cfg.time || '03:00')}"></label>
+          <label>Time
+            <span class="sched-time">
+              <input type="number" data-sch="hour" min="1" max="12" value="${esc(t12.hour)}" aria-label="Hour">
+              <span class="sched-colon">:</span>
+              <input type="number" data-sch="min" min="0" max="59" value="${esc(String(t12.min).padStart(2, '0'))}" aria-label="Minute">
+              <select data-sch="ampm">
+                <option value="AM" ${t12.ampm === 'AM' ? 'selected' : ''}>AM</option>
+                <option value="PM" ${t12.ampm === 'PM' ? 'selected' : ''}>PM</option>
+              </select>
+            </span>
+          </label>
         </div>
 
         <label class="sched-email">Email security updates to
@@ -2549,10 +2576,14 @@ pageRenderers.updates = (() => {
     freqSel.addEventListener('change', syncFreq); syncFreq();
     const msg = $('[data-sch=msg]', host);
     $('[data-sch=save]', host).onclick = async () => {
+      let h = Number($('[data-sch=hour]', host).value) % 12;
+      if ($('[data-sch=ampm]', host).value === 'PM') h += 12;
+      const mm = Math.max(0, Math.min(59, Number($('[data-sch=min]', host).value) || 0));
+      const time24 = `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
       const body = {
         enabled: $('[data-sch=enabled]', host).checked,
         frequency: $('[data-sch=freq]', host).value,
-        time: $('[data-sch=time]', host).value || '03:00',
+        time: time24,
         dayOfWeek: Number($('[data-sch=dow]', host).value),
         dayOfMonth: Number($('[data-sch=dom]', host).value),
         emailEnabled: $('[data-sch=email]', host).checked,
@@ -2569,7 +2600,7 @@ pageRenderers.updates = (() => {
       try {
         const r = await api('/updates/schedule/run', { method: 'POST', body: {} });
         if (r.skipped) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`;
-        else { msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`; }
+        else { msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`; setTimeout(() => loadSchedule(host), 1200); }
       } catch (err) { msg.textContent = `✗ ${err.message}`; }
       finally { b.disabled = false; }
     };
