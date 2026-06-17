@@ -1575,7 +1575,7 @@ pageRenderers.inventory = (() => {
 // ---------------------------------------------------------------------------
 
 pageRenderers.updates = (() => {
-  let updates = [], firmware = null, selected = new Set();
+  let updates = [], firmware = null, selected = new Set(), activeFilter = 'all';
   let streaming = false, expandedLog = null, logCache = {};
   const oldExpanded = new Set();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -1659,6 +1659,24 @@ pageRenderers.updates = (() => {
     }
   }
 
+  // Filter the visible rows by the active chip filter.
+  function filteredUpdates() {
+    if (activeFilter === 'security') return updates.filter((u) => u.security);
+    if (activeFilter === 'kernel') return updates.filter((u) => u.kernel);
+    if (activeFilter === 'firmware') return [];   // firmware isn't a package row
+    return updates;
+  }
+
+  function wireFilters(host) {
+    host.querySelectorAll('[data-filter]').forEach((btn) => {
+      btn.classList.toggle('up-filter-active', btn.dataset.filter === activeFilter);
+      btn.onclick = () => {
+        activeFilter = btn.dataset.filter;
+        render(host);   // re-render reflects active filter + table
+      };
+    });
+  }
+
   function fmtChecked(ts) {
     if (!ts) return '';
     const mins = Math.round((Date.now() - ts) / 60000);
@@ -1674,26 +1692,31 @@ pageRenderers.updates = (() => {
     const kern = updates.filter((u) => u.kernel).length;
     const fw = firmware?.updateAvailable;
 
+    // "checked" is fresh (normal colour) if < 24h old, else dimmed/stale.
+    const checkedFresh = lastChecked && (Date.now() - lastChecked) < 86400e3;
+
     $('[data-up=chips]', host).innerHTML = `
-      <span class="up-chip">${updates.length} update${updates.length !== 1 ? 's' : ''}</span>
-      ${sec ? `<span class="up-chip up-chip-sec">${sec} security</span>` : ''}
-      ${kern ? `<span class="up-chip up-chip-kern">${kern} kernel</span>` : ''}
-      <span class="up-chip ${fw ? 'up-chip-fw' : ''}">firmware ${fw ? 'update available' : 'ok'}</span>
-      ${lastChecked ? `<span class="up-checked">checked ${fmtChecked(lastChecked)}</span>` : ''}`;
+      <button class="up-chip up-filter" data-filter="all">All (${updates.length})</button>
+      <button class="up-chip up-filter up-chip-sec" data-filter="security">Security (${sec})</button>
+      <button class="up-chip up-filter up-chip-kern" data-filter="kernel">Kernel (${kern})</button>
+      <button class="up-chip up-filter ${fw ? 'up-chip-fw' : ''}" data-filter="firmware">Firmware ${fw ? `(1)` : '(0)'}</button>
+      ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}`;
+    wireFilters(host);
 
     $('[data-up=actions]', host).innerHTML =
       ACTION_BTN('refresh', ICN.refresh, 'Check for updates')
       + ACTION_BTN('security', ICN.shield, sec ? `Install security updates (${sec})` : 'No security updates', 'up-act-sec', !sec)
       + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel', selected.size === 0)
-      + ACTION_BTN('full', ICN.rocket, 'Full upgrade…', 'up-act-danger', !updates.length)
+      + ACTION_BTN('full', ICN.rocket, 'Full Upgrade', 'up-act-danger', !updates.length)
       + ACTION_BTN('firmware', ICN.chip, fw ? 'Update firmware' : 'Firmware up to date', 'up-act-fw', !fw);
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
       <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
+      <div class="up-table-scroll">
       <table class="inv-table up-table">
         <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>Changelog</th></tr></thead>
-        <tbody>${updates.map((u) => `
+        <tbody>${filteredUpdates().map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
             <td><b>${esc(u.package)}</b></td>
@@ -1706,7 +1729,7 @@ pageRenderers.updates = (() => {
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
           </tr>`).join('')}</tbody>
-      </table>` : '<p class="sess-empty">System is up to date. 🎉</p>';
+      </table></div>` : '<p class="sess-empty">System is up to date. 🎉</p>';
     wireTable(host);
   }
 
@@ -2039,13 +2062,31 @@ pageRenderers.updates = (() => {
   async function loadHistory(host) {
     let h;
     try { h = await api('/updates/history'); } catch { return; }
-    $('[data-up=history]', host).innerHTML = h.history.length ? `
-      <table class="inv-table"><thead><tr><th>When</th><th>Package</th><th>Result</th></tr></thead>
-      <tbody>${h.history.map((e) => `<tr>
+    const target = $('[data-up=history]', host);
+    if (!target) return;
+    target.innerHTML = h.history.length ? `
+      <div class="up-table-scroll">
+      <table class="inv-table"><thead><tr><th>When</th><th>Package</th><th>Description</th><th>Version</th><th>Tags</th><th>Result</th></tr></thead>
+      <tbody>${h.history.map((e) => {
+        const ver = e.fromV || e.toV
+          ? `<span class="inv-dim">${esc(e.fromV || '—')}</span> <span class="up-new">\u2192 ${esc(e.toV || '—')}</span>`
+          : '<span class="inv-dim">—</span>';
+        // Tags are derived from the recorded log (history rows don't store the
+        // original changelog tags): flag security/CVE/kernel mentions.
+        const log = (e.log || '').toLowerCase();
+        const tags = [];
+        if (/security|-security/.test(log)) tags.push('<span class="up-tag up-tag-sec">Security</span>');
+        if (/cve-\d/.test(log)) tags.push('<span class="up-tag up-tag-cve">CVE</span>');
+        if (/linux-image|kernel/.test(log) || /kernel/i.test(e.package)) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+        return `<tr>
         <td class="inv-dim">${new Date(e.ts).toLocaleString()}</td>
         <td><b>${esc(e.package)}</b></td>
+        <td class="inv-dim inv-desc">${esc(e.description || '—')}</td>
+        <td>${ver}</td>
+        <td class="up-tags-cell"><div class="up-tags-stack">${tags.join('') || '<span class="inv-dim">—</span>'}</div></td>
         <td><span class="inv-badge ${e.result === 'success' ? 'inv-ok' : 'inv-err'}">${esc(e.result)}</span></td>
-      </tr>`).join('')}</tbody></table>` : '<p class="sess-empty">No update history yet.</p>';
+      </tr>`;
+      }).join('')}</tbody></table></div>` : '<p class="sess-empty">No update history yet.</p>';
   }
 
   return {
@@ -2053,26 +2094,39 @@ pageRenderers.updates = (() => {
       host.innerHTML = `
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></div><span class="card-title">Software Updates</span></div>
-          <div class="card-body">
+          <div class="card-header up-page-head"><div class="card-icon up-page-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg></div><span class="card-title up-page-title">Software Updates</span></div>
+          <div class="up-tabs">
+            <button class="up-tab up-tab-active" data-tab="available">Available Updates</button>
+            <button class="up-tab" data-tab="history">Update History</button>
+          </div>
+          <div class="card-body up-tabpane" data-pane="available">
             <div class="up-chips" data-up="chips"></div>
             <div class="up-actions" data-up="actions"></div>
             <div class="up-progress" data-up="progress" style="display:none"></div>
             <div data-up="table"></div>
           </div>
-        </div>
-        <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z"/></svg></div><span class="card-title">Update History</span></div>
-          <div class="card-body" data-up="history"></div>
+          <div class="card-body up-tabpane" data-pane="history" style="display:none">
+            <div data-up="history"></div>
+          </div>
         </div>
       </div>`;
+      // Tab switching
+      host.querySelectorAll('[data-tab]').forEach((t) => {
+        t.onclick = () => {
+          host.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('up-tab-active', x === t));
+          host.querySelectorAll('[data-pane]').forEach((p) => {
+            p.style.display = p.dataset.pane === t.dataset.tab ? '' : 'none';
+          });
+          if (t.dataset.tab === 'history') loadHistory(host);
+        };
+      });
       // Draw the action toolbar immediately so "Check for updates" is always
       // available, even before (or without) a cached upgrade list.
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>checking…</span>';
       $('[data-up=actions]', host).innerHTML = ACTION_BTN('refresh', ICN.refresh, 'Check for updates');
       wireActions(host);
       $('[data-up=table]', host).innerHTML = '<div class="up-scanbar"><span></span></div><p class="sess-empty">Click \u201cCheck for updates\u201d to scan for available updates.</p>';
-      load(host); loadHistory(host);
+      load(host);
     },
     unmount() { streaming = false; },
   };

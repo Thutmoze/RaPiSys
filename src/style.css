@@ -4998,6 +4998,13 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .up-chip { font-size: 12px; padding: 6px 14px; border-radius: 999px; background: var(--bg-secondary);
   color: var(--text-secondary); border: 1px solid var(--border-color); }
+.up-filter { cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.up-filter:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.up-filter-active { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); font-weight: 600; }
+.up-filter-active.up-chip-sec { background: #f59e0b; color: #1a1204; border-color: #f59e0b; }
+.up-filter-active.up-chip-kern { background: #a855f7; color: #120420; border-color: #a855f7; }
+.up-checked-fresh { color: var(--text-secondary); }
+.up-checked-stale { color: var(--text-muted); opacity: 0.6; }
 .up-chip-sec { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
 .up-chip-kern { color: #a855f7; border-color: rgba(168,85,247,0.4); }
 .up-chip-fw { color: var(--accent-cyan); border-color: rgba(0,212,255,0.4); }
@@ -5007,7 +5014,8 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-act-fw { color: var(--accent-cyan) !important; }
 .up-table th input, .up-cb { cursor: pointer; }
 .up-new { color: #10b981; font-weight: 600; }
-.up-tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; margin-right: 4px; }
+.up-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px; margin-right: 4px;
+  text-transform: capitalize; font-weight: 700; }
 .up-tag-sec { color: #f59e0b; border: 1px solid rgba(245,158,11,0.4); }
 .up-tag-kern { color: #a855f7; border: 1px solid rgba(168,85,247,0.4); }
 .up-link { background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 12px; font-family: inherit; padding: 0; }
@@ -5020,8 +5028,8 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   border-top-color: var(--accent-cyan); border-radius: 50%; animation: inv-spin 0.6s linear infinite; }
 
 /* Updates: glyph buttons + animated scanning state */
-.up-btn { display: inline-flex; align-items: center; gap: 7px; }
-.up-btn svg { flex-shrink: 0; }
+.up-btn { display: inline-flex; align-items: center; gap: 8px; }
+.up-btn svg { flex-shrink: 0; width: 18px; height: 18px; }
 .up-btn-busy { cursor: progress; opacity: 0.8; }
 .up-checking { display: inline-flex; align-items: center; gap: 7px; animation: up-pulse 1.4s ease-in-out infinite; }
 @keyframes up-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
@@ -5432,3 +5440,22 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   }
 }
 
+
+/* Updates page title — larger, with a matching larger glyph */
+.up-page-title { font-size: 22px !important; font-weight: 700 !important; color: var(--text-primary) !important; }
+.up-page-icon { width: 48px !important; height: 48px !important; }
+.up-page-icon svg { width: 28px; height: 28px; }
+
+/* Updates table: allow horizontal scroll on narrow screens so all columns
+   (description, version, tags, urgency, changelog) stay reachable */
+.up-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.up-table-scroll .up-table { min-width: 760px; }
+.up-table-scroll::-webkit-scrollbar { height: 8px; }
+.up-table-scroll::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+
+/* Updates page tabs (Available / History) */
+.up-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); margin-bottom: 18px; }
+.up-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted);
+  font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 16px; cursor: pointer; margin-bottom: -1px; }
+.up-tab:hover { color: var(--text-secondary); }
+.up-tab-active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
