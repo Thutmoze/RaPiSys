@@ -5512,3 +5512,24 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 /* search box with a leading magnifier */
 .inv-search { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' stroke-width='2' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: 12px center; padding-left: 38px !important; }
+
+/* Inventory filter — grouped facets: chips for category/priority, select for section */
+.inv-fgroup { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.inv-fgroup .inv-filter-label { min-width: 64px; }
+.inv-fchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.inv-fchip { font-size: 12px; padding: 5px 11px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }
+.inv-fchip:hover { border-color: var(--text-muted); color: var(--text-primary); }
+.inv-fchip.active { background: rgba(0,212,255,0.12); border-color: var(--accent-cyan); color: var(--accent-cyan); font-weight: 600; }
+.inv-fchip-n { opacity: 0.6; font-size: 11px; margin-left: 2px; }
+.inv-fchip.active .inv-fchip-n { opacity: 0.85; }
+
+/* Settings — services health grid + SMTP warning */
+.set-health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.set-health-item { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.set-health-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.set-health-item b { font-size: 15px; }
+.set-health-item small { color: var(--text-muted); font-size: 11px; }
+.set-warn { color: #f59e0b; font-size: 12px; background: rgba(245,158,11,0.08);
+  border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-sm); padding: 8px 12px; margin-bottom: 12px; }

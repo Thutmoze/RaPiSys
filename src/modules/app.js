@@ -733,8 +733,10 @@ pageRenderers.alerts = (() => {
         <span class="al-sev ${SEV_CLASS[r.severity]}">${esc(r.severity)}</span>
         <span class="al-name"><b>${esc(r.name)}</b><br><small>${esc(r.metric)} ${esc(r.op)} ${r.threshold} for ${r.sustain_s}s · ${(r.channels || []).join('+')}</small></span>
         <span class="al-actions">
-          <button class="action-btn al-btn" data-toggle="${r.id}" data-enabled="${r.enabled}">${r.enabled ? 'Disable' : 'Enable'}</button>
-          <button class="action-btn al-btn al-del" data-del="${r.id}">Delete</button>
+          <button class="inv-act al-btn" data-toggle="${r.id}" data-enabled="${r.enabled}" title="${r.enabled ? 'Disable rule' : 'Enable rule'}">${r.enabled
+            ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l14 8-14 8V4z"/></svg>'}</button>
+          <button class="inv-act inv-act-danger al-del" data-del="${r.id}" title="Delete rule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
         </span>
       </div>`).join('') || '<p class="sess-empty">No rules — add one below.</p>';
 
@@ -893,12 +895,64 @@ pageRenderers.settings = (() => {
         <div class="wz-row"><button class="action-btn" data-set="relocate">Relocate database</button><span data-set="stmsg"></span></div>
       </div>`;
 
-    // ---- meta card ----
-    $('[data-set=meta]', host).innerHTML = `
-      <div class="set-kv"><span>Operating mode</span><b>${st.mode === 'full' ? 'Full control' : 'Monitor only'}</b></div>
-      <div class="set-kv"><span>Retention</span><b>${st.retentionDays} days local · ${st.archiveDays} days archived</b></div>
-      <div class="set-kv"><span>Email (SMTP)</span><b class="${st.smtpConfigured ? 'set-ok' : ''}">${st.smtpConfigured ? '● configured' : 'not configured'}</b></div>
-      <div class="set-kv"><span>Host agent</span><b class="${st.agent ? 'set-ok' : 'set-err'}">${st.agent ? '● connected' : '○ unavailable'}</b></div>`;
+    // ---- services health pane (main tab) ----
+    $('[data-set=health]', host).innerHTML = `
+      <div class="set-health-grid">
+        <div class="set-health-item">
+          <span class="set-health-label">Host agent</span>
+          <b class="${st.agent ? 'set-ok' : 'set-err'}">${st.agent ? '● connected' : '○ unavailable'}</b>
+          <small>Privileged host operations (fan, NAS, updates)</small>
+        </div>
+        <div class="set-health-item">
+          <span class="set-health-label">Database</span>
+          <b class="${st.storage?.degraded ? 'set-err' : 'set-ok'}">${st.storage?.degraded ? '○ degraded (local fallback)' : '● healthy'}</b>
+          <small>${esc(st.storage?.fsType || '—')} · ${esc(st.storage?.journalMode || '—')} journal</small>
+        </div>
+        <div class="set-health-item">
+          <span class="set-health-label">Encryption</span>
+          <b class="${st.encryption ? 'set-ok' : 'set-err'}">${st.encryption ? '● key present' : '○ no SECRET_KEY'}</b>
+          <small>Secrets at rest (SMTP/NAS passwords)</small>
+        </div>
+        <div class="set-health-item">
+          <span class="set-health-label">Email (SMTP)</span>
+          <b class="${st.smtpConfigured ? 'set-ok' : ''}">${st.smtpConfigured ? '● configured' : '○ not configured'}</b>
+          <small>Alert notifications</small>
+        </div>
+        <div class="set-health-item">
+          <span class="set-health-label">NAS mount</span>
+          <b class="${nasStatus?.mounted ? 'set-ok' : ''}">${nasStatus?.mounted ? '● mounted' : '○ none'}</b>
+          <small>${esc(nas?.label || 'no share configured')}</small>
+        </div>
+        <div class="set-health-item">
+          <span class="set-health-label">Operating mode</span>
+          <b>${st.mode === 'full' ? 'Full control' : 'Monitor only'}</b>
+          <small>Retention ${st.retentionDays}d local · ${st.archiveDays}d archived</small>
+        </div>
+      </div>`;
+
+    // ---- SMTP config pane ----
+    const smtp = st.smtp || {};
+    $('[data-set=smtp]', host).innerHTML = `
+      <p class="hw-hint">Configure authenticated SMTP for alert email notifications. Recommended free providers: Brevo (300/day), SMTP2GO (1,000/month). Gmail works with an App Password (requires 2FA).</p>
+      ${!st.encryption ? '<p class="set-warn">⚠ SECRET_KEY is not set — passwords cannot be stored securely. Run deploy.sh or set SECRET_KEY in .env first.</p>' : ''}
+      <div class="wz-form">
+        <div class="al-form-row">
+          <label>SMTP host <input data-sm="host" value="${esc(smtp.host || '')}" placeholder="smtp-relay.brevo.com"></label>
+          <label>Port <input data-sm="port" type="number" value="${esc(smtp.port || 587)}" placeholder="587"></label>
+        </div>
+        <label class="wz-inline"><input type="checkbox" data-sm="secure" ${smtp.secure ? 'checked' : ''}> Use TLS/SSL (port 465). Leave off for STARTTLS (587).</label>
+        <label>Username <input data-sm="user" value="${esc(smtp.user || '')}" placeholder="your-login@example.com" autocomplete="off"></label>
+        <label>Password / API key <input data-sm="pass" type="password" placeholder="${smtp.host ? '•••••• (unchanged)' : 'enter password'}" autocomplete="new-password"></label>
+        <div class="al-form-row">
+          <label>From address <input data-sm="from" value="${esc(smtp.from || '')}" placeholder="rapisys@example.com"></label>
+          <label>Send alerts to <input data-sm="to" value="${esc(smtp.to || '')}" placeholder="you@example.com"></label>
+        </div>
+        <div class="wz-row">
+          <button class="action-btn" data-sm="save">Save SMTP settings</button>
+          <button class="action-btn" data-sm="test" ${st.smtpConfigured ? '' : 'disabled'}>Send test email</button>
+          <span data-sm="msg"></span>
+        </div>
+      </div>`;
 
     wire(host, nas);
   }
@@ -952,6 +1006,36 @@ pageRenderers.settings = (() => {
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
       finally { relocate.disabled = false; }
     };
+
+    // SMTP save / test
+    const smSave = $('[data-sm=save]', host);
+    if (smSave) smSave.onclick = async () => {
+      const msg = $('[data-sm=msg]', host);
+      const body = {
+        host: $('[data-sm=host]', host).value.trim(),
+        port: Number($('[data-sm=port]', host).value) || 587,
+        secure: $('[data-sm=secure]', host).checked,
+        user: $('[data-sm=user]', host).value.trim(),
+        from: $('[data-sm=from]', host).value.trim(),
+        to: $('[data-sm=to]', host).value.trim(),
+      };
+      const pass = $('[data-sm=pass]', host).value;
+      if (pass) body.password = pass;
+      if (!body.host) { setStatus(msg, false, '✗ SMTP host is required'); return; }
+      smSave.disabled = true; setStatus(msg, true, 'Saving…');
+      try { await api('/setup/smtp', { method: 'POST', body }); setStatus(msg, true, '✓ saved'); load(host); }
+      catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+      finally { smSave.disabled = false; }
+    };
+    const smTest = $('[data-sm=test]', host);
+    if (smTest) smTest.onclick = async () => {
+      const msg = $('[data-sm=msg]', host);
+      const to = $('[data-sm=to]', host).value.trim();
+      smTest.disabled = true; setStatus(msg, true, 'Sending test email…');
+      try { await api('/setup/smtp/test', { method: 'POST', body: { to } }); setStatus(msg, true, '✓ test email sent'); }
+      catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+      finally { smTest.disabled = false; }
+    };
   }
 
   return {
@@ -960,18 +1044,22 @@ pageRenderers.settings = (() => {
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7" y2="7"/><line x1="7" y1="17" x2="7" y2="17"/></svg></div><span class="card-title">Network Storage (NAS)</span></div>
-          <div class="card-body"><div data-set="nas"></div><div data-set="nasform"></div></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></div><span class="card-title">Database Storage</span></div>
-          <div class="card-body" data-set="storage"></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6M4.2 4.2l4.3 4.3M15.5 15.5l4.3 4.3M1 12h6M17 12h6"/></svg></div><span class="card-title">Configuration</span></div>
-          <div class="card-body" data-set="meta"></div>
+          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Email (SMTP)' }])}
+          <div class="card-body" data-pane="health">
+            <div data-set="health"></div>
+          </div>
+          <div class="card-body" data-pane="storage" style="display:none">
+            <h4 class="sess-h">Network Storage (NAS)</h4>
+            <div data-set="nas"></div><div data-set="nasform"></div>
+            <h4 class="sess-h" style="margin-top:24px">Database Storage</h4>
+            <div data-set="storage"></div>
+          </div>
+          <div class="card-body" data-pane="email" style="display:none">
+            <div data-set="smtp"></div>
+          </div>
         </div>
       </div>`;
+      wirePageTabs(host);
       load(host);
     },
     unmount() {},
@@ -1509,17 +1597,43 @@ pageRenderers.inventory = (() => {
     const bar = $('[data-inv=filters]', host);
     if (!bar) return;
     if (kind !== 'package' || !facetData) { bar.innerHTML = ''; return; }
+
+    // small facets (category, priority) render as inline chip toggles; the big
+    // one (section, 20+ values) stays a searchable dropdown.
+    const chipRow = (obj, active, allLabel) => {
+      const entries = Object.entries(obj || {}).sort((a, b) => b[1] - a[1]);
+      return `<button class="inv-fchip ${!active ? 'active' : ''}" data-val="">${allLabel}</button>` +
+        entries.map(([k, n]) => `<button class="inv-fchip ${active === k ? 'active' : ''}" data-val="${esc(k)}">${esc(k)} <span class="inv-fchip-n">${n}</span></button>`).join('');
+    };
     const opt = (obj, sel, allLabel) => `<option value="">${allLabel}</option>` +
       Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
         .map(([k, n]) => `<option value="${esc(k)}" ${sel === k ? 'selected' : ''}>${esc(k)} (${n})</option>`).join('');
+
+    const anyActive = fCategory || fPriority || fSection;
     bar.innerHTML = `
-      <span class="inv-filter-label">Filter:</span>
-      <select class="inv-filter" data-filter="category" aria-label="Category">${opt(facetData.category, fCategory, 'All categories')}</select>
-      <select class="inv-filter" data-filter="priority" aria-label="Priority">${opt(facetData.priority, fPriority, 'All priorities')}</select>
-      <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'All sections')}</select>
-      ${(fCategory || fPriority || fSection) ? '<button class="inv-clear" data-filter="clear">✕ Clear filters</button>' : ''}`;
-    bar.querySelector('[data-filter=category]').onchange = (e) => { fCategory = e.target.value; offset = 0; loadRows(host); };
-    bar.querySelector('[data-filter=priority]').onchange = (e) => { fPriority = e.target.value; offset = 0; loadRows(host); };
+      <div class="inv-fgroup">
+        <span class="inv-filter-label">Category</span>
+        <div class="inv-fchips" data-facet="category">${chipRow(facetData.category, fCategory, 'All')}</div>
+      </div>
+      <div class="inv-fgroup">
+        <span class="inv-filter-label">Priority</span>
+        <div class="inv-fchips" data-facet="priority">${chipRow(facetData.priority, fPriority, 'All')}</div>
+      </div>
+      <div class="inv-fgroup">
+        <span class="inv-filter-label">Section</span>
+        <select class="inv-filter" data-filter="section" aria-label="Section">${opt(facetData.section, fSection, 'All sections')}</select>
+        ${anyActive ? '<button class="inv-clear" data-filter="clear">✕ Clear all filters</button>' : ''}
+      </div>`;
+
+    // chip handlers (category + priority)
+    bar.querySelectorAll('[data-facet] .inv-fchip').forEach((c) => {
+      c.onclick = () => {
+        const facet = c.closest('[data-facet]').dataset.facet;
+        const val = c.dataset.val;
+        if (facet === 'category') fCategory = val; else fPriority = val;
+        offset = 0; renderFilters(host); loadRows(host);
+      };
+    });
     bar.querySelector('[data-filter=section]').onchange = (e) => { fSection = e.target.value; offset = 0; loadRows(host); };
     const clr = bar.querySelector('[data-filter=clear]');
     if (clr) clr.onclick = () => { fCategory = fPriority = fSection = ''; offset = 0; renderFilters(host); loadRows(host); };
