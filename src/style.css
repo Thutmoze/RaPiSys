@@ -5468,3 +5468,23 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 16px; cursor: pointer; margin-bottom: -1px; }
 .up-tab:hover { color: var(--text-secondary); }
 .up-tab-active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
+
+/* ===========================================================================
+   Shared page chrome: large section title matching the nav glyph + tab bar.
+   Used by every page header (pageHeader) and pages with sub-views (pageTabs).
+   =========================================================================== */
+.page-head { align-items: center; gap: 14px; margin-bottom: 20px; }
+.page-title { font-size: 22px; font-weight: 700; color: var(--text-primary); }
+.page-icon { width: 48px; height: 48px; background: rgba(0,212,255,0.1); color: var(--accent-cyan);
+  border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.page-icon svg { width: 28px; height: 28px; }
+
+.page-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-color); margin-bottom: 18px; }
+.page-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted);
+  font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 16px; cursor: pointer; margin-bottom: -1px; }
+.page-tab:hover { color: var(--text-secondary); }
+.page-tab-active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
+
+/* standalone page header above the card grid (not inside a card) */
+.page-lead { margin-bottom: 8px; }
+.page-lead .page-head { margin-bottom: 0; padding: 0; }

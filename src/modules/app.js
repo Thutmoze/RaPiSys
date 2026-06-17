@@ -310,6 +310,35 @@ const ICONS = {
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
 };
 
+// Shared page chrome: a large section title that reuses the page's nav-rail
+// glyph (ICONS[id]) so every page header matches its menu item, plus an
+// optional tab bar for pages with a primary + secondary view.
+function pageHeader(id, title) {
+  return `<div class="card-header page-head">
+    <div class="card-icon page-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">${ICONS[id] || ''}</svg>
+    </div>
+    <span class="card-title page-title">${title}</span>
+  </div>`;
+}
+// tabs: [{ id, label }]; first is active. Panes are matched by data-pane=id.
+function pageTabs(tabs) {
+  return `<div class="page-tabs">${tabs.map((t, i) =>
+    `<button class="page-tab${i === 0 ? ' page-tab-active' : ''}" data-tab="${t.id}">${t.label}</button>`).join('')}</div>`;
+}
+// Wire a tab bar within `host`: shows the matching [data-pane], hides others,
+// and calls onShow(tabId) when a tab is opened (for lazy loading).
+function wirePageTabs(host, onShow) {
+  host.querySelectorAll('[data-tab]').forEach((t) => {
+    t.onclick = () => {
+      host.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('page-tab-active', x === t));
+      host.querySelectorAll('[data-pane]').forEach((p) => { p.style.display = p.dataset.pane === t.dataset.tab ? '' : 'none'; });
+      if (onShow) onShow(t.dataset.tab);
+    };
+  });
+}
+
 const PAGES = [
   { id: 'overview', label: 'Overview' },
   { id: 'hardware', label: 'Hardware' },
@@ -471,6 +500,7 @@ pageRenderers.hardware = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('hardware', 'Hardware')}</div>
       <div class="rapisys-grid">
         <div class="card">
           <div class="card-header">
@@ -649,28 +679,24 @@ pageRenderers.sessions = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('sessions', 'Sessions')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header">
-            <div class="card-icon cpu-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
-            <span class="card-title">Active Sessions</span>
-            <span class="sess-counts" data-sess="counts"></span>
-          </div>
-          <div class="card-body">
+          ${pageTabs([{ id: 'active', label: 'Active Sessions' }, { id: 'history', label: 'Login History' }])}
+          <div class="card-body" data-pane="active">
+            <div class="sess-counts" data-sess="counts" style="margin-bottom:14px"></div>
             <h4 class="sess-h">SSH</h4><div data-sess="ssh"></div>
             <h4 class="sess-h">Local console</h4><div data-sess="console"></div>
             <h4 class="sess-h">VNC</h4><div data-sess="vnc"></div>
             <h4 class="sess-h">Tailscale</h4><div data-sess="ts"></div>
           </div>
-        </div>
-        <div class="card sess-span">
-          <div class="card-header">
-            <div class="card-icon uptime-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
-            <span class="card-title">Login History (7 days)</span>
+          <div class="card-body" data-pane="history" style="display:none">
+            <h4 class="sess-h">Login History (7 days)</h4>
+            <div data-sess="hist"></div>
           </div>
-          <div class="card-body" data-sess="hist"></div>
         </div>
       </div>`;
+      wirePageTabs(host);
       refresh(host); refreshHistory(host);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
     },
@@ -749,13 +775,11 @@ pageRenderers.alerts = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('alerts', 'Alerts')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header">
-            <div class="card-icon temp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>
-            <span class="card-title">Alerts</span>
-          </div>
-          <div class="card-body">
+          ${pageTabs([{ id: 'rules', label: 'Alerts & Rules' }, { id: 'history', label: 'Incident History' }])}
+          <div class="card-body" data-pane="rules">
             <div data-al="active"></div>
             <h4 class="sess-h">Rules</h4>
             <div data-al="rules"></div>
@@ -777,15 +801,12 @@ pageRenderers.alerts = (() => {
             </div>
             <p class="hw-hint">Email notifications use the SMTP settings from Setup (Settings → re-run wizard sections coming soon). Rules are evaluated every 30 s.</p>
           </div>
-        </div>
-        <div class="card sess-span">
-          <div class="card-header">
-            <div class="card-icon uptime-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg></div>
-            <span class="card-title">Incident History</span>
+          <div class="card-body" data-pane="history" style="display:none">
+            <div class="card-body" data-al="hist"></div>
           </div>
-          <div class="card-body" data-al="hist"></div>
         </div>
       </div>`;
+      wirePageTabs(host);
 
       $('[data-new=add]', host).onclick = async () => {
         const stat = $('[data-new=status]', host);
@@ -936,6 +957,7 @@ pageRenderers.settings = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
           <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><line x1="7" y1="7" x2="7" y2="7"/><line x1="7" y1="17" x2="7" y2="17"/></svg></div><span class="card-title">Network Storage (NAS)</span></div>
@@ -1208,6 +1230,7 @@ pageRenderers.network = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('network', 'Network')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
           <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg></div><span class="card-title">Live Throughput</span>
@@ -1349,11 +1372,10 @@ pageRenderers.reports = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('reports', 'Reports')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
           <div class="card-header">
-            <div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></div>
-            <span class="card-title">Reports</span>
             <div class="rep-tabs">
               <button class="rep-tab active" data-rep-tab="daily">Daily</button>
               <button class="rep-tab" data-rep-tab="weekly">Weekly</button>
@@ -1538,6 +1560,7 @@ pageRenderers.inventory = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('inventory', 'Inventory')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
           <div class="card-header">
@@ -2094,32 +2117,20 @@ pageRenderers.updates = (() => {
       host.innerHTML = `
       <div class="rapisys-grid">
         <div class="card sess-span">
-          <div class="card-header up-page-head"><div class="card-icon up-page-icon"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div><span class="card-title up-page-title">Software Updates</span></div>
-          <div class="up-tabs">
-            <button class="up-tab up-tab-active" data-tab="available">Available Updates</button>
-            <button class="up-tab" data-tab="history">Update History</button>
-          </div>
-          <div class="card-body up-tabpane" data-pane="available">
+          ${pageHeader('updates', 'Software Updates')}
+          ${pageTabs([{ id: 'available', label: 'Available Updates' }, { id: 'history', label: 'Update History' }])}
+          <div class="card-body" data-pane="available">
             <div class="up-chips" data-up="chips"></div>
             <div class="up-actions" data-up="actions"></div>
             <div class="up-progress" data-up="progress" style="display:none"></div>
             <div data-up="table"></div>
           </div>
-          <div class="card-body up-tabpane" data-pane="history" style="display:none">
+          <div class="card-body" data-pane="history" style="display:none">
             <div data-up="history"></div>
           </div>
         </div>
       </div>`;
-      // Tab switching
-      host.querySelectorAll('[data-tab]').forEach((t) => {
-        t.onclick = () => {
-          host.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('up-tab-active', x === t));
-          host.querySelectorAll('[data-pane]').forEach((p) => {
-            p.style.display = p.dataset.pane === t.dataset.tab ? '' : 'none';
-          });
-          if (t.dataset.tab === 'history') loadHistory(host);
-        };
-      });
+      wirePageTabs(host, (tab) => { if (tab === 'history') loadHistory(host); });
       // Draw the action toolbar immediately so "Check for updates" is always
       // available, even before (or without) a cached upgrade list.
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>checking…</span>';
