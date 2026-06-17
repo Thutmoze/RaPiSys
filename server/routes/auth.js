@@ -82,5 +82,39 @@ export function authRouter({ auth, loadSettings }) {
     });
   });
 
+  // -- account: change password (requires current password) -----------------
+  r.post('/account/password', auth.requireControl, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body || {};
+      auth.changePassword(currentPassword, newPassword);
+      res.json({ ok: true });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  });
+
+  // -- account: begin enabling 2FA — returns a fresh secret + QR -------------
+  r.post('/account/mfa/begin', auth.requireControl, async (req, res) => {
+    try {
+      const r2 = auth.beginEnableMfa();
+      const qrDataUrl = await QRCode.toDataURL(r2.otpauth, { margin: 1, width: 220 });
+      res.json({ ok: true, secret: r2.secret, otpauth: r2.otpauth, qrDataUrl });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  });
+
+  // -- account: confirm 2FA with a valid code (activates it) ----------------
+  r.post('/account/mfa/confirm', auth.requireControl, async (req, res) => {
+    try {
+      if (!auth.confirmMfa(req.body?.code)) return res.status(400).json({ error: 'code did not match' });
+      res.json({ ok: true, mfaEnabled: true });
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  });
+
+  // -- account: disable 2FA (requires a valid code) -------------------------
+  r.post('/account/mfa/disable', auth.requireControl, async (req, res) => {
+    try {
+      const out = auth.disableMfa(req.body?.code);
+      res.json(out);
+    } catch (err) { res.status(400).json({ error: err.message }); }
+  });
+
   return r;
 }

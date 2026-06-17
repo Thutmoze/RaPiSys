@@ -721,6 +721,25 @@ pageRenderers.alerts = (() => {
       ]);
     } catch { return; }
 
+    // active summary widget (count by severity)
+    const summary = $('[data-al=summary]', host);
+    if (summary) {
+      const crit = active.active.filter((a) => a.severity === 'critical').length;
+      const warn = active.active.filter((a) => a.severity === 'warning').length;
+      const info = active.active.filter((a) => a.severity === 'info').length;
+      summary.innerHTML = `
+        <div class="al-sum-card ${active.active.length ? (crit ? 'al-sum-crit' : 'al-sum-warn') : 'al-sum-ok'}">
+          <div class="al-sum-big">${active.active.length}</div>
+          <div class="al-sum-label">${active.active.length ? 'active alert' + (active.active.length === 1 ? '' : 's') : 'all clear'}</div>
+        </div>
+        <div class="al-sum-breakdown">
+          <div class="al-sum-stat"><span class="al-sum-dot al-dot-crit"></span>Critical <b>${crit}</b></div>
+          <div class="al-sum-stat"><span class="al-sum-dot al-dot-warn"></span>Warning <b>${warn}</b></div>
+          <div class="al-sum-stat"><span class="al-sum-dot al-dot-info"></span>Info <b>${info}</b></div>
+          <div class="al-sum-stat"><span class="al-sum-dot"></span>Rules <b>${rules.rules.length}</b></div>
+        </div>`;
+    }
+
     // active banner
     const banner = $('[data-al=active]', host);
     banner.innerHTML = active.active.length
@@ -733,10 +752,10 @@ pageRenderers.alerts = (() => {
         <span class="al-sev ${SEV_CLASS[r.severity]}">${esc(r.severity)}</span>
         <span class="al-name"><b>${esc(r.name)}</b><br><small>${esc(r.metric)} ${esc(r.op)} ${r.threshold} for ${r.sustain_s}s · ${(r.channels || []).join('+')}</small></span>
         <span class="al-actions">
-          <button class="inv-act al-btn" data-toggle="${r.id}" data-enabled="${r.enabled}" title="${r.enabled ? 'Disable rule' : 'Enable rule'}">${r.enabled
-            ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
-            : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4l14 8-14 8V4z"/></svg>'}</button>
-          <button class="inv-act inv-act-danger al-del" data-del="${r.id}" title="Delete rule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          <button class="inv-act" data-toggle="${r.id}" data-enabled="${r.enabled}" title="${r.enabled ? 'Disable rule' : 'Enable rule'}">${r.enabled
+            ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14" opacity="0.0"/><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-5"/></svg>'}</button>
+          <button class="inv-act inv-act-danger" data-del="${r.id}" title="Delete rule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
         </span>
       </div>`).join('') || '<p class="sess-empty">No rules — add one below.</p>';
 
@@ -780,9 +799,12 @@ pageRenderers.alerts = (() => {
       <div class="page-lead">${pageHeader('alerts', 'Alerts')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'rules', label: 'Alerts & Rules' }, { id: 'history', label: 'Incident History' }])}
-          <div class="card-body" data-pane="rules">
+          ${pageTabs([{ id: 'active', label: 'Active Alerts' }, { id: 'rules', label: 'Rules' }, { id: 'history', label: 'Incident History' }])}
+          <div class="card-body" data-pane="active">
+            <div class="al-summary" data-al="summary"></div>
             <div data-al="active"></div>
+          </div>
+          <div class="card-body" data-pane="rules" style="display:none">
             <h4 class="sess-h">Rules</h4>
             <div data-al="rules"></div>
             <h4 class="sess-h">Add rule</h4>
@@ -801,7 +823,7 @@ pageRenderers.alerts = (() => {
               <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
               <div class="wz-row"><button class="action-btn" data-new="add">Add rule</button><span data-new="status"></span></div>
             </div>
-            <p class="hw-hint">Email notifications use the SMTP settings from Setup (Settings → re-run wizard sections coming soon). Rules are evaluated every 30 s.</p>
+            <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s.</p>
           </div>
           <div class="card-body" data-pane="history" style="display:none">
             <div class="card-body" data-al="hist"></div>
@@ -841,6 +863,9 @@ pageRenderers.alerts = (() => {
 
 pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // edit-mode flags: when a section is already configured we show a read-only
+  // summary with an Edit button, and only reveal the form when editing.
+  let editSmtp = false, editDb = false;
 
   async function load(host) {
     let st;
@@ -886,42 +911,53 @@ pageRenderers.settings = (() => {
 
     // ---- storage card ----
     const s = st.storage || {};
+    const dbDirVal = nas?.mountpoint || (s.path && s.path.startsWith('/mnt/rapisys/') ? s.path.replace(/\/rapisys\.db$/, '') : '');
     $('[data-set=storage]', host).innerHTML = `
       <div class="set-kv"><span>Database</span><b>${esc(s.path || s.dbPath || '—')}</b></div>
       <div class="set-kv"><span>Filesystem</span><b>${esc(s.fsType || '—')} · ${esc(s.journalMode || '—')} journal</b></div>
-      <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ degraded (local fallback)' : '● healthy'}</b></div>
-      <div class="wz-form">
-        <label>Database directory <input data-set="dbdir" value="${esc(nas?.mountpoint || (s.path && s.path.startsWith('/mnt/rapisys/') ? s.path.replace(/\/rapisys\.db$/, '') : ''))}" placeholder="/mnt/rapisys/mybook"></label>
-        <div class="wz-row"><button class="action-btn" data-set="relocate">Relocate database</button><span data-set="stmsg"></span></div>
-      </div>`;
+      <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ Degraded (local fallback)' : '● Healthy'}</b></div>
+      ${!editDb ? `
+        <div class="wz-row set-btn-row"><button class="action-btn" data-set="dbedit">Edit location</button></div>` : `
+        <div class="wz-form">
+          <label>Database directory <input data-set="dbdir" value="${esc(dbDirVal)}" placeholder="/mnt/rapisys/mybook"></label>
+          <div class="wz-row"><button class="action-btn" data-set="relocate">Relocate database</button><button class="action-btn" data-set="dbcancel">Cancel</button><span data-set="stmsg"></span></div>
+        </div>`}`;
 
     // ---- services health pane (main tab) ----
+    const fmtDbSize = (b) => {
+      if (!b && b !== 0) return null;
+      if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
+      if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+      if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+      return b + ' B';
+    };
+    const dbSize = fmtDbSize(st.storage?.sizeBytes);
     $('[data-set=health]', host).innerHTML = `
       <div class="set-health-grid">
         <div class="set-health-item">
           <span class="set-health-label">Host agent</span>
-          <b class="${st.agent ? 'set-ok' : 'set-err'}">${st.agent ? '● connected' : '○ unavailable'}</b>
+          <b class="${st.agent ? 'set-ok' : 'set-err'}">${st.agent ? '● Connected' : '○ Unavailable'}</b>
           <small>Privileged host operations (fan, NAS, updates)</small>
         </div>
         <div class="set-health-item">
           <span class="set-health-label">Database</span>
-          <b class="${st.storage?.degraded ? 'set-err' : 'set-ok'}">${st.storage?.degraded ? '○ degraded (local fallback)' : '● healthy'}</b>
-          <small>${esc(st.storage?.fsType || '—')} · ${esc(st.storage?.journalMode || '—')} journal</small>
+          <b class="${st.storage?.degraded ? 'set-err' : 'set-ok'}">${st.storage?.degraded ? '○ Degraded (local fallback)' : '● Healthy'}</b>
+          <small>${esc(st.storage?.fsType || '—')} · ${esc(st.storage?.journalMode || '—')} journal${dbSize ? ` · ${dbSize}` : ''}</small>
         </div>
         <div class="set-health-item">
           <span class="set-health-label">Encryption</span>
-          <b class="${st.encryption ? 'set-ok' : 'set-err'}">${st.encryption ? '● key present' : '○ no SECRET_KEY'}</b>
+          <b class="${st.encryption ? 'set-ok' : 'set-err'}">${st.encryption ? '● Key present' : '○ No SECRET_KEY'}</b>
           <small>Secrets at rest (SMTP/NAS passwords)</small>
         </div>
         <div class="set-health-item">
           <span class="set-health-label">Email (SMTP)</span>
-          <b class="${st.smtpConfigured ? 'set-ok' : ''}">${st.smtpConfigured ? '● configured' : '○ not configured'}</b>
+          <b class="${st.smtpConfigured ? 'set-ok' : ''}">${st.smtpConfigured ? '● Configured' : '○ Not configured'}</b>
           <small>Alert notifications</small>
         </div>
         <div class="set-health-item">
           <span class="set-health-label">NAS mount</span>
-          <b class="${nasStatus?.mounted ? 'set-ok' : ''}">${nasStatus?.mounted ? '● mounted' : '○ none'}</b>
-          <small>${esc(nas?.label || 'no share configured')}</small>
+          <b class="${nasStatus?.mounted ? 'set-ok' : ''}">${nasStatus?.mounted ? '● Mounted' : '○ None'}</b>
+          <small>${esc(nas?.label || 'No share configured')}</small>
         </div>
         <div class="set-health-item">
           <span class="set-health-label">Operating mode</span>
@@ -932,27 +968,73 @@ pageRenderers.settings = (() => {
 
     // ---- SMTP config pane ----
     const smtp = st.smtp || {};
+    const showSmtpForm = editSmtp || !st.smtpConfigured;
     $('[data-set=smtp]', host).innerHTML = `
       <p class="hw-hint">Configure authenticated SMTP for alert email notifications. Recommended free providers: Brevo (300/day), SMTP2GO (1,000/month). Gmail works with an App Password (requires 2FA).</p>
       ${!st.encryption ? '<p class="set-warn">⚠ SECRET_KEY is not set — passwords cannot be stored securely. Run deploy.sh or set SECRET_KEY in .env first.</p>' : ''}
-      <div class="wz-form">
-        <div class="al-form-row">
-          <label>SMTP host <input data-sm="host" value="${esc(smtp.host || '')}" placeholder="smtp-relay.brevo.com"></label>
-          <label>Port <input data-sm="port" type="number" value="${esc(smtp.port || 587)}" placeholder="587"></label>
+      ${!showSmtpForm ? `
+        <div class="set-summary">
+          <div class="set-kv"><span>Host</span><b>${esc(smtp.host || '—')}:${esc(smtp.port || 587)}</b></div>
+          <div class="set-kv"><span>Security</span><b>${smtp.secure ? 'TLS/SSL' : 'STARTTLS'}</b></div>
+          <div class="set-kv"><span>Username</span><b>${esc(smtp.user || '—')}</b></div>
+          <div class="set-kv"><span>From</span><b>${esc(smtp.from || '—')}</b></div>
+          <div class="set-kv"><span>Send alerts to</span><b>${esc(smtp.to || '—')}</b></div>
+          <div class="wz-row set-btn-row">
+            <button class="action-btn" data-sm="edit">Edit</button>
+            <button class="action-btn" data-sm="test">Send test email</button>
+            <span data-sm="msg"></span>
+          </div>
+        </div>` : `
+        <div class="wz-form">
+          <div class="al-form-row">
+            <label>SMTP host <input data-sm="host" value="${esc(smtp.host || '')}" placeholder="smtp-relay.brevo.com"></label>
+            <label>Port <input data-sm="port" type="number" value="${esc(smtp.port || 587)}" placeholder="587"></label>
+          </div>
+          <label class="wz-inline"><input type="checkbox" data-sm="secure" ${smtp.secure ? 'checked' : ''}> Use TLS/SSL (port 465). Leave off for STARTTLS (587).</label>
+          <label>Username <input data-sm="user" value="${esc(smtp.user || '')}" placeholder="your-login@example.com" autocomplete="off"></label>
+          <label>Password / API key <input data-sm="pass" type="password" placeholder="${smtp.host ? '•••••• (unchanged)' : 'enter password'}" autocomplete="new-password"></label>
+          <div class="al-form-row">
+            <label>From address <input data-sm="from" value="${esc(smtp.from || '')}" placeholder="rapisys@example.com"></label>
+            <label>Send alerts to <input data-sm="to" value="${esc(smtp.to || '')}" placeholder="you@example.com"></label>
+          </div>
+          <div class="wz-row">
+            <button class="action-btn" data-sm="save">Save SMTP settings</button>
+            ${st.smtpConfigured ? '<button class="action-btn" data-sm="cancel">Cancel</button>' : ''}
+            <span data-sm="msg"></span>
+          </div>
+        </div>`}`;
+
+    // ---- account pane ----
+    let me = null;
+    try { me = await api('/auth/me'); } catch { /* */ }
+    const accEl = $('[data-set=account]', host);
+    if (accEl) {
+      const mfaOn = !!me?.mfaEnabled;
+      accEl.innerHTML = `
+        <div class="set-summary">
+          <div class="set-kv"><span>Username</span><b>${esc(me?.username || '—')}</b></div>
+          <div class="set-kv"><span>Two-factor (2FA)</span><b class="${mfaOn ? 'set-ok' : ''}">${mfaOn ? '● Enabled' : '○ Disabled'}</b></div>
         </div>
-        <label class="wz-inline"><input type="checkbox" data-sm="secure" ${smtp.secure ? 'checked' : ''}> Use TLS/SSL (port 465). Leave off for STARTTLS (587).</label>
-        <label>Username <input data-sm="user" value="${esc(smtp.user || '')}" placeholder="your-login@example.com" autocomplete="off"></label>
-        <label>Password / API key <input data-sm="pass" type="password" placeholder="${smtp.host ? '•••••• (unchanged)' : 'enter password'}" autocomplete="new-password"></label>
-        <div class="al-form-row">
-          <label>From address <input data-sm="from" value="${esc(smtp.from || '')}" placeholder="rapisys@example.com"></label>
-          <label>Send alerts to <input data-sm="to" value="${esc(smtp.to || '')}" placeholder="you@example.com"></label>
+
+        <h4 class="sess-h" style="margin-top:20px">Change password</h4>
+        <div class="wz-form">
+          <label>Current password <input data-acc="cur" type="password" autocomplete="current-password"></label>
+          <label>New password <input data-acc="new" type="password" autocomplete="new-password" placeholder="at least 8 characters"></label>
+          <label>Confirm new password <input data-acc="new2" type="password" autocomplete="new-password"></label>
+          <div class="wz-row"><button class="action-btn" data-acc="pwsave">Update password</button><span data-acc="pwmsg"></span></div>
         </div>
-        <div class="wz-row">
-          <button class="action-btn" data-sm="save">Save SMTP settings</button>
-          <button class="action-btn" data-sm="test" ${st.smtpConfigured ? '' : 'disabled'}>Send test email</button>
-          <span data-sm="msg"></span>
-        </div>
-      </div>`;
+
+        <h4 class="sess-h" style="margin-top:24px">Two-factor authentication</h4>
+        ${mfaOn ? `
+          <p class="hw-hint">2FA is active. Disabling it requires a current code from your authenticator app.</p>
+          <div class="wz-form">
+            <label>Authenticator code <input data-acc="discode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
+            <div class="wz-row"><button class="action-btn" data-acc="mfadisable">Disable 2FA</button><span data-acc="mfamsg"></span></div>
+          </div>` : `
+          <p class="hw-hint">Add an authenticator app (TOTP) for a second login factor. Requires SECRET_KEY to be set.</p>
+          <div data-acc="mfaenroll"></div>
+          <div class="wz-row"><button class="action-btn" data-acc="mfabegin" ${st.encryption ? '' : 'disabled'}>Enable 2FA</button><span data-acc="mfamsg"></span></div>`}`;
+    }
 
     wire(host, nas);
   }
@@ -996,16 +1078,27 @@ pageRenderers.settings = (() => {
       catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
     };
 
+    const dbEdit = $('[data-set=dbedit]', host);
+    if (dbEdit) dbEdit.onclick = () => { editDb = true; load(host); };
+    const dbCancel = $('[data-set=dbcancel]', host);
+    if (dbCancel) dbCancel.onclick = () => { editDb = false; load(host); };
+
     const relocate = $('[data-set=relocate]', host);
     if (relocate) relocate.onclick = async () => {
       const msg = $('[data-set=stmsg]', host);
       const dir = $('[data-set=dbdir]', host).value.trim();
       relocate.disabled = true; setStatus(msg, true, 'Relocating database…');
       try { const r = await api('/setup/storage', { method: 'POST', body: { dbDir: dir } });
-        setStatus(msg, true, `✓ now on ${r.fsType || 'disk'} (${r.journalMode} journal)`); load(host);
+        editDb = false; setStatus(msg, true, `✓ now on ${r.fsType || 'disk'} (${r.journalMode} journal)`); load(host);
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
       finally { relocate.disabled = false; }
     };
+
+    // SMTP edit / cancel toggles
+    const smEdit = $('[data-sm=edit]', host);
+    if (smEdit) smEdit.onclick = () => { editSmtp = true; load(host); };
+    const smCancel = $('[data-sm=cancel]', host);
+    if (smCancel) smCancel.onclick = () => { editSmtp = false; load(host); };
 
     // SMTP save / test
     const smSave = $('[data-sm=save]', host);
@@ -1023,18 +1116,75 @@ pageRenderers.settings = (() => {
       if (pass) body.password = pass;
       if (!body.host) { setStatus(msg, false, '✗ SMTP host is required'); return; }
       smSave.disabled = true; setStatus(msg, true, 'Saving…');
-      try { await api('/setup/smtp', { method: 'POST', body }); setStatus(msg, true, '✓ saved'); load(host); }
+      try { await api('/setup/smtp', { method: 'POST', body }); editSmtp = false; setStatus(msg, true, '✓ saved'); load(host); }
       catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
       finally { smSave.disabled = false; }
     };
     const smTest = $('[data-sm=test]', host);
     if (smTest) smTest.onclick = async () => {
       const msg = $('[data-sm=msg]', host);
-      const to = $('[data-sm=to]', host).value.trim();
+      const to = $('[data-sm=to]', host)?.value.trim();
       smTest.disabled = true; setStatus(msg, true, 'Sending test email…');
       try { await api('/setup/smtp/test', { method: 'POST', body: { to } }); setStatus(msg, true, '✓ test email sent'); }
       catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
       finally { smTest.disabled = false; }
+    };
+
+    // ---- account: change password ----
+    const pwSave = $('[data-acc=pwsave]', host);
+    if (pwSave) pwSave.onclick = async () => {
+      const msg = $('[data-acc=pwmsg]', host);
+      const cur = $('[data-acc=cur]', host).value;
+      const nw = $('[data-acc=new]', host).value;
+      const nw2 = $('[data-acc=new2]', host).value;
+      if (nw.length < 8) { setStatus(msg, false, '✗ new password must be at least 8 characters'); return; }
+      if (nw !== nw2) { setStatus(msg, false, '✗ new passwords do not match'); return; }
+      pwSave.disabled = true; setStatus(msg, true, 'Updating…');
+      try {
+        await api('/auth/account/password', { method: 'POST', body: { currentPassword: cur, newPassword: nw } });
+        setStatus(msg, true, '✓ password updated');
+        $('[data-acc=cur]', host).value = $('[data-acc=new]', host).value = $('[data-acc=new2]', host).value = '';
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+      finally { pwSave.disabled = false; }
+    };
+
+    // ---- account: enable 2FA (begin -> show QR -> confirm) ----
+    const mfaBegin = $('[data-acc=mfabegin]', host);
+    if (mfaBegin) mfaBegin.onclick = async () => {
+      const msg = $('[data-acc=mfamsg]', host);
+      mfaBegin.disabled = true; setStatus(msg, true, 'Generating secret…');
+      try {
+        const r = await api('/auth/account/mfa/begin', { method: 'POST', body: {} });
+        const enroll = $('[data-acc=mfaenroll]', host);
+        enroll.innerHTML = `
+          <div class="acc-enroll">
+            <img src="${r.qrDataUrl}" alt="2FA QR code" class="acc-qr">
+            <p class="hw-hint">Scan with your authenticator app, or enter the secret manually: <code>${esc(r.secret)}</code></p>
+            <label>Enter the 6-digit code to confirm <input data-acc="enrollcode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
+            <div class="wz-row"><button class="action-btn" data-acc="mfaconfirm">Confirm &amp; activate</button></div>
+          </div>`;
+        mfaBegin.style.display = 'none';
+        setStatus(msg, true, '');
+        const confirm = $('[data-acc=mfaconfirm]', host);
+        confirm.onclick = async () => {
+          const code = $('[data-acc=enrollcode]', host).value.trim();
+          confirm.disabled = true; setStatus(msg, true, 'Verifying…');
+          try { await api('/auth/account/mfa/confirm', { method: 'POST', body: { code } });
+            toast('success', '2FA', 'Two-factor authentication enabled'); load(host);
+          } catch (err) { setStatus(msg, false, `✗ ${err.message}`); confirm.disabled = false; }
+        };
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); mfaBegin.disabled = false; }
+    };
+
+    // ---- account: disable 2FA ----
+    const mfaDisable = $('[data-acc=mfadisable]', host);
+    if (mfaDisable) mfaDisable.onclick = async () => {
+      const msg = $('[data-acc=mfamsg]', host);
+      const code = $('[data-acc=discode]', host).value.trim();
+      mfaDisable.disabled = true; setStatus(msg, true, 'Disabling…');
+      try { await api('/auth/account/mfa/disable', { method: 'POST', body: { code } });
+        toast('success', '2FA', 'Two-factor authentication disabled'); load(host);
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); mfaDisable.disabled = false; }
     };
   }
 
@@ -1044,7 +1194,7 @@ pageRenderers.settings = (() => {
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Email (SMTP)' }])}
+          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Email (SMTP)' }, { id: 'account', label: 'Account' }])}
           <div class="card-body" data-pane="health">
             <div data-set="health"></div>
           </div>
@@ -1056,6 +1206,9 @@ pageRenderers.settings = (() => {
           </div>
           <div class="card-body" data-pane="email" style="display:none">
             <div data-set="smtp"></div>
+          </div>
+          <div class="card-body" data-pane="account" style="display:none">
+            <div data-set="account"></div>
           </div>
         </div>
       </div>`;

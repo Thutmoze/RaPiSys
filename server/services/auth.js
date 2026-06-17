@@ -98,6 +98,46 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     return crypto.timingSafeEqual(hash, Buffer.from(admin.pass_hash));
   }
 
+  /** Change the admin password — requires the current password. */
+  function changePassword(currentPassword, newPassword) {
+    const admin = getAdmin();
+    if (!admin) throw new Error('no admin registered');
+    if (!checkPassword(admin, currentPassword)) throw new Error('current password is incorrect');
+    if (String(newPassword || '').length < 8) throw new Error('new password must be at least 8 characters');
+    const salt = crypto.randomBytes(32);
+    const hash = scryptHash(newPassword, salt);
+    getDb().prepare(`UPDATE admin_user SET pass_salt = ?, pass_hash = ? WHERE id = 1`).run(salt, hash);
+    return { ok: true };
+  }
+
+  /** Disable 2FA — requires a current valid TOTP code to prove possession. */
+  function disableMfa(code) {
+    const admin = getAdmin();
+    if (!admin) throw new Error('no admin registered');
+    if (!admin.mfa_enabled) return { ok: true, mfaEnabled: false };
+    if (!verifyTotp(decryptSecret(admin), code)) throw new Error('invalid authenticator code');
+    getDb().prepare(`UPDATE admin_user SET mfa_enabled = 0, mfa_confirmed = 0, totp_secret_enc = NULL WHERE id = 1`).run();
+    return { ok: true, mfaEnabled: false };
+  }
+
+  /**
+   * Begin enabling 2FA: generates a fresh secret, stores it (unconfirmed), and
+   * returns the otpauth URI so the client can show a QR. Activation completes
+   * via confirmMfa() with a valid code.
+   */
+  function beginEnableMfa() {
+    const admin = getAdmin();
+    if (!admin) throw new Error('no admin registered');
+    if (!hasSecretKey()) throw new Error('SECRET_KEY not set — cannot store MFA secret securely');
+    const secret = generateSecret();
+    const enc = encrypt(secret);
+    const encJson = JSON.stringify({
+      ct: enc.ciphertext.toString('base64'), iv: enc.iv.toString('base64'), tag: enc.tag.toString('base64'),
+    });
+    getDb().prepare(`UPDATE admin_user SET totp_secret_enc = ?, mfa_enabled = 1, mfa_confirmed = 0 WHERE id = 1`).run(encJson);
+    return { secret, otpauth: otpauthUri(secret, admin.username) };
+  }
+
   // ---- sessions ---------------------------------------------------------------
   function createSession(ip, ua) {
     const token = crypto.randomBytes(32).toString('base64url');
@@ -208,6 +248,7 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
   }
 
   return { getAdmin, register, confirmMfa, login, createSessionDirect, validateSession, destroySession,
+    changePassword, disableMfa, beginEnableMfa,
     purgeExpired, cookieToken, requireConfig, requireControl, getMode, isAuthenticated,
     COOKIE_NAME };
 }

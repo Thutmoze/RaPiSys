@@ -43,7 +43,12 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
       completed: !!settings.rapisys?.setupCompleted,
       agent: await agentAvailable(),
       encryption: hasSecretKey(),
-      storage: { ...dbMeta(), configuredPath: settings.rapisys?.storage?.dbPath || null },
+      storage: (() => {
+        const m = dbMeta();
+        let sizeBytes = null;
+        try { if (m.path) sizeBytes = fs.statSync(m.path).size; } catch { /* */ }
+        return { ...m, sizeBytes, configuredPath: settings.rapisys?.storage?.dbPath || null };
+      })(),
       retentionDays: settings.rapisys?.retention?.days || 90,
       archiveDays: settings.rapisys?.retention?.archiveDays || 365,
       smtpConfigured: !!settings.rapisys?.smtp?.host,

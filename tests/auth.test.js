@@ -105,3 +105,39 @@ describe('auth service', () => {
     expect(called).toBe(true);
   });
 });
+
+describe('account management', () => {
+  it('changePassword requires the correct current password and re-logs in', () => {
+    const { auth } = fixture();
+    auth.register('pwuser', 'oldpassword', { mfa: false });
+    expect(() => auth.changePassword('wrongpass', 'newpassword')).toThrow(/incorrect/);
+    expect(() => auth.changePassword('oldpassword', 'short')).toThrow(/at least 8/);
+    expect(auth.changePassword('oldpassword', 'newpassword').ok).toBe(true);
+    // old password no longer works, new one does
+    expect(() => auth.login('pwuser', 'oldpassword', null, 'ip', '')).toThrow();
+    const token = auth.login('pwuser', 'newpassword', null, 'ip', '');
+    expect(auth.validateSession(token)).toBe(true);
+  });
+  it('beginEnableMfa + confirm enables 2FA on a non-MFA account', () => {
+    const { auth } = fixture();
+    auth.register('mfauser', 'longpassword', { mfa: false });
+    expect(auth.getAdmin().mfa_enabled).toBe(0);
+    const { secret } = auth.beginEnableMfa();
+    expect(auth.getAdmin().mfa_enabled).toBe(1);
+    expect(auth.getAdmin().mfa_confirmed).toBe(0);
+    expect(auth.confirmMfa(totpCode(secret))).toBe(true);
+    expect(auth.getAdmin().mfa_confirmed).toBe(1);
+  });
+  it('disableMfa requires a valid code and clears the secret', () => {
+    const { auth } = fixture();
+    const { secret } = auth.register('mfauser2', 'longpassword');
+    auth.confirmMfa(totpCode(secret));
+    expect(() => auth.disableMfa('000000')).toThrow(/invalid/);
+    expect(auth.disableMfa(totpCode(secret)).mfaEnabled).toBe(false);
+    expect(auth.getAdmin().mfa_enabled).toBe(0);
+    expect(auth.getAdmin().totp_secret_enc).toBe(null);
+    // login no longer needs a code
+    const token = auth.login('mfauser2', 'longpassword', null, 'ip', '');
+    expect(auth.validateSession(token)).toBe(true);
+  });
+});
