@@ -116,31 +116,45 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
     return { skipped: null, ...result };
   }
 
-  // The scheduler ticks hourly; this decides whether the current wall-clock
-  // moment (in the USER's timezone) matches the configured schedule and the run
-  // hasn't fired yet this hour. The container clock is UTC, so we shift `now` by
-  // the stored tzOffsetMinutes (minutes to ADD to UTC to get local time) that
-  // the browser captured when the schedule was saved.
+  // The scheduler ticks every ~10 min; this fires the check once when the
+  // current local time has reached the scheduled HH:MM (within a tick window)
+  // on a matching day, and not already fired for that occurrence. The container
+  // clock is UTC, so we shift `now` by tzOffsetMinutes (minutes to ADD to UTC
+  // to get the user's local time) captured by the browser when saved.
+  const TICK_WINDOW_MS = 11 * 60000;   // a bit more than the 10-min tick cadence
   let lastFiredKey = null;
   function localNow(cfg, now = new Date()) {
     const offsetMin = Number(cfg.tzOffsetMinutes) || 0;
     return new Date(now.getTime() + offsetMin * 60000);
   }
+  // The scheduled local Date for the day `local` falls on.
+  function scheduledTimeOn(cfg, local) {
+    const [h, m] = String(cfg.time || '03:00').split(':').map(Number);
+    const t = new Date(local.getTime());
+    t.setUTCHours(h, m, 0, 0);   // local is a UTC-shifted clock, so use UTC setters
+    return t;
+  }
+  function dayMatches(cfg, local) {
+    if (cfg.frequency === 'weekly') return local.getUTCDay() === cfg.dayOfWeek;
+    if (cfg.frequency === 'monthly') return local.getUTCDate() === cfg.dayOfMonth;
+    return true;   // daily
+  }
   function isDue(cfg, now = new Date()) {
     const local = localNow(cfg, now);
-    const [h] = cfg.time.split(':').map(Number);
-    if (local.getUTCHours() !== h) return false;        // chosen hour, in local tz
-    if (cfg.frequency === 'weekly' && local.getUTCDay() !== cfg.dayOfWeek) return false;
-    if (cfg.frequency === 'monthly' && local.getUTCDate() !== cfg.dayOfMonth) return false;
-    return true;
+    if (!dayMatches(cfg, local)) return false;
+    const target = scheduledTimeOn(cfg, local);
+    const delta = local.getTime() - target.getTime();
+    // due if we're at or just past the scheduled time, within one tick window
+    return delta >= 0 && delta < TICK_WINDOW_MS;
   }
   async function tick(now = new Date()) {
     const cfg = await getConfig();
     if (!cfg.enabled) return;
     if (!isDue(cfg, now)) return;
     const local = localNow(cfg, now);
-    const key = `${local.getUTCFullYear()}-${local.getUTCMonth()}-${local.getUTCDate()}-${local.getUTCHours()}`;
-    if (key === lastFiredKey) return;                  // already fired this hour
+    // one fire per scheduled day+time occurrence
+    const key = `${local.getUTCFullYear()}-${local.getUTCMonth()}-${local.getUTCDate()}-${cfg.time}`;
+    if (key === lastFiredKey) return;                  // already fired this occurrence
     lastFiredKey = key;
     try { await runOnce(); } catch (err) { events?.add?.('update.check.fail', 'warning', { error: err.message }); }
   }
