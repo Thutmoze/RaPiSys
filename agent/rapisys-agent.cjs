@@ -871,23 +871,92 @@ WantedBy=multi-user.target
     });
 
     let text = '';
-    if (ok) {
-      // extract just the changelog from the downloaded .deb
-      await run('dpkg-deb', ['-x', debPath, path.join(tmp, 'x')], 60000).catch(() => {});
-      const docDir = path.join(tmp, 'x', 'usr', 'share', 'doc', pkg);
-      if (fs.existsSync(docDir)) {
-        for (const f of ['changelog.Debian.gz', 'changelog.gz', 'changelog.Debian', 'changelog']) {
-          const p = path.join(docDir, f);
-          if (fs.existsSync(p)) { const b = fs.readFileSync(p); text = f.endsWith('.gz') ? require('zlib').gunzipSync(b).toString('utf-8') : b.toString('utf-8'); break; }
+    const zlib2 = require('zlib');
+    // Read the first changelog found anywhere under usr/share/doc in an
+    // extracted tree (not just usr/share/doc/<pkg> — metapackages may ship the
+    // changelog under a differently-named doc dir, or not at all).
+    const extractChangelog = (extractRoot) => {
+      const docRoot = path.join(extractRoot, 'usr', 'share', 'doc');
+      let dirs = [];
+      try { dirs = fs.readdirSync(docRoot); } catch { return ''; }
+      // prefer the exact package dir, then any sibling
+      dirs.sort((a, b) => (a === pkg ? -1 : b === pkg ? 1 : 0));
+      for (const d of dirs) {
+        const dd = path.join(docRoot, d);
+        let files = [];
+        try { files = fs.readdirSync(dd); } catch { continue; }
+        const f = files.find((n) => /^changelog(\.Debian)?(\.gz)?$/i.test(n));
+        if (f) {
+          const p = path.join(dd, f);
+          // skip dangling symlinks (common for kernel metapackages)
+          try { if (!fs.statSync(p).isFile()) continue; } catch { continue; }
+          try { const b = fs.readFileSync(p); return f.endsWith('.gz') ? zlib2.gunzipSync(b).toString('utf-8') : b.toString('utf-8'); }
+          catch { /* try next */ }
         }
       }
+      return '';
+    };
+
+    if (ok) {
+      await run('dpkg-deb', ['-x', debPath, path.join(tmp, 'x')], 60000).catch(() => {});
+      text = extractChangelog(path.join(tmp, 'x'));
     }
+
+    let usedSource = false;
+    // Fallback: the package's own .deb has no changelog (thin metapackage, e.g.
+    // linux-headers-rpi-2712). Resolve its source package and download a binary
+    // .deb from the same source that *does* carry a changelog.
+    if (!text) {
+      try {
+        const show = await run('apt-cache', ['show', pkg], 15000).catch(() => ({ stdout: '' }));
+        // "Source: linux" (may include a version in parens, strip it)
+        const sm = (show.stdout || '').match(/^Source:\s*(\S+)/m);
+        const srcName = sm ? sm[1] : null;
+        if (srcName) {
+          // find a binary .deb URI from the same source pool dir as our package
+          // (the pool path is /pool/main/<x>/<source>/...), preferring the
+          // versioned headers-common or image deb which ships the changelog.
+          const poolDir = uri.slice(0, uri.lastIndexOf('/') + 1);
+          const allUris = (piu.stdout || '').match(/'(https?:\/\/[^']+\.deb)'/g) || [];
+          const cands = allUris.map((s) => s.slice(1, -1))
+            .filter((u) => u.startsWith(poolDir))
+            .sort((a, b) => {
+              // prefer 'common' (arch-indep docs) then 'image' then anything
+              const score = (u) => /common/.test(u) ? 0 : /linux-image/.test(u) ? 1 : 2;
+              return score(a) - score(b);
+            });
+          for (const cu of cands) {
+            if (cu === uri) continue;   // already tried the package's own deb
+            const stmp = path.join(tmp, 'src'); fs.mkdirSync(stmp, { recursive: true });
+            const sdeb = path.join(stmp, 'src.deb');
+            const sok = await new Promise((resolve) => {
+              const lib = cu.startsWith('https') ? https : http;
+              const rq = lib.get(cu, (rs) => {
+                if (rs.statusCode !== 200) { rs.destroy(); return resolve(false); }
+                const total = parseInt(rs.headers['content-length'] || '0', 10);
+                const o = fs.createWriteStream(sdeb); let got = 0, lp = -1;
+                rs.on('data', (d) => { got += d.length; const pc = total ? Math.floor((got/total)*100) : 0; if (pc !== lp) { lp = pc; send?.(JSON.stringify({ downloaded: got, total, pct: pc, source: true })); } });
+                rs.pipe(o); o.on('finish', () => resolve(true)); o.on('error', () => resolve(false)); rs.on('error', () => resolve(false));
+              });
+              rq.on('error', () => resolve(false));
+              rq.setTimeout(180000, () => { rq.destroy(); resolve(false); });
+            });
+            if (sok) {
+              await run('dpkg-deb', ['-x', sdeb, path.join(stmp, 'x')], 60000).catch(() => {});
+              text = extractChangelog(path.join(stmp, 'x'));
+              if (text) { usedSource = true; break; }
+            }
+          }
+        }
+      } catch { /* fallback best-effort */ }
+    }
+
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
-    if (!text) return { changelog: '', source: 'none', error: 'changelog not found' };
+    if (!text) return { changelog: '', source: 'none', error: 'no changelog in this package' };
     let candidateVersion = null;
     const fnm = uri.split('/').pop().match(/_([^_]+)_/);
     if (fnm) candidateVersion = decodeURIComponent(fnm[1]).replace(/%7e/gi, '~').replace(/%2b/gi, '+');
-    return { changelog: text.split('\n').slice(0, 150).join('\n'), source: 'candidate', candidateVersion };
+    return { changelog: text.split('\n').slice(0, 150).join('\n'), source: usedSource ? 'source' : 'candidate', candidateVersion };
   },
 
     async 'apt.changelog'({ pkg, candidate = false }) {

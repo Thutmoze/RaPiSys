@@ -2404,6 +2404,13 @@ pageRenderers.updates = (() => {
     let activeIdx = null;
     const renderBody = () => {
       if (data.error) return `<p class="up-cl-empty">${esc(data.error)}</p>`;
+      if (data.noChangelog) {
+        return `<div class="up-cl-needfull">
+            <p class="up-cl-empty">No changelog available for this package.</p>
+            <button class="up-cl-retry" data-cl="retry">Try again</button>
+            <div class="up-cl-dlprog" data-cl="dlprog" style="display:none"></div>
+          </div>`;
+      }
       if (data.needsFull) {
         return `<div class="up-cl-needfull">
             <p>This package is large, so the new-version changelog isn't cached yet. The notes below are the <b>installed</b> version. Download the new package to see what's changing?</p>
@@ -2470,6 +2477,8 @@ pageRenderers.updates = (() => {
       });
       const dl = ov.querySelector('[data-cl=dl]');
       if (dl) dl.onclick = () => downloadFullToModal(host, pkg, ov, installed);
+      const retry = ov.querySelector('[data-cl=retry]');
+      if (retry) retry.onclick = () => downloadFullToModal(host, pkg, ov, installed);
     };
     wire();
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
@@ -2482,7 +2491,7 @@ pageRenderers.updates = (() => {
 
   function downloadFullToModal(host, pkg, ov, installed) {
     const prog = ov.querySelector('[data-cl=dlprog]');
-    const btn = ov.querySelector('[data-cl=dl]');
+    const btn = ov.querySelector('[data-cl=dl]') || ov.querySelector('[data-cl=retry]');
     if (btn) btn.disabled = true;
     if (prog) { prog.style.display = 'block'; prog.innerHTML = '<div class="up-dl-row"><span class="up-spinner-sm"></span><span>Starting…</span></div><div class="up-progbar"><span data-bar style="width:0%"></span></div>'; }
     const t0 = Date.now();
@@ -2497,7 +2506,13 @@ pageRenderers.updates = (() => {
       logCache[pkg] = undefined; // invalidate
       const u = updates.find((x) => x.package === pkg);
       if (r.security !== undefined && u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; render(host); }
-      if (ov._rerender) ov._rerender({ changelog: r.changelog, candidateVersion: r.candidateVersion, needsFull: false, error: r.changelog ? null : 'No changelog available.' });
+      if (r.changelog) {
+        if (ov._rerender) ov._rerender({ changelog: r.changelog, candidateVersion: r.candidateVersion, needsFull: false, noChangelog: false, error: null });
+      } else {
+        // still nothing even after the source-package fallback — settle on the
+        // "no changelog" state (the backend has now persisted a marker).
+        if (ov._rerender) ov._rerender({ changelog: '', needsFull: false, noChangelog: true, error: null });
+      }
     });
     ev.addEventListener('error', () => { ev.close(); if (prog) prog.innerHTML = '<span class="up-cl-empty">Download failed.</span>'; if (btn) btn.disabled = false; });
   }
@@ -2510,6 +2525,12 @@ pageRenderers.updates = (() => {
     try {
       const r = await api(`/updates/changelog/${encodeURIComponent(pkg)}`);
       if (r.security !== undefined && u) { u.security = r.security; u.cves = r.cves || 0; u.urgency = r.urgency; render(host); }
+      if (r.none) {
+        // we've already downloaded this package and it has no changelog — offer
+        // a manual retry (which re-downloads and tries the source package too).
+        ov._rerender({ changelog: '', noChangelog: true, error: null });
+        return;
+      }
       const needsFull = (r.source === 'installed' || r.source === 'none');
       ov._rerender({ changelog: r.changelog || 'No changelog available.', candidateVersion: r.candidateVersion, needsFull, error: null });
     } catch (e) {

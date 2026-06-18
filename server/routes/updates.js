@@ -107,7 +107,7 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     send('start', { pkg });
     try {
       const out = await updates.changelogFull(pkg, (p) => send('progress', p));
-      if (out.source === 'candidate' && out.changelog) {
+      if ((out.source === 'candidate' || out.source === 'source') && out.changelog) {
         try { const tag = updates.tagSecurityFromChangelog(pkg, out.candidateVersion, out.changelog, installedOf(pkg)); out.security = tag.security; out.cves = tag.cves; out.urgency = tag.urgency; } catch { /* */ }
       }
       send('done', out);

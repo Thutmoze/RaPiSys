@@ -175,6 +175,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       const cand = candidateOf(pkg);
       // 1) DB cache first — any prior successful fetch (range or full download).
       const stored = updatesRepo?.getChangelog?.(pkg, cand);
+      if (stored && stored.none) return { changelog: '', candidateVersion: cand, source: 'none', none: true };
       if (stored && stored.changelog) return { changelog: stored.changelog, candidateVersion: stored.candidateVersion || cand, source: 'candidate' };
       // 2) range-fetch (cheap); store on success.
       try {
@@ -193,6 +194,9 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       (line) => { try { onProgress?.(JSON.parse(line)); } catch { /* */ } }, 200000);
     // persist so future views reuse it instantly with the proper format
     if (r && r.changelog) updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || candidateOf(pkg), r.changelog);
+    // record a sentinel when the package genuinely has no changelog (even after
+    // the source-package fallback) so we don't re-download it every view.
+    else if (r && r.source === 'none') updatesRepo?.markNoChangelog?.(pkg, candidateOf(pkg));
     return r;
   }
 

@@ -57,4 +57,23 @@ describe('update history security tags', () => {
     expect(row.security).toBe(1);             // now surfaced on the old row
     expect(row.cves).toBe(39);
   });
+
+  it('marks and reports packages with no obtainable changelog', () => {
+    const r = repo();
+    expect(r.getChangelog('linux-headers-rpi-2712', '1:6.18.34')).toBeNull();   // never fetched
+    r.markNoChangelog('linux-headers-rpi-2712', '1:6.18.34');
+    const got = r.getChangelog('linux-headers-rpi-2712', '1:6.18.34');
+    expect(got).not.toBeNull();
+    expect(got.none).toBe(true);             // sentinel, so callers don't re-download
+    expect(got.changelog).toBe('');
+  });
+
+  it('a real changelog still reads back normally after a none-marker exists for another pkg', () => {
+    const r = repo();
+    r.markNoChangelog('linux-headers-rpi-2712', '1:6.18.34');
+    r.saveChangelog('nano', '8.0', 'nano (8.0) bookworm; urgency=low');
+    const got = r.getChangelog('nano', '8.0');
+    expect(got.none).toBeUndefined();
+    expect(got.changelog).toMatch(/nano/);
+  });
 });

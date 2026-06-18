@@ -1,6 +1,9 @@
 /** RaPiSys — update_history repository. */
 
 export function createUpdatesRepo(db) {
+  // sentinel stored in update_changelogs.changelog to mark "we downloaded the
+  // package and it has no obtainable changelog" — distinct from "never fetched".
+  const NONE_MARKER = '\u001f__NO_CHANGELOG__\u001f';
   // Cache the upgradable list + last-check time in a tiny kv row (reuse the
   // secrets-style pattern via a dedicated table created on demand).
   db.exec(`CREATE TABLE IF NOT EXISTS update_cache (id INTEGER PRIMARY KEY CHECK (id=1), checked_at INTEGER, payload TEXT)`);
@@ -56,7 +59,17 @@ export function createUpdatesRepo(db) {
       const strip = (v) => String(v).replace(/^\d+:/, '');
       if (strip(row.candidate) !== strip(candidate)) return null;
     }
+    // a stored NONE_MARKER means we already downloaded and found no changelog —
+    // surface that as a sentinel so callers don't re-download every time.
+    if (row.changelog === NONE_MARKER) return { candidateVersion: row.candidate, changelog: '', none: true };
     return { candidateVersion: row.candidate, changelog: row.changelog };
+  }
+  // record that a package has no obtainable changelog for this candidate, so the
+  // expensive full download isn't retried on every view.
+  function markNoChangelog(pkg, candidate) {
+    db.prepare(`INSERT INTO update_changelogs (package, candidate, changelog, fetched_at) VALUES (?, ?, ?, ?)
+                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, changelog=excluded.changelog, fetched_at=excluded.fetched_at`)
+      .run(pkg, candidate || null, NONE_MARKER, Date.now());
   }
   function getSecurityTags() {
     const rows = db.prepare(`SELECT package, candidate, security, cves, urgency FROM update_sectags`).all();
@@ -111,5 +124,5 @@ export function createUpdatesRepo(db) {
     }
     return rows;
   }
-  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog };
+  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog, markNoChangelog };
 }
