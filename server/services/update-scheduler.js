@@ -201,7 +201,7 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
   // on a matching day, and not already fired for that occurrence. The container
   // clock is UTC, so we shift `now` by tzOffsetMinutes (minutes to ADD to UTC
   // to get the user's local time) captured by the browser when saved.
-  const TICK_WINDOW_MS = 11 * 60000;   // a bit more than the 10-min tick cadence
+  const TICK_WINDOW_MS = 2 * 60000;   // fire within ~1-2 min of the target (60s tick)
   let lastFiredKey = null;
   function localNow(cfg, now = new Date()) {
     const offsetMin = Number(cfg.tzOffsetMinutes) || 0;

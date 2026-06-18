@@ -107,8 +107,8 @@ describe('update scheduler', () => {
     const { sched, updates } = fixture({ updatesList: [] });
     await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00', tzOffsetMinutes: 0 });
     const before = new Date(Date.UTC(2026, 0, 1, 2, 55, 0));  // 02:55 — before target
-    const at = new Date(Date.UTC(2026, 0, 1, 3, 5, 0));       // 03:05 — within 11-min window
-    const after = new Date(Date.UTC(2026, 0, 1, 3, 8, 0));    // 03:08 — same occurrence
+    const at = new Date(Date.UTC(2026, 0, 1, 3, 1, 0));       // 03:01 — within 2-min window
+    const after = new Date(Date.UTC(2026, 0, 1, 3, 1, 30));   // 03:01:30 — same occurrence
     await sched.tick(before);
     expect(updates.refresh).toHaveBeenCalledTimes(0);   // not yet due
     await sched.tick(at);
@@ -120,7 +120,7 @@ describe('update scheduler', () => {
   it('does not fire well past the scheduled time (missed window)', async () => {
     const { sched } = fixture();
     const cfg = await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00', tzOffsetMinutes: 0 });
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 3, 2, 0)))).toBe(true);    // 03:02 — in window
+    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 3, 1, 0)))).toBe(true);    // 03:01 — in window
     expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 3, 30, 0)))).toBe(false);  // 03:30 — too late
     expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 2, 58, 0)))).toBe(false);  // 02:58 — too early
   });
@@ -129,15 +129,15 @@ describe('update scheduler', () => {
     const { sched } = fixture();
     const cfg = await sched.setConfig({ enabled: true, frequency: 'weekly', time: '03:00', dayOfWeek: 1, tzOffsetMinutes: 0 });
     // 2026-01-05 is a Monday (getUTCDay()===1)
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 5, 3, 2)))).toBe(true);
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 6, 3, 2)))).toBe(false);  // Tuesday
+    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 5, 3, 1)))).toBe(true);
+    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 6, 3, 1)))).toBe(false);  // Tuesday
   });
 
   it('isDue shifts by tzOffsetMinutes so local time matches a UTC container', async () => {
     const { sched } = fixture();
     // user in UTC+3 (Doha) wants 03:00 local → that's 00:00 UTC
     const cfg = await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00', tzOffsetMinutes: 180 });
-    const utcMatch = new Date(Date.UTC(2026, 0, 5, 0, 5));    // 00:05 UTC = 03:05 local — in window
+    const utcMatch = new Date(Date.UTC(2026, 0, 5, 0, 1));    // 00:01 UTC = 03:01 local — in window
     const utcLate = new Date(Date.UTC(2026, 0, 5, 3, 5));     // 03:05 UTC = 06:05 local — wrong time
     expect(sched.isDue(cfg, utcMatch)).toBe(true);            // fires at user's 03:00
     expect(sched.isDue(cfg, utcLate)).toBe(false);            // not at user's 06:00
