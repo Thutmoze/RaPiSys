@@ -90,9 +90,26 @@ export function createUpdatesRepo(db) {
     tx(entries);
   }
   function recent(limit = 50) {
-    return db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log,
+    const rows = db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log,
                               security, cves, kernel, description
                        FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
+    // Backfill rows that predate per-row tag capture (security IS NULL): if the
+    // package still has a tag in update_sectags, surface it so older history
+    // entries show Security/CVE badges too. Computed at read time, not stored.
+    let tags = null;
+    for (const r of rows) {
+      if (r.security == null && r.cves == null) {
+        if (!tags) {
+          tags = {};
+          try { for (const t of db.prepare(`SELECT package, security, cves FROM update_sectags`).all()) tags[t.package] = t; }
+          catch { tags = {}; }
+        }
+        const t = tags[r.package];
+        if (t) { r.security = t.security ? 1 : 0; r.cves = t.cves || 0; }
+        if (r.kernel == null) r.kernel = /linux-image|^linux-headers|kernel/i.test(r.package) ? 1 : 0;
+      }
+    }
+    return rows;
   }
   return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog };
 }

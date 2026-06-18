@@ -44,4 +44,17 @@ describe('update history security tags', () => {
     expect(row.cves).toBeNull();
     expect(row.kernel).toBe(0);
   });
+
+  it('backfills tags at read time for rows recorded before the tag existed', () => {
+    const r = repo();
+    // simulate an old row: recorded with no known tag (security/cves NULL)
+    r.record({ ts: Date.now(), packageName: 'firefox', fromV: '151', toV: '152', result: 'success', log: '' });
+    let [row] = r.recent(10);
+    expect(row.security).toBeNull();          // nothing known yet
+    // the tag is learned later (e.g. a changelog scan)
+    r.saveSecurityTag('firefox', { candidate: '152', security: true, cves: 39, urgency: 'high' });
+    [row] = r.recent(10);
+    expect(row.security).toBe(1);             // now surfaced on the old row
+    expect(row.cves).toBe(39);
+  });
 });
