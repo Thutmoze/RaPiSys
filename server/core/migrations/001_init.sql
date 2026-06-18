@@ -113,7 +113,10 @@ CREATE TABLE IF NOT EXISTS update_history (
   from_v  TEXT,
   to_v    TEXT,
   result  TEXT,                      -- success|failed|simulated
-  log     TEXT
+  log     TEXT,
+  security INTEGER,                  -- 1 if the package carried a security tag at upgrade time
+  cves     INTEGER,                  -- count of CVEs known at upgrade time
+  kernel   INTEGER                   -- 1 if a kernel/linux-image package
 );
 
 -- NAS mount registry (units themselves are written by the host agent).

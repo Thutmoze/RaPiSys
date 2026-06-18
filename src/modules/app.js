@@ -2340,6 +2340,7 @@ pageRenderers.updates = (() => {
     streaming = true;
     const panel = $('[data-up=progress]', host);
     panel.style.display = 'block';
+    panel.className = 'up-progress';
     panel.innerHTML = '<div class="up-progress-head"><b>Scanning large packages…</b><span class="up-spinner"></span></div><div class="up-scanlarge" data-up="sl"></div>';
     const slEl = panel.querySelector('[data-up=sl]');
     const ev = new EventSource(`/api/updates/scan-large/stream?packages=${encodeURIComponent(pkgs.join(','))}`);
@@ -2548,25 +2549,78 @@ pageRenderers.updates = (() => {
     if (streaming) { toast('info', 'Updates', 'An upgrade is already running'); return; }
     if (!full && (!packages || !packages.length)) return;
     streaming = true;
+    const pkgList = full ? [] : (packages || []);
     const panel = $('[data-up=progress]', host);
     panel.style.display = 'block';
-    panel.innerHTML = `<div class="up-progress-head"><b>Upgrading: ${esc(label)}</b><span class="up-spinner"></span></div><pre class="up-log" data-up="log"></pre>`;
+    panel.className = 'up-install-card';
+    panel.innerHTML = `
+      <div class="up-install-head">
+        <div class="up-install-title"><span class="up-spinner"></span><b>Installing ${esc(label)}</b></div>
+        <button class="up-install-close" data-up="close" hidden title="Close">✕</button>
+      </div>
+      <div class="up-install-bar"><div class="up-install-bar-fill" data-up="bar"></div></div>
+      <div class="up-install-status" data-up="status">Starting…</div>
+      <button class="up-install-toggle" data-up="toggle">▸ Show details</button>
+      <pre class="up-log up-install-log" data-up="log" hidden></pre>
+      <div class="up-install-result" data-up="result" hidden></div>`;
     const logEl = panel.querySelector('[data-up=log]');
-    const qs = full ? 'full=1' : `packages=${encodeURIComponent((packages || []).join(','))}`;
+    const barEl = panel.querySelector('[data-up=bar]');
+    const statusEl = panel.querySelector('[data-up=status]');
+    const toggleEl = panel.querySelector('[data-up=toggle]');
+    const resultEl = panel.querySelector('[data-up=result]');
+    // click-to-expand the detailed apt log
+    toggleEl.onclick = () => {
+      const show = logEl.hasAttribute('hidden');
+      if (show) { logEl.removeAttribute('hidden'); toggleEl.textContent = '▾ Hide details'; }
+      else { logEl.setAttribute('hidden', ''); toggleEl.textContent = '▸ Show details'; }
+    };
+    // progress is indeterminate from apt, so advance a soft estimate as lines
+    // stream in (caps below 90% until 'done' snaps it to 100).
+    let pct = 5; barEl.style.width = pct + '%';
+    const bump = () => { pct = Math.min(90, pct + 1.5); barEl.style.width = pct + '%'; };
+
+    const qs = full ? 'full=1' : `packages=${encodeURIComponent(pkgList.join(','))}`;
     const ev = new EventSource(`/api/updates/stream?${qs}`);
-    ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
+    ev.addEventListener('line', (e) => {
+      const line = JSON.parse(e.data).line;
+      logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight;
+      // surface a friendly status from common apt phases
+      if (/^(Get:|Fetched|Reading)/.test(line)) statusEl.textContent = 'Downloading packages…';
+      else if (/Unpacking/.test(line)) statusEl.textContent = 'Unpacking…';
+      else if (/Setting up|Preparing to/.test(line)) statusEl.textContent = 'Installing…';
+      else if (/Processing triggers/.test(line)) statusEl.textContent = 'Finishing up…';
+      bump();
+    });
     ev.addEventListener('done', (e) => {
       const d = JSON.parse(e.data);
       panel.querySelector('.up-spinner')?.remove();
-      logEl.textContent += `\n${d.ok ? '✓ Completed successfully' : '✗ Finished with errors (code ' + d.code + ')'}\n`;
+      barEl.style.width = '100%';
+      barEl.classList.add(d.ok ? 'up-install-bar-ok' : 'up-install-bar-err');
+      statusEl.textContent = d.ok ? 'Done' : `Finished with errors (code ${d.code})`;
+      resultEl.removeAttribute('hidden');
+      resultEl.innerHTML = d.ok
+        ? '<span class="up-install-success">✓ Completed successfully</span>'
+        : `<span class="up-install-fail">✗ Finished with errors (code ${d.code})</span>`;
+      panel.querySelector('[data-up=close]').hidden = false;
       toast(d.ok ? 'success' : 'error', 'Updates', d.ok ? 'Upgrade complete' : 'Upgrade had errors');
-      ev.close(); streaming = false; selected.clear(); load(host);
+      ev.close(); streaming = false; selected.clear();
     });
     ev.addEventListener('error', (e) => {
       let m = 'stream error'; try { m = JSON.parse(e.data).message; } catch { /* */ }
-      logEl.textContent += `\n✗ ${m}\n`; panel.querySelector('.up-spinner')?.remove();
+      logEl.removeAttribute('hidden'); logEl.textContent += `\n✗ ${m}\n`;
+      panel.querySelector('.up-spinner')?.remove();
+      statusEl.textContent = 'Error';
+      resultEl.removeAttribute('hidden');
+      resultEl.innerHTML = `<span class="up-install-fail">✗ ${esc(m)}</span>`;
+      panel.querySelector('[data-up=close]').hidden = false;
       ev.close(); streaming = false;
     });
+    // closing the card refreshes the Available Updates list so upgraded packages
+    // drop off (they're no longer upgradable).
+    panel.querySelector('[data-up=close]').onclick = () => {
+      panel.style.display = 'none';
+      load(host);
+    };
   }
 
   function startFirmware(host) {
@@ -2574,6 +2628,7 @@ pageRenderers.updates = (() => {
     streaming = true;
     const panel = $('[data-up=progress]', host);
     panel.style.display = 'block';
+    panel.className = 'up-progress';
     panel.innerHTML = `<div class="up-progress-head"><b>Updating firmware (rpi-eeprom)</b><span class="up-spinner"></span></div><pre class="up-log" data-up="log"></pre>`;
     const logEl = panel.querySelector('[data-up=log]');
     const ev = new EventSource('/api/updates/firmware/stream');
@@ -2594,13 +2649,20 @@ pageRenderers.updates = (() => {
         const ver = e.fromV || e.toV
           ? `<span class="inv-dim">${esc(e.fromV || '—')}</span> <span class="up-new">\u2192 ${esc(e.toV || '—')}</span>`
           : '<span class="inv-dim">—</span>';
-        // Tags are derived from the recorded log (history rows don't store the
-        // original changelog tags): flag security/CVE/kernel mentions.
-        const log = (e.log || '').toLowerCase();
+        // Prefer the real tags captured at upgrade time (stored on the history
+        // row). Older rows predating this have null flags — fall back to the
+        // best-effort log/name heuristic for those only.
         const tags = [];
-        if (/security|-security/.test(log)) tags.push('<span class="up-tag up-tag-sec">Security</span>');
-        if (/cve-\d/.test(log)) tags.push('<span class="up-tag up-tag-cve">CVE</span>');
-        if (/linux-image|kernel/.test(log) || /kernel/i.test(e.package)) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+        if (e.security != null || e.cves != null || e.kernel != null) {
+          if (e.security) tags.push('<span class="up-tag up-tag-sec">Security</span>');
+          if (e.cves) tags.push(`<span class="up-tag up-tag-cve">${e.cves} CVE${e.cves > 1 ? 's' : ''}</span>`);
+          if (e.kernel) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+        } else {
+          const log = (e.log || '').toLowerCase();
+          if (/security|-security/.test(log)) tags.push('<span class="up-tag up-tag-sec">Security</span>');
+          if (/cve-\d/.test(log)) tags.push('<span class="up-tag up-tag-cve">CVE</span>');
+          if (/linux-image|kernel/.test(log) || /kernel/i.test(e.package)) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+        }
         return `<tr>
         <td class="inv-dim">${new Date(e.ts).toLocaleString()}</td>
         <td><b>${esc(e.package)}</b></td>

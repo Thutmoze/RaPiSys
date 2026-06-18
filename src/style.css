@@ -5711,6 +5711,10 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sched-toggle-main { font-weight: 600; color: var(--text-primary); padding-bottom: 12px;
   margin-bottom: 4px; border-bottom: 1px solid var(--border-color); }
 .sched-toggle-main .sched-tg-icon { color: var(--accent-cyan); }
+/* when a toggle is on, light up its glyph + label in accent cyan */
+.sched-toggle:has(.set-switch input:checked) { color: var(--accent-cyan); }
+.sched-toggle:has(.set-switch input:checked) .sched-tg-icon { color: var(--accent-cyan); }
+.sched-toggle-main:has(.set-switch input:checked) { color: var(--accent-cyan); }
 .sched-subnotif { padding-left: 4px; margin-top: 2px; }
 .sched-subnotif[hidden] { display: none; }
 
@@ -5726,3 +5730,30 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .nav-checking { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 8px;
   color: var(--accent-cyan); font-size: 12px; font-weight: 600; }
 .nav-checking .up-spinner-sm { flex-shrink: 0; }
+
+/* Install/upgrade flow — dedicated card with progress bar + expandable details */
+.up-install-card { margin: 16px 0; padding: 18px; background: var(--bg-secondary);
+  border: 1px solid var(--accent-cyan); border-radius: var(--radius-md);
+  box-shadow: 0 4px 24px rgba(0,212,255,0.12); animation: up-card-in 0.25s ease; }
+@keyframes up-card-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.up-install-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.up-install-title { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text-primary); }
+.up-install-close { background: none; border: none; color: var(--text-muted); font-size: 16px;
+  cursor: pointer; padding: 2px 8px; border-radius: 6px; line-height: 1; }
+.up-install-close:hover { background: rgba(239,68,68,0.15); color: #ef4444; }
+.up-install-bar { height: 8px; background: var(--bg-primary); border-radius: 999px; overflow: hidden; margin-bottom: 10px; }
+.up-install-bar-fill { height: 100%; width: 5%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-cyan), #00b4d8);
+  transition: width 0.4s ease;
+  background-size: 200% 100%; animation: up-bar-shimmer 1.6s linear infinite; }
+@keyframes up-bar-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.up-install-bar-ok { background: linear-gradient(90deg, #22c55e, #16a34a); animation: none; }
+.up-install-bar-err { background: linear-gradient(90deg, #ef4444, #b91c1c); animation: none; }
+.up-install-status { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.up-install-toggle { background: none; border: none; color: var(--accent-cyan); font-size: 12px;
+  cursor: pointer; padding: 2px 0; margin-bottom: 6px; }
+.up-install-toggle:hover { text-decoration: underline; }
+.up-install-log { margin-top: 4px; }
+.up-install-result { margin-top: 10px; font-size: 14px; }
+.up-install-success { color: #22c55e; font-weight: 700; }
+.up-install-fail { color: #ef4444; font-weight: 700; }
