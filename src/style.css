@@ -5766,3 +5766,24 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .up-install-result { margin-top: 10px; font-size: 14px; }
 .up-install-success { color: #22c55e; font-weight: 700; }
 .up-install-fail { color: #ef4444; font-weight: 700; }
+
+/* ── In-browser remote access (SSH terminal + VNC desktop) ───────────────── */
+.rt-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.rt-status { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }
+.rt-status.rt-ok { color: #22c55e; border-color: rgba(34,197,94,0.4); }
+.rt-status.rt-off { color: #ef4444; border-color: rgba(239,68,68,0.4); }
+.rt-hint { font-size: 11px; color: var(--text-muted); }
+.rt-term { height: 60vh; min-height: 360px; background: #0a0a0a; border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); padding: 8px; overflow: hidden; }
+.rt-vnc { height: 64vh; min-height: 360px; background: #000; border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.rt-vnc canvas { max-width: 100%; max-height: 100%; }
+
+/* Remote-access settings card */
+.rm-keybox { margin-top: 12px; padding: 12px; background: var(--bg-secondary);
+  border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.rm-key-head { display: flex; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 6px; }
+.rm-pubkey { font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5;
+  background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;
+  padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); margin: 6px 0; }

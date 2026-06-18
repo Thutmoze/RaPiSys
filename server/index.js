@@ -1049,11 +1049,18 @@ app.delete('/api/services/config/:index', requireAuth, async (req, res) => {
 // and keep their exact response shapes.
 // ============================================================
 
+let serverRef = null;
 import('./rapisys.js')
   .then(({ initRapisys }) => initRapisys({
     app, loadSettings, saveSettings, withFileLock, requireAuth,
   }))
-  .then(() => console.log('[rapisys] modules initialised'))
+  .then((rapisys) => {
+    console.log('[rapisys] modules initialised');
+    // Attach the in-browser remote-access WebSocket bridges to the live server.
+    if (rapisys && typeof rapisys.attachRemoteAccess === 'function' && serverRef) {
+      rapisys.attachRemoteAccess(serverRef).catch((e) => console.error('[rapisys] remote-access attach failed:', e.message));
+    }
+  })
   .catch((err) => console.error('[rapisys] init failed (legacy dashboard still works):', err));
 
 // ===================
@@ -1072,8 +1079,9 @@ app.use((req, res, next) => {
 // Start Server
 // ===================
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`RaPiSys API running on http://localhost:${PORT}`);
   console.log(`Settings config: ${CONFIG.settingsPath}`);
   console.log(`Auth required: ${CONFIG.adminToken ? 'Yes' : 'No (dev mode)'}`);
 });
+serverRef = server;

@@ -34,6 +34,7 @@ import { createUpdateScheduler } from './services/update-scheduler.js';
 import { createAlertEngine } from './services/alerting.js';
 import { createSessionTracker } from './services/session-tracker.js';
 import { createAuth } from './services/auth.js';
+import { createRemoteAccess } from './services/remote-access.js';
 import { historyRouter } from './routes/history.js';
 import { deepHealthRouter } from './routes/health.js';
 import { setupRouter } from './routes/setup.js';
@@ -45,6 +46,7 @@ import { reportsRouter } from './routes/reports.js';
 import { inventoryRouter } from './routes/inventory.js';
 import { layoutsRouter } from './routes/layouts.js';
 import { updatesRouter } from './routes/updates.js';
+import { remoteRouter } from './routes/remote.js';
 import { authRouter } from './routes/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -159,6 +161,12 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   // ---- authentication / operating mode ---------------------------------------
   const auth = createAuth({ getDb, loadSettings, eventsRepo: eventsFacade });
+
+  // ---- in-browser remote access (SSH terminal + VNC desktop) -----------------
+  const remoteAccess = createRemoteAccess({
+    loadSettings, saveSettings, withFileLock,
+    secrets: secretsFacade, auth, events: eventsFacade,
+  });
   // Take over the LEGACY requireAuth as well: in full mode the session
   // cookie (or admin token) authenticates the original settings endpoints;
   // in monitor mode they stay open like stock pi-dashboard.
@@ -221,6 +229,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/reports', reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/updates', updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/remote', remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   app.use('/api/layouts', layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
@@ -231,5 +240,5 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     + `journal=${handle.meta.journalMode} fs=${handle.meta.fsType}`
     + (handle.meta.degraded ? ' (DEGRADED: NAS unavailable, using local fallback)' : ''));
 
-  return { scheduler, getDb, dbMeta };
+  return { scheduler, getDb, dbMeta, attachRemoteAccess: (server) => remoteAccess.attach(server) };
 }

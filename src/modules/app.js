@@ -631,6 +631,100 @@ pageRenderers.hardware = (() => {
 
 pageRenderers.sessions = (() => {
   let timer = null;
+  let term = null, termFit = null, termWs = null, termResizeObs = null;   // SSH terminal state
+  let vncRfb = null;                                                       // VNC client state
+
+  function teardownTerm() {
+    try { termWs && termWs.close(); } catch { /* */ }
+    try { termResizeObs && termResizeObs.disconnect(); } catch { /* */ }
+    try { term && term.dispose(); } catch { /* */ }
+    termWs = null; term = null; termFit = null; termResizeObs = null;
+  }
+  function teardownVnc() {
+    try { vncRfb && vncRfb.disconnect(); } catch { /* */ }
+    vncRfb = null;
+  }
+
+  // Open an in-browser SSH terminal (xterm.js ↔ WebSocket ↔ host sshd).
+  async function openTerminal(host) {
+    const wrap = $('[data-sess=termwrap]', host);
+    if (!wrap) return;
+    let cfg;
+    try { cfg = await api('/remote/config'); } catch { wrap.innerHTML = '<p class="sess-empty">Could not load remote-access config.</p>'; return; }
+    if (!cfg.enabled || !cfg.ssh.enabled) {
+      wrap.innerHTML = '<p class="sess-empty">In-browser SSH is disabled. Enable it in Settings → Remote Access.</p>';
+      return;
+    }
+    if (!cfg.sshKeyConfigured || !cfg.ssh.username) {
+      wrap.innerHTML = '<p class="sess-empty">SSH key or username not configured. Finish setup in Settings → Remote Access.</p>';
+      return;
+    }
+    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="status">Connecting…</span></div><div class="rt-term" data-rt="term"></div>';
+    const [{ Terminal }, { FitAddon }] = await Promise.all([
+      import('@xterm/xterm'), import('@xterm/addon-fit'),
+    ]);
+    await import('@xterm/xterm/css/xterm.css');
+    const statusEl = $('[data-rt=status]', host);
+    term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, monospace',
+      theme: { background: '#0a0a0a', foreground: '#e8e8f0', cursor: '#00d4ff' } });
+    termFit = new FitAddon();
+    term.loadAddon(termFit);
+    term.open($('[data-rt=term]', host));
+    try { termFit.fit(); } catch { /* */ }
+
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    termWs = new WebSocket(`${proto}://${location.host}/api/remote/ws/ssh`);
+    termWs.binaryType = 'arraybuffer';
+    termWs.onopen = () => {
+      if (statusEl) { statusEl.textContent = 'Connected'; statusEl.className = 'rt-status rt-ok'; }
+      sendResize();
+    };
+    termWs.onmessage = (e) => {
+      const data = typeof e.data === 'string' ? e.data : new Uint8Array(e.data);
+      term.write(data);
+    };
+    termWs.onclose = () => { if (statusEl) { statusEl.textContent = 'Disconnected'; statusEl.className = 'rt-status rt-off'; } };
+    termWs.onerror = () => { if (statusEl) { statusEl.textContent = 'Connection error'; statusEl.className = 'rt-status rt-off'; } };
+    term.onData((d) => { if (termWs && termWs.readyState === 1) termWs.send(d); });
+    const sendResize = () => {
+      try { termFit.fit(); } catch { /* */ }
+      if (termWs && termWs.readyState === 1) termWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+    };
+    termResizeObs = new ResizeObserver(() => sendResize());
+    termResizeObs.observe($('[data-rt=term]', host));
+  }
+
+  // Open an in-browser VNC desktop (noVNC ↔ WebSocket ↔ host VNC server).
+  async function openDesktop(host) {
+    const wrap = $('[data-sess=vncwrap]', host);
+    if (!wrap) return;
+    let cfg;
+    try { cfg = await api('/remote/config'); } catch { wrap.innerHTML = '<p class="sess-empty">Could not load remote-access config.</p>'; return; }
+    if (!cfg.enabled || !cfg.vnc.enabled) {
+      wrap.innerHTML = '<p class="sess-empty">In-browser VNC is disabled. Enable it in Settings → Remote Access.</p>';
+      return;
+    }
+    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="vstatus">Connecting…</span><span class="rt-hint">RealVNC: set authentication to VNC password</span></div><div class="rt-vnc" data-rt="vnc"></div>';
+    const statusEl = $('[data-rt=vstatus]', host);
+    const RFB = (await import('@novnc/novnc')).default;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    try {
+      vncRfb = new RFB($('[data-rt=vnc]', host), `${proto}://${location.host}/api/remote/ws/vnc`, {
+        // RealVNC/wayvnc may prompt for a password via the credentials event
+        wsProtocols: ['binary'],
+      });
+      vncRfb.scaleViewport = true;
+      vncRfb.addEventListener('connect', () => { if (statusEl) { statusEl.textContent = 'Connected'; statusEl.className = 'rt-status rt-ok'; } });
+      vncRfb.addEventListener('disconnect', () => { if (statusEl) { statusEl.textContent = 'Disconnected'; statusEl.className = 'rt-status rt-off'; } });
+      vncRfb.addEventListener('credentialsrequired', () => {
+        const password = prompt('VNC password:');
+        if (password != null) vncRfb.sendCredentials({ password });
+      });
+      vncRfb.addEventListener('securityfailure', (e) => { if (statusEl) { statusEl.textContent = 'Auth failed: ' + (e.detail?.reason || ''); statusEl.className = 'rt-status rt-off'; } });
+    } catch (err) {
+      wrap.innerHTML = `<p class="sess-empty">VNC error: ${esc(err.message)}</p>`;
+    }
+  }
 
   const fmtDur = (ms) => {
     if (ms == null) return '—';
@@ -717,7 +811,7 @@ pageRenderers.sessions = (() => {
       <div class="page-lead">${pageHeader('sessions', 'Sessions')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'active', label: 'Active Sessions' }, { id: 'history', label: 'Login History' }])}
+          ${pageTabs([{ id: 'active', label: 'Active Sessions' }, { id: 'history', label: 'Login History' }, { id: 'terminal', label: 'Terminal' }, { id: 'desktop', label: 'Desktop' }])}
           <div class="card-body" data-pane="active">
             <div class="sess-counts" data-sess="counts" style="margin-bottom:14px"></div>
             <h4 class="sess-h">SSH</h4><div data-sess="ssh"></div>
@@ -729,13 +823,24 @@ pageRenderers.sessions = (() => {
             <h4 class="sess-h">Login History (7 days)</h4>
             <div data-sess="hist"></div>
           </div>
+          <div class="card-body" data-pane="terminal" style="display:none">
+            <div data-sess="termwrap"></div>
+          </div>
+          <div class="card-body" data-pane="desktop" style="display:none">
+            <div data-sess="vncwrap"></div>
+          </div>
         </div>
       </div>`;
-      wirePageTabs(host);
+      wirePageTabs(host, (tab) => {
+        // tear down any live remote session when leaving its tab
+        teardownTerm(); teardownVnc();
+        if (tab === 'terminal') openTerminal(host);
+        if (tab === 'desktop') openDesktop(host);
+      });
       refresh(host); refreshHistory(host);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
     },
-    unmount() { clearInterval(timer); },
+    unmount() { clearInterval(timer); teardownTerm(); teardownVnc(); },
   };
 })();
 
@@ -1397,13 +1502,132 @@ pageRenderers.settings = (() => {
     };
   }
 
+  // ---- Remote Access settings pane ----
+  let editRemote = false;
+  async function loadRemote(host) {
+    const el2 = $('[data-set=remote]', host);
+    if (!el2) return;
+    let cfg;
+    try { cfg = await api('/remote/config'); } catch { el2.innerHTML = '<p class="sess-empty">Could not load remote-access config.</p>'; return; }
+
+    if (!editRemote) {
+      const sshState = cfg.ssh.enabled ? '● Enabled' : '○ Disabled';
+      const vncState = cfg.vnc.enabled ? '● Enabled' : '○ Disabled';
+      el2.innerHTML = `
+        <p class="up-sec-hint">Access this Pi's shell and desktop from your browser — no SSH client or VNC viewer needed. Stays on your LAN and uses your admin session. Disabled by default.</p>
+        <div class="set-summary">
+          <div class="set-kv"><span>Remote access</span><b class="${cfg.enabled ? 'set-ok' : ''}">${cfg.enabled ? '● Enabled' : '○ Disabled'}</b></div>
+          <div class="set-kv"><span>SSH terminal</span><b class="${cfg.ssh.enabled ? 'set-ok' : ''}">${sshState}</b></div>
+          <div class="set-kv"><span>SSH login</span><b>${cfg.ssh.username ? esc(cfg.ssh.username) + '@' + esc(cfg.ssh.host) + ':' + cfg.ssh.port : '(not set)'}</b></div>
+          <div class="set-kv"><span>SSH key</span><b>${cfg.sshKeyConfigured ? '✓ generated' : '✗ not generated'}</b></div>
+          <div class="set-kv"><span>VNC desktop</span><b class="${cfg.vnc.enabled ? 'set-ok' : ''}">${vncState}</b></div>
+          <div class="set-kv"><span>VNC server</span><b>${esc(cfg.vnc.host)}:${cfg.vnc.port}</b></div>
+        </div>
+        <div class="set-actions">
+          <button class="set-btn set-btn-edit" data-rm="edit">${EDIT_ICON}<span>Edit</span></button>
+        </div>`;
+      $('[data-rm=edit]', host).onclick = () => { editRemote = true; loadRemote(host); };
+      return;
+    }
+
+    el2.innerHTML = `
+      <div class="wz-form">
+        <label class="sched-toggle sched-toggle-main">
+          <span class="set-switch"><input type="checkbox" data-rm="enabled" ${cfg.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+          <span>Enable in-browser remote access</span>
+        </label>
+
+        <div class="sched-subnotif" data-rm-sub ${cfg.enabled ? '' : 'hidden'}>
+          <h4 class="sess-h">SSH Terminal</h4>
+          <label class="sched-toggle">
+            <span class="set-switch"><input type="checkbox" data-rm="sshen" ${cfg.ssh.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+            <span>Enable SSH terminal</span>
+          </label>
+          <label>SSH username
+            <input data-rm="sshuser" value="${esc(cfg.ssh.username || '')}" placeholder="e.g. pi" autocomplete="off">
+          </label>
+          <div class="wz-row">
+            <label style="flex:2">Host <input data-rm="sshhost" value="${esc(cfg.ssh.host)}"></label>
+            <label style="flex:1">Port <input data-rm="sshport" type="number" value="${cfg.ssh.port}"></label>
+          </div>
+          <div class="rm-keybox">
+            <div class="rm-key-head"><b>Dashboard SSH key</b> <span class="${cfg.sshKeyConfigured ? 'set-ok' : 'inv-dim'}">${cfg.sshKeyConfigured ? '✓ generated' : 'not generated'}</span></div>
+            <p class="up-sec-hint">Add this public key to <code>~/.ssh/authorized_keys</code> on the Pi so the terminal can log in.</p>
+            <pre class="rm-pubkey" data-rm="pubkey">${cfg.sshPublicKey ? esc(cfg.sshPublicKey) : '(generate a key to see it here)'}</pre>
+            <div class="set-actions" style="border:0;padding-top:0">
+              <button class="set-btn" data-rm="genkey">${cfg.sshKeyConfigured ? 'Regenerate Key' : 'Generate Key'}</button>
+              ${cfg.sshPublicKey ? '<button class="set-btn" data-rm="copykey">Copy Public Key</button>' : ''}
+            </div>
+          </div>
+
+          <h4 class="sess-h" style="margin-top:18px">VNC Desktop</h4>
+          <label class="sched-toggle">
+            <span class="set-switch"><input type="checkbox" data-rm="vncen" ${cfg.vnc.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+            <span>Enable VNC desktop</span>
+          </label>
+          <div class="wz-row">
+            <label style="flex:2">VNC host <input data-rm="vnchost" value="${esc(cfg.vnc.host)}"></label>
+            <label style="flex:1">Port <input data-rm="vncport" type="number" value="${cfg.vnc.port}"></label>
+          </div>
+          <p class="up-sec-hint">Requires a VNC server (RealVNC) running on the Pi. In RealVNC set the authentication mode to <b>VNC password</b> so the browser can prompt for it.</p>
+        </div>
+
+        <div class="set-actions">
+          <button class="set-btn set-btn-primary" data-rm="save">${SAVE_ICON}<span>Save</span></button>
+          <button class="set-btn set-btn-cancel" data-rm="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+          <span data-rm="msg"></span>
+        </div>
+      </div>`;
+    enhanceSelects(host);
+
+    const mainTog = $('[data-rm=enabled]', host);
+    const sub = $('[data-rm-sub]', host);
+    if (mainTog && sub) mainTog.addEventListener('change', () => { sub.hidden = !mainTog.checked; });
+
+    $('[data-rm=genkey]', host).onclick = async () => {
+      const btn = $('[data-rm=genkey]', host); btn.disabled = true; btn.textContent = 'Generating…';
+      try {
+        const r = await api('/remote/ssh/key', { method: 'POST', body: {} });
+        $('[data-rm=pubkey]', host).textContent = r.publicKey;
+        toast('success', 'Remote Access', 'SSH key generated');
+        editRemote = true; loadRemote(host);
+      } catch (err) { toast('error', 'Remote Access', err.message); btn.disabled = false; btn.textContent = 'Generate Key'; }
+    };
+    const copyBtn = $('[data-rm=copykey]', host);
+    if (copyBtn) copyBtn.onclick = () => {
+      const txt = $('[data-rm=pubkey]', host).textContent;
+      navigator.clipboard?.writeText(txt).then(() => toast('success', 'Remote Access', 'Public key copied')).catch(() => {});
+    };
+
+    $('[data-rm=cancel]', host).onclick = () => { editRemote = false; loadRemote(host); };
+    $('[data-rm=save]', host).onclick = async () => {
+      const body = {
+        enabled: $('[data-rm=enabled]', host).checked,
+        ssh: {
+          enabled: $('[data-rm=sshen]', host).checked,
+          username: $('[data-rm=sshuser]', host).value.trim(),
+          host: $('[data-rm=sshhost]', host).value.trim() || '127.0.0.1',
+          port: Number($('[data-rm=sshport]', host).value) || 22,
+        },
+        vnc: {
+          enabled: $('[data-rm=vncen]', host).checked,
+          host: $('[data-rm=vnchost]', host).value.trim() || '127.0.0.1',
+          port: Number($('[data-rm=vncport]', host).value) || 5900,
+        },
+      };
+      const b = $('[data-rm=save]', host); b.disabled = true; $('[data-rm=msg]', host).textContent = 'Saving…';
+      try { await api('/remote/config', { method: 'PUT', body }); toast('success', 'Remote Access', 'Settings saved'); editRemote = false; loadRemote(host); }
+      catch (err) { $('[data-rm=msg]', host).textContent = '✗ ' + err.message; b.disabled = false; }
+    };
+  }
+
   return {
     mount(host) {
       host.innerHTML = `
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Notifications' }, { id: 'account', label: 'Account' }])}
+          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Notifications' }, { id: 'remote', label: 'Remote Access' }, { id: 'account', label: 'Account' }])}
           <div class="card-body" data-pane="health">
             <div data-set="health"></div>
           </div>
@@ -1419,12 +1643,16 @@ pageRenderers.settings = (() => {
             <h4 class="sess-h" style="margin-top:24px">Telegram</h4>
             <div data-set="telegram"></div>
           </div>
+          <div class="card-body" data-pane="remote" style="display:none">
+            <h4 class="sess-h">In-Browser Remote Access</h4>
+            <div data-set="remote"></div>
+          </div>
           <div class="card-body" data-pane="account" style="display:none">
             <div data-set="account"></div>
           </div>
         </div>
       </div>`;
-      wirePageTabs(host);
+      wirePageTabs(host, (tab) => { if (tab === 'remote') loadRemote(host); });
       load(host);
     },
     unmount() {},
