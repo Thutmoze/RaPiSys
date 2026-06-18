@@ -194,19 +194,21 @@ export async function vncVencryptProxy(ws, opts) {
     log('chose VeNCrypt subtype', chosen, needsPlainAuth ? '(plain auth)' : '(no auth)');
     const sb = Buffer.alloc(4); sb.writeUInt32BE(chosen, 0); writeRaw(sb);
 
-    // 8) server sends 1 ack byte (1 = continue) before TLS in many servers; but
-    //    per the strict 0.2 spec the TLS handshake starts immediately. wayvnc
-    //    (neatvnc) sends an ack byte: read it but tolerate either path by
-    //    peeking — we read 1 byte; if it's part of the TLS ClientHello we'd
-    //    corrupt the stream, so we DON'T read here and start TLS directly, which
-    //    matches neatvnc. (If this proves wrong on-device, the log will show a
-    //    TLS handshake failure and we add a 1-byte read here.)
+    // 8) neatvnc (wayvnc) sends a 1-byte ack after the subtype selection and
+    //    BEFORE the TLS handshake (0 = failure, non-0 = continue). If we don't
+    //    consume it, Node's TLS ClientHello reads it as the first record byte
+    //    and fails with "wrong version number". (Confirmed on-device.)
+    const subAck = (await upReader.read(1))[0];
+    log('subtype ack:', subAck);
+    if (subAck === 0) throw new Error('wayvnc rejected VeNCrypt subtype ' + chosen);
 
     // 9) upgrade the socket to TLS. Hand the raw socket to tls.connect as the
     //    underlying transport; from here we read/write via tlsSock.
     upstream.removeAllListeners('data');
-    const anyLeft = upReader.drain();   // should be empty; if not, TLS would choke
-    if (anyLeft.length) log('WARNING: ' + anyLeft.length + ' bytes buffered before TLS (unexpected)');
+    const anyLeft = upReader.drain();
+    // any bytes that arrived bundled with the ack belong to TLS — put them back
+    // on the socket's read buffer so tls.connect consumes them first.
+    if (anyLeft.length) { log(anyLeft.length + ' bytes buffered pre-TLS, unshifting to socket'); upstream.unshift(anyLeft); }
     tlsSock = await new Promise((res, rej) => {
       const t = tls.connect({
         socket: upstream,
