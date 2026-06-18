@@ -5787,3 +5787,15 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .rm-pubkey { font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.5;
   background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px;
   padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); margin: 6px 0; }
+
+/* Remote terminal toolbar buttons + fullscreen + popout */
+.rt-btn { padding: 4px 12px; font-size: 12px; }
+.rt-fs { position: fixed; inset: 0; z-index: 9000; background: #0a0a0a; padding: 12px; border-radius: 0; }
+.rt-fs .rt-term { height: calc(100vh - 60px); }
+.rt-fs .rt-vnc { height: calc(100vh - 60px); }
+/* Popout window: hide nav rail + page header for a clean standalone terminal */
+body.rapisys-popout .nav-rail,
+body.rapisys-popout .page-lead,
+body.rapisys-popout .page-tabs { display: none !important; }
+body.rapisys-popout .container { max-width: 100%; padding: 8px; }
+body.rapisys-popout .rt-term { height: calc(100vh - 70px); }

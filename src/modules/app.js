@@ -659,7 +659,7 @@ pageRenderers.sessions = (() => {
       wrap.innerHTML = '<p class="sess-empty">SSH key or username not configured. Finish setup in Settings → Remote Access.</p>';
       return;
     }
-    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="status">Connecting…</span></div><div class="rt-term" data-rt="term"></div>';
+    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="status">Connecting…</span><span style="flex:1"></span><button class="set-btn rt-btn" data-rt="fs">⛶ Fullscreen</button><button class="set-btn rt-btn" data-rt="popout">⧉ New Window</button></div><div class="rt-term" data-rt="term"></div>';
     const [{ Terminal }, { FitAddon }] = await Promise.all([
       import('@xterm/xterm'), import('@xterm/addon-fit'),
     ]);
@@ -692,6 +692,27 @@ pageRenderers.sessions = (() => {
     };
     termResizeObs = new ResizeObserver(() => sendResize());
     termResizeObs.observe($('[data-rt=term]', host));
+
+    // Fullscreen the terminal pane (native Fullscreen API).
+    const fsBtn = $('[data-rt=fs]', host);
+    if (fsBtn) fsBtn.onclick = () => {
+      const el2 = wrap;
+      if (!document.fullscreenElement) { el2.requestFullscreen?.().then(() => setTimeout(sendResize, 100)).catch(() => {}); el2.classList.add('rt-fs'); }
+      else { document.exitFullscreen?.(); el2.classList.remove('rt-fs'); }
+    };
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement) wrap.classList.remove('rt-fs');
+      setTimeout(sendResize, 120);
+    });
+
+    // Pop the terminal out into its own browser window (own SSH session).
+    const poBtn = $('[data-rt=popout]', host);
+    if (poBtn) poBtn.onclick = () => {
+      const w = window.open(`${location.origin}/#/sessions?pop=terminal`, 'rapisys-terminal',
+        'width=960,height=600,menubar=no,toolbar=no,location=no,status=no');
+      if (w) { try { w.focus(); } catch { /* */ } }
+      else toast('info', 'Terminal', 'Popup blocked — allow popups for this site');
+    };
   }
 
   // Open an in-browser VNC desktop (noVNC ↔ WebSocket ↔ host VNC server).
@@ -839,6 +860,13 @@ pageRenderers.sessions = (() => {
       });
       refresh(host); refreshHistory(host);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
+      // popout window: ?pop=terminal → jump straight to the Terminal tab and
+      // strip the nav rail/header for a clean standalone terminal window.
+      if (location.hash.includes('pop=terminal')) {
+        document.body.classList.add('rapisys-popout');
+        const tbtn = host.querySelector('[data-tab=terminal]');
+        if (tbtn) tbtn.click();
+      }
     },
     unmount() { clearInterval(timer); teardownTerm(); teardownVnc(); },
   };
@@ -1594,9 +1622,29 @@ pageRenderers.settings = (() => {
       } catch (err) { toast('error', 'Remote Access', err.message); btn.disabled = false; btn.textContent = 'Generate Key'; }
     };
     const copyBtn = $('[data-rm=copykey]', host);
-    if (copyBtn) copyBtn.onclick = () => {
+    if (copyBtn) copyBtn.onclick = async () => {
       const txt = $('[data-rm=pubkey]', host).textContent;
-      navigator.clipboard?.writeText(txt).then(() => toast('success', 'Remote Access', 'Public key copied')).catch(() => {});
+      let ok = false;
+      // navigator.clipboard only exists in secure contexts (HTTPS/localhost);
+      // over plain-HTTP LAN it's undefined, so fall back to execCommand.
+      try {
+        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(txt); ok = true; }
+        else {
+          const ta = document.createElement('textarea');
+          ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+      } catch { ok = false; }
+      if (ok) {
+        const orig = copyBtn.innerHTML;
+        copyBtn.classList.add('set-btn-test');
+        copyBtn.innerHTML = '<span>✓ Copied</span>';
+        setTimeout(() => { copyBtn.classList.remove('set-btn-test'); copyBtn.innerHTML = orig; }, 1600);
+      } else {
+        toast('info', 'Remote Access', 'Could not copy — select the key text and copy manually');
+      }
     };
 
     $('[data-rm=cancel]', host).onclick = () => { editRemote = false; loadRemote(host); };
