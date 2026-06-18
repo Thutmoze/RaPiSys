@@ -106,12 +106,49 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
   }
 
   /** Run one scheduled check; email if configured and warranted. */
+  let running = false;
+  let runningSince = null;
   async function runOnce() {
     const cfg = await getConfig();
     if (!cfg.enabled) return { skipped: 'disabled' };
+    running = true; runningSince = Date.now();
+    try {
+      return await doRun(cfg);
+    } finally {
+      running = false; runningSince = null;
+    }
+  }
+
+  async function doRun(cfg) {
     const out = await updates.refresh();
     if (!out.available) return { skipped: 'no-agent' };
     const list = out.updates || [];
+
+    // Deep scan (#3): the interactive UI tags security/CVEs lazily — a user
+    // clicks "view changelog" and large packages get their full changelog
+    // downloaded on demand. A scheduled check has no one to click, so for any
+    // package the cheap range-fetch couldn't reach (out.unscanned), download the
+    // full package changelog here so the security/CVE picture is complete before
+    // we decide what to notify. Bounded so a pathological run can't take forever.
+    let deepScanned = 0;
+    const unscanned = (out.unscanned || []).slice(0, 40);
+    if (unscanned.length && updates.changelogFull && updates.tagSecurityFromChangelog) {
+      const byPkg = Object.fromEntries(list.map((u) => [u.package, u]));
+      for (const pkg of unscanned) {
+        try {
+          const r = await updates.changelogFull(pkg);
+          const u = byPkg[pkg];
+          if (r && r.changelog && u) {
+            const tag = updates.tagSecurityFromChangelog(pkg, u.candidate, r.changelog, u.installed);
+            if (tag) { u.security = tag.security; u.cves = tag.cves; u.urgency = tag.urgency; }
+            deepScanned++;
+          }
+        } catch (err) {
+          events?.add?.('update.deepscan.fail', 'info', { pkg, error: err.message });
+        }
+      }
+    }
+
     const security = list.filter((u) => u.security);
 
     let emailed = false;
@@ -193,5 +230,5 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
     try { await runOnce(); } catch (err) { events?.add?.('update.check.fail', 'warning', { error: err.message }); }
   }
 
-  return { getConfig, setConfig, runOnce, tick, isDue };
+  return { getConfig, setConfig, runOnce, tick, isDue, isRunning: () => ({ running, since: runningSince }) };
 }

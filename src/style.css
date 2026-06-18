@@ -5692,3 +5692,16 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sched-sum-acts { display: flex; gap: 6px; flex-shrink: 0; }
 
 .sched-next { color: var(--accent-cyan); }
+
+/* Auto-check — checking-now banner */
+.sched-checking { display: flex; align-items: center; gap: 10px; padding: 12px 16px; margin-bottom: 14px;
+  background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.35); border-radius: var(--radius-sm);
+  color: var(--accent-cyan); font-size: 13px; font-weight: 600; }
+
+/* Auto-check — notification toggle group (master + sub-toggles) */
+.sched-notif { margin: 6px 0 4px; }
+.sched-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 0; font-size: 13px; color: var(--text-secondary); }
+.sched-toggle-main { font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); }
+.sched-subnotif { padding-left: 14px; margin-top: 2px; border-left: 2px solid var(--border-color); }
+.sched-subnotif[hidden] { display: none; }

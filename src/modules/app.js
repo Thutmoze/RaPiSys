@@ -2633,19 +2633,22 @@ pageRenderers.updates = (() => {
     const historyHtml = history.length ? `
       <h4 class="sess-h">Run history</h4>
       <div class="up-table-scroll">
-      <table class="inv-table"><thead><tr><th>When</th><th>Updates</th><th>Security</th><th>Emailed</th></tr></thead>
+      <table class="inv-table"><thead><tr><th>When</th><th>Updates</th><th>Security</th><th>Email</th><th>Telegram</th></tr></thead>
       <tbody>${history.map((h) => `<tr>
         <td class="inv-dim">${new Date(h.ts).toLocaleString()}</td>
         <td><b>${h.checked}</b></td>
         <td><b class="${h.security ? 'sched-sec' : ''}">${h.security}</b></td>
         <td>${h.emailed ? '<span class="inv-badge inv-ok">sent</span>' : '<span class="inv-dim">—</span>'}</td>
+        <td>${h.telegrammed ? '<span class="inv-badge inv-ok">sent</span>' : '<span class="inv-dim">—</span>'}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p class="sess-empty">No automatic checks have run yet.</p>';
 
     // VIEW MODE: a schedule is configured and we're not editing → summary + glyphs
     const showForm = editSchedule || !cfg.enabled;
     if (!showForm) {
+      const running = cfg._running?.running;
       target.innerHTML = `
         <p class="up-sec-hint">Periodically run a security check in the background and email you new security updates. Uses the SMTP settings from Settings \u2192 Email (SMTP).</p>
+        ${running ? `<div class="sched-checking"><span class="up-spinner-sm"></span><span>Checking for updates now…</span></div>` : ''}
         <div class="set-summary sched-summary">
           <div class="sched-sum-main">
             <div class="set-kv"><span>Status</span><b class="set-ok">● Enabled</b></div>
@@ -2665,6 +2668,14 @@ pageRenderers.updates = (() => {
           <span data-sch="msg"></span>
         </div>
         ${historyHtml}`;
+      if (running && !host._schedPoll) {
+        host._schedPoll = setInterval(async () => {
+          try {
+            const c = await api('/updates/schedule');
+            if (!c._running?.running) { clearInterval(host._schedPoll); host._schedPoll = null; loadSchedule(host); }
+          } catch { clearInterval(host._schedPoll); host._schedPoll = null; }
+        }, 3000);
+      }
       $('[data-sch=edit]', host).onclick = () => { editSchedule = true; loadSchedule(host); };
       $('[data-sch=disable]', host).onclick = async () => {
         if (!await rapisysConfirm('Disable automatic update checks?', { danger: true, confirmLabel: 'Disable' })) return;
@@ -2716,9 +2727,26 @@ pageRenderers.updates = (() => {
           <input data-sch="to" value="${esc(cfg.emailTo || '')}" placeholder="you@example.com (falls back to SMTP recipient)" autocomplete="off">
         </label>
 
-        <label class="wz-inline"><input type="checkbox" data-sch="email" ${cfg.emailEnabled ? 'checked' : ''}> Send an email when updates are found</label>
-        <label class="wz-inline"><input type="checkbox" data-sch="telegram" ${cfg.telegramEnabled ? 'checked' : ''}> Send a Telegram message when updates are found</label>
-        <label class="wz-inline"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}> Only notify when there are security updates</label>
+        <div class="sched-notif">
+          <label class="sched-toggle sched-toggle-main">
+            <span>Enable notifications</span>
+            <span class="set-switch"><input type="checkbox" data-sch="notify" ${(cfg.emailEnabled || cfg.telegramEnabled) ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+          </label>
+          <div class="sched-subnotif" data-sch-subnotif ${(cfg.emailEnabled || cfg.telegramEnabled) ? '' : 'hidden'}>
+            <label class="sched-toggle">
+              <span>Email</span>
+              <span class="set-switch"><input type="checkbox" data-sch="email" ${cfg.emailEnabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+            </label>
+            <label class="sched-toggle">
+              <span>Telegram</span>
+              <span class="set-switch"><input type="checkbox" data-sch="telegram" ${cfg.telegramEnabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+            </label>
+            <label class="sched-toggle">
+              <span>Security updates only</span>
+              <span class="set-switch"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+            </label>
+          </div>
+        </div>
         <div class="set-actions">
           <button class="set-btn set-btn-primary" data-sch="save"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Save schedule</span></button>
           ${cfg.enabled ? `<button class="set-btn" data-sch="cancel"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button>` : ''}
@@ -2738,6 +2766,19 @@ pageRenderers.updates = (() => {
       if (dom) dom.hidden = f !== 'monthly';
     };
     freqSel.addEventListener('change', syncFreq); syncFreq();
+    // master "Enable notifications" toggle reveals the email/telegram/security sub-toggles
+    const notifyMain = $('[data-sch=notify]', host);
+    const subNotif = $('[data-sch-subnotif]', host);
+    if (notifyMain && subNotif) {
+      notifyMain.addEventListener('change', () => {
+        subNotif.hidden = !notifyMain.checked;
+        if (!notifyMain.checked) {
+          // turning the master off disables the channels
+          const e = $('[data-sch=email]', host), t = $('[data-sch=telegram]', host);
+          if (e) e.checked = false; if (t) t.checked = false;
+        }
+      });
+    }
     const msg = $('[data-sch=msg]', host);
     $('[data-sch=save]', host).onclick = async () => {
       let h = Number($('[data-sch=hour]', host).value) % 12;

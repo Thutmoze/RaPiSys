@@ -10,7 +10,8 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
 
   // -- automatic update check schedule (read public, write requires control) --
   r.get('/schedule', async (req, res) => {
-    res.json(await updateScheduler.getConfig());
+    const cfg = await updateScheduler.getConfig();
+    res.json({ ...cfg, _running: updateScheduler.isRunning?.() || { running: false } });
   });
   r.put('/schedule', requireControl, async (req, res) => {
     try { res.json(await updateScheduler.setConfig(req.body || {})); }

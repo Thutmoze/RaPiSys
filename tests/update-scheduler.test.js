@@ -3,19 +3,29 @@ import { describe, it, expect, vi } from 'vitest';
 
 const { createUpdateScheduler } = await import('../server/services/update-scheduler.js');
 
-function fixture({ updatesList = [], smtpTo = 'admin@example.com' } = {}) {
+function fixture({ updatesList = [], unscanned = [], changelogs = {} } = {}) {
   let settings = { rapisys: {} };
   const sent = [];
-  const updates = { refresh: vi.fn(async () => ({ available: true, updates: updatesList, checkedAt: Date.now() })) };
+  const tgSent = [];
+  const updates = {
+    refresh: vi.fn(async () => ({ available: true, updates: updatesList, checkedAt: Date.now(), unscanned })),
+    changelogFull: vi.fn(async (pkg) => ({ changelog: changelogs[pkg] || '' })),
+    tagSecurityFromChangelog: vi.fn((pkg, cand, text) => {
+      const cves = new Set((text.match(/CVE-\d{4}-\d+/g) || [])).size;
+      const security = /-security;/.test(text) || cves > 0;
+      return { security, cves, urgency: security ? 'high' : 'low' };
+    }),
+  };
   const mailer = { send: vi.fn(async (m) => { sent.push(m); return { ok: true }; }) };
+  const telegram = { send: vi.fn(async (m) => { tgSent.push(m); return { ok: true }; }) };
   const sched = createUpdateScheduler({
-    updates, mailer,
+    updates, mailer, telegram,
     loadSettings: async () => settings,
     saveSettings: async (s) => { settings = s; },
     withFileLock: async (fn) => fn(),
     events: { add: () => {} },
   });
-  return { sched, sent, updates, mailer, get settings() { return settings; } };
+  return { sched, sent, tgSent, updates, mailer, telegram, get settings() { return settings; } };
 }
 
 describe('update scheduler', () => {
@@ -65,6 +75,31 @@ describe('update scheduler', () => {
     expect(r.security).toBe(0);
     expect(r.emailed).toBe(false);
     expect(mailer.send).not.toHaveBeenCalled();
+  });
+
+  it('deep-scans unscanned packages and upgrades them to security when CVEs found', async () => {
+    // chromium starts untagged (security:false) and is in the unscanned list;
+    // its full changelog contains a CVE, so the deep-scan must flip it.
+    const { sched, updates } = fixture({
+      updatesList: [{ package: 'chromium', installed: '1', candidate: '2', security: false }],
+      unscanned: ['chromium'],
+      changelogs: { chromium: 'chromium (2) bookworm; urgency=high\n  * Fix CVE-2026-1234\n' },
+    });
+    await sched.setConfig({ enabled: true, onlySecurity: true });
+    const r = await sched.runOnce();
+    expect(updates.changelogFull).toHaveBeenCalledWith('chromium');
+    expect(r.security).toBe(1);          // upgraded by the deep scan
+  });
+
+  it('sends Telegram when telegramEnabled and security updates exist', async () => {
+    const { sched, telegram, tgSent } = fixture({
+      updatesList: [{ package: 'openssl', installed: '1', candidate: '2', security: true, cves: 1 }],
+    });
+    await sched.setConfig({ enabled: true, emailEnabled: false, telegramEnabled: true });
+    const r = await sched.runOnce();
+    expect(r.telegrammed).toBe(true);
+    expect(telegram.send).toHaveBeenCalledTimes(1);
+    expect(tgSent[0].text).toMatch(/openssl/);
   });
 
   it('tick fires within the window after the scheduled time, once per occurrence', async () => {
