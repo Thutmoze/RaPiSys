@@ -9,6 +9,7 @@ function fixture({ updatesList = [], unscanned = [], changelogs = {} } = {}) {
   const tgSent = [];
   const updates = {
     refresh: vi.fn(async () => ({ available: true, updates: updatesList, checkedAt: Date.now(), unscanned })),
+    cached: vi.fn(() => ({ available: true, updates: updatesList, checkedAt: Date.now() })),
     changelogFull: vi.fn(async (pkg) => ({ changelog: changelogs[pkg] || '' })),
     tagSecurityFromChangelog: vi.fn((pkg, cand, text) => {
       const cves = new Set((text.match(/CVE-\d{4}-\d+/g) || [])).size;

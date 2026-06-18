@@ -403,8 +403,31 @@ function buildNav() {
     }
   });
   rail.appendChild(authBtn);
+  // Global "checking now" indicator: a small spinner in the nav rail, visible on
+  // any page while a background auto-check is running. Polls every 15s.
+  const checkInd = el('div', 'nav-checking', `
+    <span class="up-spinner-sm"></span><span class="nav-label">Checking…</span>`);
+  checkInd.title = 'An automatic update check is running';
+  checkInd.style.display = 'none';
+  rail.appendChild(checkInd);
+  startGlobalCheckPoll(checkInd);
   document.body.appendChild(rail);
   return rail;
+}
+
+// Poll the auto-check schedule for a running background check; toggle the nav
+// indicator. Lightweight (one tiny GET) and shared across all pages.
+let _globalCheckTimer = null;
+function startGlobalCheckPoll(indEl) {
+  if (_globalCheckTimer) clearInterval(_globalCheckTimer);
+  const tick = async () => {
+    try {
+      const c = await api('/updates/schedule');
+      indEl.style.display = c?._running?.running ? 'flex' : 'none';
+    } catch { /* leave as-is on error */ }
+  };
+  tick();
+  _globalCheckTimer = setInterval(tick, 15000);
 }
 
 function route() {
@@ -2072,7 +2095,7 @@ pageRenderers.inventory = (() => {
 
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set(), activeFilter = 'all';
-  let streaming = false, expandedLog = null, logCache = {}, editSchedule = false;
+  let streaming = false, expandedLog = null, logCache = {}, editSchedule = false, schedPollHost = null;
   const oldExpanded = new Set();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // inline glyphs (stroke icons matching the app's Lucide-style set)
@@ -2206,8 +2229,8 @@ pageRenderers.updates = (() => {
       ACTION_BTN('refresh', ICN.refresh, 'Check for updates')
       + ACTION_BTN('security', ICN.shield, sec ? `Install security updates (${sec})` : 'No security updates', 'up-act-sec', !sec)
       + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel', selected.size === 0)
-      + ACTION_BTN('full', ICN.rocket, 'Full Upgrade', 'up-act-danger', !updates.length)
-      + ACTION_BTN('firmware', ICN.chip, fw ? 'Update firmware' : 'Firmware', 'up-act-fw', !fw);
+      + ACTION_BTN('full', ICN.rocket, `Full Upgrade (${updates.length})`, 'up-act-danger', !updates.length)
+      + ACTION_BTN('firmware', ICN.chip, fw ? 'Update Firmware (1)' : 'Firmware (0)', 'up-act-fw', !fw);
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
@@ -2667,13 +2690,22 @@ pageRenderers.updates = (() => {
           <span data-sch="msg"></span>
         </div>
         ${historyHtml}`;
-      if (running && !host._schedPoll) {
+      // Always poll while viewing the schedule (view mode): show the banner the
+      // moment a background check starts, and re-render when it finishes so the
+      // run history + last-run update without a manual refresh.
+      if (!host._schedPoll) {
+        schedPollHost = host;
+        let wasRunning = running;
         host._schedPoll = setInterval(async () => {
           try {
             const c = await api('/updates/schedule');
-            if (!c._running?.running) { clearInterval(host._schedPoll); host._schedPoll = null; loadSchedule(host); }
-          } catch { clearInterval(host._schedPoll); host._schedPoll = null; }
-        }, 3000);
+            const now = !!c?._running?.running;
+            if (now !== wasRunning) {   // state changed → re-render to reflect it
+              wasRunning = now;
+              loadSchedule(host);
+            }
+          } catch { /* keep polling */ }
+        }, 4000);
       }
       $('[data-sch=edit]', host).onclick = () => { editSchedule = true; loadSchedule(host); };
       $('[data-sch=disable]', host).onclick = async () => {
@@ -2851,7 +2883,12 @@ pageRenderers.updates = (() => {
           </div>
         </div>
       </div>`;
-      wirePageTabs(host, (tab) => { if (tab === 'history') loadHistory(host); if (tab === 'schedule') loadSchedule(host); });
+      wirePageTabs(host, (tab) => {
+        // leaving the schedule tab stops its poll
+        if (tab !== 'schedule' && host._schedPoll) { clearInterval(host._schedPoll); host._schedPoll = null; }
+        if (tab === 'history') loadHistory(host);
+        if (tab === 'schedule') loadSchedule(host);
+      });
       // Draw the action toolbar immediately so "Check for updates" is always
       // available, even before (or without) a cached upgrade list.
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip up-checking"><span class="up-spinner-sm"></span>checking…</span>';
@@ -2860,7 +2897,7 @@ pageRenderers.updates = (() => {
       $('[data-up=table]', host).innerHTML = '<div class="up-scanbar"><span></span></div><p class="sess-empty">Click \u201cCheck for updates\u201d to scan for available updates.</p>';
       load(host);
     },
-    unmount() { streaming = false; },
+    unmount() { streaming = false; if (schedPollHost?._schedPoll) { clearInterval(schedPollHost._schedPoll); schedPollHost._schedPoll = null; } },
   };
 })();
 

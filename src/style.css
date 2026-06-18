@@ -5716,3 +5716,8 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .set-btn-cancel:hover, button.set-btn-cancel:hover {
   background: rgba(239,68,68,0.18); border-color: #ef4444; color: #ef4444;
 }
+
+/* Global nav-rail "checking now" indicator */
+.nav-checking { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 8px;
+  color: var(--accent-cyan); font-size: 12px; font-weight: 600; }
+.nav-checking .up-spinner-sm { flex-shrink: 0; }

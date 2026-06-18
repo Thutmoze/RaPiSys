@@ -149,32 +149,41 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
       }
     }
 
-    const security = list.filter((u) => u.security);
+    // Recompute from the SAME merged source the Available Updates tab reads
+    // (updates.cached() merges all persisted security tags), so the Auto-Check
+    // count can't diverge from what the user sees on the Updates page. Our
+    // deep-scan tags above are persisted, so they're included here too.
+    let finalList = list;
+    try {
+      const merged = updates.cached?.();
+      if (merged?.updates?.length) finalList = merged.updates;
+    } catch { /* fall back to the in-memory list */ }
+    const security = finalList.filter((u) => u.security);
 
     let emailed = false;
-    if (cfg.emailEnabled && (security.length > 0 || (!cfg.onlySecurity && list.length > 0))) {
+    if (cfg.emailEnabled && (security.length > 0 || (!cfg.onlySecurity && finalList.length > 0))) {
       const to = cfg.emailTo || undefined;   // mailer falls back to SMTP "to"
-      const { subject, text, html } = buildEmail(list);
+      const { subject, text, html } = buildEmail(finalList);
       try {
         await mailer.send({ to, subject, text, html });
         emailed = true;
-        events?.add?.('update.email', 'info', { security: security.length, total: list.length });
+        events?.add?.('update.email', 'info', { security: security.length, total: finalList.length });
       } catch (err) {
         events?.add?.('update.email.fail', 'warning', { error: err.message });
       }
     }
 
     let telegrammed = false;
-    if (cfg.telegramEnabled && telegram && (security.length > 0 || (!cfg.onlySecurity && list.length > 0))) {
+    if (cfg.telegramEnabled && telegram && (security.length > 0 || (!cfg.onlySecurity && finalList.length > 0))) {
       try {
-        await telegram.send({ text: buildTelegram(list) });
+        await telegram.send({ text: buildTelegram(finalList) });
         telegrammed = true;
-        events?.add?.('update.telegram', 'info', { security: security.length, total: list.length });
+        events?.add?.('update.telegram', 'info', { security: security.length, total: finalList.length });
       } catch (err) {
         events?.add?.('update.telegram.fail', 'warning', { error: err.message });
       }
     }
-    const result = { ts: Date.now(), checked: list.length, security: security.length, emailed, telegrammed, checkedAt: out.checkedAt };
+    const result = { ts: Date.now(), checked: finalList.length, security: security.length, emailed, telegrammed, checkedAt: out.checkedAt };
     // persist the last-run summary + a short history so the UI can show both
     await withFileLock(async () => {
       const s = await loadSettings();
