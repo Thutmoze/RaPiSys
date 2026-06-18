@@ -25,6 +25,29 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
   const SSH_KEY_SECRET = 'remote.ssh.privkey';
   const VNC_PW_SECRET = 'remote.vnc.password';
 
+  // Live in-browser bridge sessions (SSH + VNC), surfaced in Active Sessions.
+  // Map<id, {kind, username, source, startedAt}>.
+  const liveBridges = new Map();
+  let bridgeSeq = 0;
+  function openBridge(kind, username) {
+    const id = `br${++bridgeSeq}`;
+    liveBridges.set(id, { kind, username: username || kind, source: 'dashboard (browser)', startedAt: Date.now() });
+    return id;
+  }
+  function closeBridge(id) { if (id) liveBridges.delete(id); }
+  // Snapshot for the sessions collector to merge in.
+  function liveSessions() {
+    return [...liveBridges.entries()].map(([id, s]) => ({
+      kind: s.kind,
+      key: `bridge:${id}`,
+      username: s.username,
+      source: s.source,
+      startedAt: s.startedAt,
+      idleMs: null,
+      meta: { bridge: true, via: 'dashboard' },
+    }));
+  }
+
   // ---- config ---------------------------------------------------------------
   function defaults() {
     return {
@@ -150,11 +173,13 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
 
     const conn = new SSHClient();
     let closed = false;
-    const cleanup = () => { if (closed) return; closed = true; try { conn.end(); } catch { /* */ } try { ws.close(); } catch { /* */ } };
+    let bridgeId = null;
+    const cleanup = () => { if (closed) return; closed = true; closeBridge(bridgeId); try { conn.end(); } catch { /* */ } try { ws.close(); } catch { /* */ } };
 
     conn.on('ready', () => {
       conn.shell({ term: 'xterm-256color' }, (err, stream) => {
         if (err) { fail('Shell error: ' + err.message); return cleanup(); }
+        bridgeId = openBridge('ssh', cfg.ssh.username);
         events?.add?.('remote.ssh.open', 'info', { user: cfg.ssh.username });
         stream.on('data', (d) => { try { ws.send(d); } catch { /* */ } });
         stream.stderr.on('data', (d) => { try { ws.send(d); } catch { /* */ } });
@@ -202,8 +227,9 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
       // transparent TCP bridge (no-auth / standard-VNC server noVNC handles itself)
       const tcp = net.connect({ host: cfg.vnc.host || '127.0.0.1', port: Number(cfg.vnc.port) || 5900 });
       let closed = false;
-      const cleanup = () => { if (closed) return; closed = true; try { tcp.destroy(); } catch { /* */ } try { ws.close(); } catch { /* */ } };
-      tcp.on('connect', () => events?.add?.('remote.vnc.open', 'info', { mode: 'raw' }));
+      let bridgeId = null;
+      const cleanup = () => { if (closed) return; closed = true; closeBridge(bridgeId); try { tcp.destroy(); } catch { /* */ } try { ws.close(); } catch { /* */ } };
+      tcp.on('connect', () => { bridgeId = openBridge('vnc', cfg.vnc.username || 'desktop'); events?.add?.('remote.vnc.open', 'info', { mode: 'raw' }); });
       tcp.on('data', (d) => { try { ws.send(d); } catch { /* */ } });
       tcp.on('error', cleanup); tcp.on('close', cleanup);
       ws.on('message', (m) => { try { tcp.write(m); } catch { /* */ } });
@@ -214,18 +240,20 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
     // VeNCrypt/TLS termination (default 'auto'). Uses stored PAM credentials.
     const { vncVencryptProxy } = await import('./vnc-proxy.js');
     const password = secrets.get(VNC_PW_SECRET) || '';
+    let vBridgeId = null;
+    ws.on('close', () => closeBridge(vBridgeId));
     vncVencryptProxy(ws, {
       host: cfg.vnc.host || '127.0.0.1',
       port: Number(cfg.vnc.port) || 5900,
       username: cfg.vnc.username || '',
       password,
-      debug: true,   // log handshake steps to the container log for on-device debugging
+      debug: process.env.RAPISYS_VNC_DEBUG === '1',   // off by default; set env to re-enable handshake logging
       onEvent: (ev, msg) => {
-        if (ev === 'ready') events?.add?.('remote.vnc.open', 'info', { mode: 'vencrypt' });
+        if (ev === 'ready') { vBridgeId = openBridge('vnc', cfg.vnc.username || 'desktop'); events?.add?.('remote.vnc.open', 'info', { mode: 'vencrypt' }); }
         if (ev === 'error') events?.add?.('remote.vnc.error', 'warning', { error: msg });
       },
-    }).catch((err) => { events?.add?.('remote.vnc.error', 'warning', { error: err.message }); try { ws.close(); } catch { /* */ } });
+    }).catch((err) => { closeBridge(vBridgeId); events?.add?.('remote.vnc.error', 'warning', { error: err.message }); try { ws.close(); } catch { /* */ } });
   }
 
-  return { getConfig, setConfig, generateKey, attach };
+  return { getConfig, setConfig, generateKey, attach, liveSessions };
 }

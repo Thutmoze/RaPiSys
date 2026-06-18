@@ -133,7 +133,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     events: eventsFacade,
   });
 
-  const sessions = createSessionsCollector();
+  let remoteAccessRef = null;   // set once remote-access is constructed (below)
+  const sessions = createSessionsCollector({ bridgeSessions: () => (remoteAccessRef ? remoteAccessRef.liveSessions() : []) });
   const network = createNetworkCollector();
   const reportsFacade = new Proxy({}, { get: (_, m) => (...a) => reportsRepo[m](...a) });
   const reports = createReports({
@@ -167,6 +168,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, auth, events: eventsFacade,
   });
+  remoteAccessRef = remoteAccess;
   // Take over the LEGACY requireAuth as well: in full mode the session
   // cookie (or admin token) authenticates the original settings endpoints;
   // in monitor mode they stay open like stock pi-dashboard.

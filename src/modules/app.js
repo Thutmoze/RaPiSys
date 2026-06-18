@@ -337,7 +337,7 @@ function pageHeader(id, title) {
 // tabs: [{ id, label }]; first is active. Panes are matched by data-pane=id.
 function pageTabs(tabs) {
   return `<div class="page-tabs">${tabs.map((t, i) =>
-    `<button class="page-tab${i === 0 ? ' page-tab-active' : ''}" data-tab="${t.id}">${t.label}</button>`).join('')}</div>`;
+    `<button class="page-tab${i === 0 ? ' page-tab-active' : ''}" data-tab="${t.id}">${t.icon ? `<svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${t.icon}</svg>` : ''}${t.label}</button>`).join('')}</div>`;
 }
 // Wire a tab bar within `host`: shows the matching [data-pane], hides others,
 // and calls onShow(tabId) when a tab is opened (for lazy loading).
@@ -370,6 +370,21 @@ let activeRenderer = null;
 function buildNav() {
   const rail = el('nav', 'nav-rail');
   rail.setAttribute('aria-label', 'RaPiSys pages');
+
+  // Collapse toggle (state persisted in localStorage; this is the Pi-served app).
+  const collapsed = localStorage.getItem('rapisys.navCollapsed') === '1';
+  if (collapsed) document.body.classList.add('nav-collapsed');
+  const toggle = el('button', 'nav-item nav-toggle', `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    <span class="nav-label">Collapse</span>`);
+  toggle.title = 'Collapse / expand menu';
+  toggle.addEventListener('click', () => {
+    const now = document.body.classList.toggle('nav-collapsed');
+    localStorage.setItem('rapisys.navCollapsed', now ? '1' : '0');
+  });
+  rail.appendChild(toggle);
+
   for (const p of PAGES) {
     const btn = el('button', 'nav-item', `
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
@@ -725,7 +740,7 @@ pageRenderers.sessions = (() => {
       wrap.innerHTML = '<p class="sess-empty">In-browser VNC is disabled. Enable it in Settings → Remote Access.</p>';
       return;
     }
-    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="vstatus">Connecting…</span><span style="flex:1"></span><button class="set-btn rt-btn" data-rt="vfs">⛶ Fullscreen</button></div><div class="rt-vnc" data-rt="vnc"></div>';
+    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="vstatus">Connecting…</span><span style="flex:1"></span><button class="set-btn rt-btn" data-rt="vfs">⛶ Fullscreen</button><button class="set-btn rt-btn" data-rt="vpopout">⧉ New Window</button></div><div class="rt-vnc" data-rt="vnc"></div>';
     const statusEl = $('[data-rt=vstatus]', host);
     const RFB = (await import('@novnc/novnc')).default;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -748,6 +763,13 @@ pageRenderers.sessions = (() => {
       if (vfsBtn) vfsBtn.onclick = () => {
         if (!document.fullscreenElement) { wrap.requestFullscreen?.().catch(() => {}); wrap.classList.add('rt-fs'); }
         else { document.exitFullscreen?.(); wrap.classList.remove('rt-fs'); }
+      };
+      const vpoBtn = $('[data-rt=vpopout]', host);
+      if (vpoBtn) vpoBtn.onclick = () => {
+        const w = window.open(`${location.origin}/#/sessions?pop=desktop`, 'rapisys-desktop',
+          'width=1100,height=720,menubar=no,toolbar=no,location=no,status=no');
+        if (w) { try { w.focus(); } catch { /* */ } }
+        else toast('info', 'Desktop', 'Popup blocked — allow popups for this site');
       };
     } catch (err) {
       wrap.innerHTML = `<p class="sess-empty">VNC error: ${esc(err.message)}</p>`;
@@ -839,7 +861,12 @@ pageRenderers.sessions = (() => {
       <div class="page-lead">${pageHeader('sessions', 'Sessions')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'active', label: 'Active Sessions' }, { id: 'history', label: 'Login History' }, { id: 'terminal', label: 'Terminal' }, { id: 'desktop', label: 'Desktop' }])}
+          ${pageTabs([
+            { id: 'active', label: 'Active Sessions', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>' },
+            { id: 'history', label: 'Login History', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
+            { id: 'terminal', label: 'Terminal', icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>' },
+            { id: 'desktop', label: 'Desktop', icon: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>' },
+          ])}
           <div class="card-body" data-pane="active">
             <div class="sess-counts" data-sess="counts" style="margin-bottom:14px"></div>
             <h4 class="sess-h">SSH</h4><div data-sess="ssh"></div>
@@ -867,11 +894,12 @@ pageRenderers.sessions = (() => {
       });
       refresh(host); refreshHistory(host);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
-      // popout window: ?pop=terminal → jump straight to the Terminal tab and
-      // strip the nav rail/header for a clean standalone terminal window.
-      if (location.hash.includes('pop=terminal')) {
+      // popout window: ?pop=terminal|desktop → jump straight to that tab and
+      // strip the nav rail/header for a clean standalone window.
+      const popMatch = location.hash.match(/pop=(terminal|desktop)/);
+      if (popMatch) {
         document.body.classList.add('rapisys-popout');
-        const tbtn = host.querySelector('[data-tab=terminal]');
+        const tbtn = host.querySelector(`[data-tab=${popMatch[1]}]`);
         if (tbtn) tbtn.click();
       }
     },

@@ -84,7 +84,9 @@ function idleMsOfPid(pid) {
 
 // ---------------------------------------------------------------------------
 
-export function createSessionsCollector() {
+export function createSessionsCollector(opts = {}) {
+  // Optional provider of in-browser bridge sessions (set after construction).
+  const getBridges = () => { try { return opts.bridgeSessions ? opts.bridgeSessions() : []; } catch { return []; } };
 
   async function ssh() {
     const conns = await ssEstablished(':22');
@@ -185,6 +187,12 @@ export function createSessionsCollector() {
     // ssh() returns both remote (ssh) and physical (console) logins.
     const sshSessions = allLocal.filter((s) => s.kind === 'ssh');
     const consoleSessions = allLocal.filter((s) => s.kind === 'console');
+    // Merge in-browser bridge sessions (dashboard SSH terminal / VNC desktop).
+    const bridges = getBridges();
+    for (const b of bridges) {
+      if (b.kind === 'ssh') sshSessions.push(b);
+      else if (b.kind === 'vnc') vncSessions.push(b);
+    }
     return { ssh: sshSessions, console: consoleSessions, vnc: vncSessions, tailscale: ts, ts: Date.now() };
   }
 

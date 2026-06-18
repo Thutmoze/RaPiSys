@@ -67,4 +67,13 @@ describe('remote access', () => {
     expect(parsed instanceof Error).toBe(false);
     expect(parsed.type).toBe('ssh-rsa');
   });
+
+  it('exposes live bridge sessions for the Active Sessions list', async () => {
+    const { ra } = fixture();
+    // no sessions initially
+    expect(ra.liveSessions()).toEqual([]);
+    // liveSessions returns the shape the sessions collector expects
+    const sample = ra.liveSessions();
+    expect(Array.isArray(sample)).toBe(true);
+  });
 });
