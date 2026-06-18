@@ -725,23 +725,30 @@ pageRenderers.sessions = (() => {
       wrap.innerHTML = '<p class="sess-empty">In-browser VNC is disabled. Enable it in Settings → Remote Access.</p>';
       return;
     }
-    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="vstatus">Connecting…</span><span class="rt-hint">RealVNC: set authentication to VNC password</span></div><div class="rt-vnc" data-rt="vnc"></div>';
+    wrap.innerHTML = '<div class="rt-toolbar"><span class="rt-status" data-rt="vstatus">Connecting…</span><span style="flex:1"></span><button class="set-btn rt-btn" data-rt="vfs">⛶ Fullscreen</button></div><div class="rt-vnc" data-rt="vnc"></div>';
     const statusEl = $('[data-rt=vstatus]', host);
     const RFB = (await import('@novnc/novnc')).default;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     try {
-      vncRfb = new RFB($('[data-rt=vnc]', host), `${proto}://${location.host}/api/remote/ws/vnc`, {
-        // RealVNC/wayvnc may prompt for a password via the credentials event
-        wsProtocols: ['binary'],
-      });
+      // The bridge presents a plain (already-authenticated) RFB stream — it
+      // terminates wayvnc's VeNCrypt/TLS + login upstream — so noVNC connects
+      // with no credentials of its own.
+      vncRfb = new RFB($('[data-rt=vnc]', host), `${proto}://${location.host}/api/remote/ws/vnc`);
       vncRfb.scaleViewport = true;
       vncRfb.addEventListener('connect', () => { if (statusEl) { statusEl.textContent = 'Connected'; statusEl.className = 'rt-status rt-ok'; } });
-      vncRfb.addEventListener('disconnect', () => { if (statusEl) { statusEl.textContent = 'Disconnected'; statusEl.className = 'rt-status rt-off'; } });
-      vncRfb.addEventListener('credentialsrequired', () => {
-        const password = prompt('VNC password:');
-        if (password != null) vncRfb.sendCredentials({ password });
+      vncRfb.addEventListener('disconnect', (e) => {
+        if (statusEl) {
+          const clean = e.detail?.clean;
+          statusEl.textContent = clean ? 'Disconnected' : 'Disconnected — check VNC login/settings';
+          statusEl.className = 'rt-status rt-off';
+        }
       });
       vncRfb.addEventListener('securityfailure', (e) => { if (statusEl) { statusEl.textContent = 'Auth failed: ' + (e.detail?.reason || ''); statusEl.className = 'rt-status rt-off'; } });
+      const vfsBtn = $('[data-rt=vfs]', host);
+      if (vfsBtn) vfsBtn.onclick = () => {
+        if (!document.fullscreenElement) { wrap.requestFullscreen?.().catch(() => {}); wrap.classList.add('rt-fs'); }
+        else { document.exitFullscreen?.(); wrap.classList.remove('rt-fs'); }
+      };
     } catch (err) {
       wrap.innerHTML = `<p class="sess-empty">VNC error: ${esc(err.message)}</p>`;
     }
@@ -1597,7 +1604,17 @@ pageRenderers.settings = (() => {
             <label style="flex:2">VNC host <input data-rm="vnchost" value="${esc(cfg.vnc.host)}"></label>
             <label style="flex:1">Port <input data-rm="vncport" type="number" value="${cfg.vnc.port}"></label>
           </div>
-          <p class="up-sec-hint">Requires a VNC server (RealVNC) running on the Pi. In RealVNC set the authentication mode to <b>VNC password</b> so the browser can prompt for it.</p>
+          <label>Authentication mode
+            <select data-rm="vncauth">
+              <option value="auto" ${(cfg.vnc.auth || 'auto') === 'auto' ? 'selected' : ''}>VeNCrypt/TLS + login (wayvnc / RealVNC default)</option>
+              <option value="raw" ${cfg.vnc.auth === 'raw' ? 'selected' : ''}>Plain / no encryption (TigerVNC, no-auth)</option>
+            </select>
+          </label>
+          <div class="wz-row" data-rm-vncauth ${(cfg.vnc.auth || 'auto') === 'auto' ? '' : 'hidden'}>
+            <label style="flex:1">Login username (PAM) <input data-rm="vncuser" value="${esc(cfg.vnc.username || '')}" placeholder="e.g. ${esc(cfg.ssh.username || 'pi')}" autocomplete="off"></label>
+            <label style="flex:1">Password <input data-rm="vncpass" type="password" placeholder="${cfg.vncPasswordConfigured ? '•••••••• (stored)' : 'your login password'}" autocomplete="new-password"></label>
+          </div>
+          <p class="up-sec-hint">wayvnc (the Raspberry Pi OS default) and RealVNC use encrypted VeNCrypt/TLS — the dashboard terminates that for the browser using your Pi <b>login</b> (PAM) credentials. Leave password blank to keep the stored one.</p>
         </div>
 
         <div class="set-actions">
@@ -1611,6 +1628,9 @@ pageRenderers.settings = (() => {
     const mainTog = $('[data-rm=enabled]', host);
     const sub = $('[data-rm-sub]', host);
     if (mainTog && sub) mainTog.addEventListener('change', () => { sub.hidden = !mainTog.checked; });
+    const vncAuthSel = $('[data-rm=vncauth]', host);
+    const vncAuthRow = $('[data-rm-vncauth]', host);
+    if (vncAuthSel && vncAuthRow) vncAuthSel.addEventListener('change', () => { vncAuthRow.hidden = vncAuthSel.value !== 'auto'; });
 
     $('[data-rm=genkey]', host).onclick = async () => {
       const btn = $('[data-rm=genkey]', host); btn.disabled = true; btn.textContent = 'Generating…';
@@ -1661,6 +1681,9 @@ pageRenderers.settings = (() => {
           enabled: $('[data-rm=vncen]', host).checked,
           host: $('[data-rm=vnchost]', host).value.trim() || '127.0.0.1',
           port: Number($('[data-rm=vncport]', host).value) || 5900,
+          auth: $('[data-rm=vncauth]', host).value,
+          username: $('[data-rm=vncuser]', host) ? $('[data-rm=vncuser]', host).value.trim() : '',
+          ...($('[data-rm=vncpass]', host) && $('[data-rm=vncpass]', host).value ? { password: $('[data-rm=vncpass]', host).value } : {}),
         },
       };
       const b = $('[data-rm=save]', host); b.disabled = true; $('[data-rm=msg]', host).textContent = 'Saving…';

@@ -23,13 +23,14 @@ import net from 'net';
 
 export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, secrets, auth, events }) {
   const SSH_KEY_SECRET = 'remote.ssh.privkey';
+  const VNC_PW_SECRET = 'remote.vnc.password';
 
   // ---- config ---------------------------------------------------------------
   function defaults() {
     return {
       enabled: false,
       ssh: { enabled: false, host: '127.0.0.1', port: 22, username: '' },
-      vnc: { enabled: false, host: '127.0.0.1', port: 5900 },
+      vnc: { enabled: false, host: '127.0.0.1', port: 5900, username: '', auth: 'auto' },
     };
   }
   async function getConfig() {
@@ -42,9 +43,16 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
       vnc: { ...d.vnc, ...(cfg.vnc || {}) },
       sshKeyConfigured: !!secrets.has(SSH_KEY_SECRET),
       sshPublicKey: (cfg.ssh && cfg.ssh.pubkey) || null,
+      vncPasswordConfigured: !!secrets.has(VNC_PW_SECRET),
     };
   }
   async function setConfig(patch) {
+    // VNC password is write-only: store it encrypted and strip from settings.
+    if (patch.vnc && typeof patch.vnc.password === 'string') {
+      if (patch.vnc.password) secrets.set(VNC_PW_SECRET, patch.vnc.password);
+      const { password, ...vncRest } = patch.vnc;
+      patch = { ...patch, vnc: vncRest };
+    }
     return withFileLock(async () => {
       const s = await loadSettings();
       s.rapisys = s.rapisys || {};
@@ -181,21 +189,42 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
     } catch (err) { fail('SSH connect error: ' + err.message); }
   }
 
-  // VNC: WebSocket ↔ raw TCP to the VNC server (byte-for-byte, websockify-style).
+  // VNC: bridge the WebSocket to the host VNC server. wayvnc (and RealVNC)
+  // typically require VeNCrypt/TLS which the browser can't do, so we terminate
+  // it here via the proxy. For a plain no-auth server, 'raw' mode just pipes.
   async function bridgeVnc(ws) {
     const cfg = await getConfig().catch(() => null);
     const close = () => { try { ws.close(); } catch { /* */ } };
     if (!cfg || !cfg.enabled || !cfg.vnc.enabled) { close(); return; }
-    const tcp = net.connect({ host: cfg.vnc.host || '127.0.0.1', port: Number(cfg.vnc.port) || 5900 });
-    let closed = false;
-    const cleanup = () => { if (closed) return; closed = true; try { tcp.destroy(); } catch { /* */ } try { ws.close(); } catch { /* */ } };
-    tcp.on('connect', () => events?.add?.('remote.vnc.open', 'info', {}));
-    tcp.on('data', (d) => { try { ws.send(d); } catch { /* */ } });
-    tcp.on('error', cleanup);
-    tcp.on('close', cleanup);
-    ws.on('message', (m) => { try { tcp.write(m); } catch { /* */ } });
-    ws.on('close', cleanup);
-    ws.on('error', cleanup);
+
+    const auth = cfg.vnc.auth || 'auto';
+    if (auth === 'raw') {
+      // transparent TCP bridge (no-auth / standard-VNC server noVNC handles itself)
+      const tcp = net.connect({ host: cfg.vnc.host || '127.0.0.1', port: Number(cfg.vnc.port) || 5900 });
+      let closed = false;
+      const cleanup = () => { if (closed) return; closed = true; try { tcp.destroy(); } catch { /* */ } try { ws.close(); } catch { /* */ } };
+      tcp.on('connect', () => events?.add?.('remote.vnc.open', 'info', { mode: 'raw' }));
+      tcp.on('data', (d) => { try { ws.send(d); } catch { /* */ } });
+      tcp.on('error', cleanup); tcp.on('close', cleanup);
+      ws.on('message', (m) => { try { tcp.write(m); } catch { /* */ } });
+      ws.on('close', cleanup); ws.on('error', cleanup);
+      return;
+    }
+
+    // VeNCrypt/TLS termination (default 'auto'). Uses stored PAM credentials.
+    const { vncVencryptProxy } = await import('./vnc-proxy.js');
+    const password = secrets.get(VNC_PW_SECRET) || '';
+    vncVencryptProxy(ws, {
+      host: cfg.vnc.host || '127.0.0.1',
+      port: Number(cfg.vnc.port) || 5900,
+      username: cfg.vnc.username || '',
+      password,
+      debug: true,   // log handshake steps to the container log for on-device debugging
+      onEvent: (ev, msg) => {
+        if (ev === 'ready') events?.add?.('remote.vnc.open', 'info', { mode: 'vencrypt' });
+        if (ev === 'error') events?.add?.('remote.vnc.error', 'warning', { error: msg });
+      },
+    }).catch((err) => { events?.add?.('remote.vnc.error', 'warning', { error: err.message }); try { ws.close(); } catch { /* */ } });
   }
 
   return { getConfig, setConfig, generateKey, attach };
