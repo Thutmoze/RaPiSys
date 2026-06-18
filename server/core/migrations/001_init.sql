@@ -116,7 +116,8 @@ CREATE TABLE IF NOT EXISTS update_history (
   log     TEXT,
   security INTEGER,                  -- 1 if the package carried a security tag at upgrade time
   cves     INTEGER,                  -- count of CVEs known at upgrade time
-  kernel   INTEGER                   -- 1 if a kernel/linux-image package
+  kernel   INTEGER,                  -- 1 if a kernel/linux-image package
+  description TEXT                   -- package summary captured at upgrade time
 );
 
 -- NAS mount registry (units themselves are written by the host agent).

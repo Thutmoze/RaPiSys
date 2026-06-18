@@ -18,11 +18,14 @@ describe('update history security tags', () => {
     const r = repo();
     // a known security package with CVEs
     r.saveSecurityTag('openssl', { candidate: '3.1', security: true, cves: 4, urgency: 'high' });
-    r.record({ ts: Date.now(), packageName: 'openssl', fromV: '3.0', toV: '3.1', result: 'success', log: 'Setting up openssl' });
+    r.record({ ts: Date.now(), packageName: 'openssl', fromV: '3.0', toV: '3.1', result: 'success', log: 'Setting up openssl', description: 'Secure Sockets Layer toolkit' });
     const [row] = r.recent(10);
     expect(row.package).toBe('openssl');
     expect(row.security).toBe(1);
     expect(row.cves).toBe(4);
+    expect(row.fromV).toBe('3.0');
+    expect(row.toV).toBe('3.1');
+    expect(row.description).toBe('Secure Sockets Layer toolkit');
   });
 
   it('flags kernel packages by name even without a security tag', () => {

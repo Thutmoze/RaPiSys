@@ -71,8 +71,9 @@ export function createUpdatesRepo(db) {
   try { db.exec(`ALTER TABLE update_history ADD COLUMN security INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN cves INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN kernel INTEGER`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE update_history ADD COLUMN description TEXT`); } catch { /* exists */ }
 
-  function record({ ts, packageName, fromV, toV, result, log }) {
+  function record({ ts, packageName, fromV, toV, result, log, description }) {
     // capture the package's known security tags at the moment of the upgrade
     let sec = null, cves = null, kern = null;
     try {
@@ -80,9 +81,9 @@ export function createUpdatesRepo(db) {
       if (t) { sec = t.security ? 1 : 0; cves = t.cves || 0; }
       kern = (/linux-image|^linux-headers|kernel/i.test(packageName)) ? 1 : 0;
     } catch { /* best-effort */ }
-    db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(ts, packageName, fromV || null, toV || null, result, (log || '').slice(0, 20000), sec, cves, kern);
+    db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(ts, packageName, fromV || null, toV || null, result, (log || '').slice(0, 20000), sec, cves, kern, description || null);
   }
   function recordBatch(entries) {
     const tx = db.transaction((rows) => { for (const r of rows) record(r); });
@@ -90,7 +91,7 @@ export function createUpdatesRepo(db) {
   }
   function recent(limit = 50) {
     return db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log,
-                              security, cves, kernel
+                              security, cves, kernel, description
                        FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
   }
   return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog };

@@ -150,15 +150,64 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     let logBuf = '';
     send('start', { full, packages, ts: startTs });
     try {
+      // snapshot the pre-upgrade upgradable list so we can compute what actually
+      // changed (apt pulls in dependencies beyond the requested packages) and
+      // recover each package's from-version + description for the history rows.
+      let beforeMap = {};
+      try {
+        const c = updates.cached?.();
+        for (const u of (c?.updates || [])) beforeMap[u.package] = u;
+      } catch { /* best-effort */ }
+
       const result = await updates.upgrade({ packages, full }, (line) => {
         logBuf += line + '\n';
         send('line', { line });
       });
       const ok = result.code === 0;
-      // record history (one row for full, one per package otherwise)
-      const entries = full
-        ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: ok ? 'success' : 'failed', log: logBuf }]
-        : packages.map((p) => ({ ts: Date.now(), packageName: p, result: ok ? 'success' : 'failed', log: logBuf.slice(0, 4000) }));
+
+      // Re-list upgradable packages (cheap: no apt-get update) to learn the true
+      // post-upgrade state. Anything that was upgradable before and is now gone
+      // (or moved to a newer installed version) actually got upgraded — this
+      // captures dependencies, not just the explicitly requested packages.
+      let afterMap = {};
+      if (ok) {
+        try {
+          const after = await updates.list();
+          for (const u of (after.updates || [])) afterMap[u.package] = u;
+          // persist the fresh list as the cache so the UI drops upgraded packages
+          updatesRepo.saveCache(after.updates || []);
+        } catch { /* if re-list fails, fall back to requested-package history */ }
+      }
+
+      // Build history entries from the real diff when we have it, else fall back
+      // to the requested package list.
+      let entries;
+      if (ok && Object.keys(beforeMap).length) {
+        const changed = Object.values(beforeMap).filter((b) => {
+          const a = afterMap[b.package];
+          return !a || a.installed !== b.installed;   // gone, or installed version advanced
+        });
+        const list = changed.length ? changed : (full ? [] : (packages || []).map((p) => beforeMap[p]).filter(Boolean));
+        entries = list.map((b) => ({
+          ts: Date.now(), packageName: b.package,
+          fromV: b.installed || null, toV: b.candidate || null,
+          description: b.description || null,
+          result: 'success', log: logBuf.slice(0, 4000),
+        }));
+        if (!entries.length) {
+          entries = full
+            ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: 'success', log: logBuf }]
+            : (packages || []).map((p) => ({ ts: Date.now(), packageName: p, result: 'success', log: logBuf.slice(0, 4000) }));
+        }
+      } else {
+        entries = full
+          ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: ok ? 'success' : 'failed', log: logBuf }]
+          : (packages || []).map((p) => {
+              const b = beforeMap[p];
+              return { ts: Date.now(), packageName: p, fromV: b?.installed || null, toV: b?.candidate || null,
+                       description: b?.description || null, result: ok ? 'success' : 'failed', log: logBuf.slice(0, 4000) };
+            });
+      }
       updatesRepo.recordBatch(entries);
       events?.add('updates.applied', ok ? 'info' : 'warning', { full, packages, ok });
       send('done', { ok, code: result.code });
