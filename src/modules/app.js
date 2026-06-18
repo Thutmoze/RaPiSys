@@ -2550,24 +2550,28 @@ pageRenderers.updates = (() => {
     if (!full && (!packages || !packages.length)) return;
     streaming = true;
     const pkgList = full ? [] : (packages || []);
-    const panel = $('[data-up=progress]', host);
-    panel.style.display = 'block';
-    panel.className = 'up-install-card';
-    panel.innerHTML = `
-      <div class="up-install-head">
-        <div class="up-install-title"><span class="up-spinner"></span><b>Installing ${esc(label)}</b></div>
-        <button class="up-install-close" data-up="close" hidden title="Close">✕</button>
-      </div>
-      <div class="up-install-bar"><div class="up-install-bar-fill" data-up="bar"></div></div>
-      <div class="up-install-status" data-up="status">Starting…</div>
-      <button class="up-install-toggle" data-up="toggle">▸ Show details</button>
-      <pre class="up-log up-install-log" data-up="log" hidden></pre>
-      <div class="up-install-result" data-up="result" hidden></div>`;
-    const logEl = panel.querySelector('[data-up=log]');
-    const barEl = panel.querySelector('[data-up=bar]');
-    const statusEl = panel.querySelector('[data-up=status]');
-    const toggleEl = panel.querySelector('[data-up=toggle]');
-    const resultEl = panel.querySelector('[data-up=result]');
+    // Render the install flow as an overlay above the page.
+    const ov = el('div', 'wizard-overlay up-install-overlay');
+    ov.innerHTML = `
+      <div class="up-install-card" role="dialog" aria-modal="true">
+        <div class="up-install-head">
+          <div class="up-install-title"><span class="up-spinner"></span><b>Installing ${esc(label)}</b></div>
+          <button class="up-install-close" data-up="close" hidden title="Close">✕</button>
+        </div>
+        <div class="up-install-bar"><div class="up-install-bar-fill" data-up="bar"></div></div>
+        <div class="up-install-status" data-up="status">Starting…</div>
+        <button class="up-install-toggle" data-up="toggle">▸ Show details</button>
+        <pre class="up-log up-install-log" data-up="log" hidden></pre>
+        <div class="up-install-result" data-up="result" hidden></div>
+      </div>`;
+    document.body.appendChild(ov);
+    const card = ov.querySelector('.up-install-card');
+    const logEl = card.querySelector('[data-up=log]');
+    const barEl = card.querySelector('[data-up=bar]');
+    const statusEl = card.querySelector('[data-up=status]');
+    const toggleEl = card.querySelector('[data-up=toggle]');
+    const resultEl = card.querySelector('[data-up=result]');
+    const closeBtn = card.querySelector('[data-up=close]');
     // click-to-expand the detailed apt log
     toggleEl.onclick = () => {
       const show = logEl.hasAttribute('hidden');
@@ -2579,12 +2583,18 @@ pageRenderers.updates = (() => {
     let pct = 5; barEl.style.width = pct + '%';
     const bump = () => { pct = Math.min(90, pct + 1.5); barEl.style.width = pct + '%'; };
 
+    let finished = false;
+    const closeAndRefresh = () => { ov.remove(); load(host); };
+    // closing the card (only once finished) refreshes Available Updates so
+    // upgraded packages drop off the list.
+    closeBtn.onclick = closeAndRefresh;
+    ov.addEventListener('click', (e) => { if (e.target === ov && finished) closeAndRefresh(); });
+
     const qs = full ? 'full=1' : `packages=${encodeURIComponent(pkgList.join(','))}`;
     const ev = new EventSource(`/api/updates/stream?${qs}`);
     ev.addEventListener('line', (e) => {
       const line = JSON.parse(e.data).line;
       logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight;
-      // surface a friendly status from common apt phases
       if (/^(Get:|Fetched|Reading)/.test(line)) statusEl.textContent = 'Downloading packages…';
       else if (/Unpacking/.test(line)) statusEl.textContent = 'Unpacking…';
       else if (/Setting up|Preparing to/.test(line)) statusEl.textContent = 'Installing…';
@@ -2593,7 +2603,7 @@ pageRenderers.updates = (() => {
     });
     ev.addEventListener('done', (e) => {
       const d = JSON.parse(e.data);
-      panel.querySelector('.up-spinner')?.remove();
+      card.querySelector('.up-spinner')?.remove();
       barEl.style.width = '100%';
       barEl.classList.add(d.ok ? 'up-install-bar-ok' : 'up-install-bar-err');
       statusEl.textContent = d.ok ? 'Done' : `Finished with errors (code ${d.code})`;
@@ -2601,26 +2611,20 @@ pageRenderers.updates = (() => {
       resultEl.innerHTML = d.ok
         ? '<span class="up-install-success">✓ Completed successfully</span>'
         : `<span class="up-install-fail">✗ Finished with errors (code ${d.code})</span>`;
-      panel.querySelector('[data-up=close]').hidden = false;
+      closeBtn.hidden = false; finished = true;
       toast(d.ok ? 'success' : 'error', 'Updates', d.ok ? 'Upgrade complete' : 'Upgrade had errors');
       ev.close(); streaming = false; selected.clear();
     });
     ev.addEventListener('error', (e) => {
       let m = 'stream error'; try { m = JSON.parse(e.data).message; } catch { /* */ }
       logEl.removeAttribute('hidden'); logEl.textContent += `\n✗ ${m}\n`;
-      panel.querySelector('.up-spinner')?.remove();
+      card.querySelector('.up-spinner')?.remove();
       statusEl.textContent = 'Error';
       resultEl.removeAttribute('hidden');
       resultEl.innerHTML = `<span class="up-install-fail">✗ ${esc(m)}</span>`;
-      panel.querySelector('[data-up=close]').hidden = false;
+      closeBtn.hidden = false; finished = true;
       ev.close(); streaming = false;
     });
-    // closing the card refreshes the Available Updates list so upgraded packages
-    // drop off (they're no longer upgradable).
-    panel.querySelector('[data-up=close]').onclick = () => {
-      panel.style.display = 'none';
-      load(host);
-    };
   }
 
   function startFirmware(host) {
