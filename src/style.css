@@ -179,7 +179,7 @@ body {
 .container {
   position: relative;
   z-index: 1;
-  max-width: 1400px;
+  max-width: 1760px;
   margin: 0 auto;
   padding: 24px;
   min-height: 100vh;
@@ -4982,6 +4982,8 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 /* non-description cells: keep on one line and ellipsize if a value is long */
 .inv-table-fixed td:not(.inv-desc):not(.inv-actions) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inv-table-fixed td.inv-actions { overflow: visible; }
+/* version cells (Installed/Available) wrap long strings instead of clipping */
+.inv-table-fixed td.up-ver { white-space: normal; overflow: visible; word-break: break-all; }
 /* tag/urgency/checkbox/view cells hold capsules or controls — never clip them */
 .inv-table-fixed td.up-tags-cell, .inv-table-fixed td:has(.up-link),
 .inv-table-fixed td:has(.up-cb), .inv-table-fixed td:has(.urg-badge) { overflow: visible; white-space: normal; }
@@ -5700,13 +5702,16 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   color: var(--accent-cyan); font-size: 13px; font-weight: 600; }
 
 /* Auto-check — notification toggle group (master + sub-toggles) */
-.sched-notif { margin: 6px 0 4px; }
+.sched-notif { margin: 8px 0 4px; }
 .wz-form .sched-toggle, .sched-toggle { display: flex; flex-direction: row; align-items: center;
-  justify-content: flex-start; gap: 12px; padding: 9px 0; font-size: 13px;
+  justify-content: flex-start; gap: 10px; padding: 8px 0; font-size: 13px;
   color: var(--text-secondary); cursor: pointer; text-align: left; }
-.sched-toggle > span:first-child { flex: 1; }
-.sched-toggle-main { font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); }
-.sched-subnotif { padding-left: 14px; margin-top: 2px; border-left: 2px solid var(--border-color); }
+.sched-toggle .set-switch { flex-shrink: 0; }
+.sched-tg-icon { flex-shrink: 0; color: var(--text-muted); }
+.sched-toggle-main { font-weight: 600; color: var(--text-primary); padding-bottom: 12px;
+  margin-bottom: 4px; border-bottom: 1px solid var(--border-color); }
+.sched-toggle-main .sched-tg-icon { color: var(--accent-cyan); }
+.sched-subnotif { padding-left: 4px; margin-top: 2px; }
 .sched-subnotif[hidden] { display: none; }
 
 /* Site-wide: shared Cancel button styling (red/danger), independent of context */

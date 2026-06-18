@@ -2237,15 +2237,15 @@ pageRenderers.updates = (() => {
       <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
       <div class="up-table-scroll">
       <table class="inv-table up-table inv-table-fixed">
-        <colgroup><col style="width:34px"><col style="width:15%"><col style="width:auto"><col style="width:11%"><col style="width:11%"><col style="width:64px"><col style="width:9%"><col style="width:11%"><col style="width:8%"><col style="width:58px"></colgroup>
+        <colgroup><col style="width:34px"><col style="width:13%"><col style="width:22%"><col style="width:15%"><col style="width:15%"><col style="width:70px"><col style="width:9%"><col style="width:10%"><col style="width:7%"><col style="width:58px"></colgroup>
         <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>View</th></tr></thead>
         <tbody>${filteredUpdates().map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
             <td><b>${esc(u.package)}</b></td>
             <td class="inv-dim inv-desc">${esc(u.description || '')}</td>
-            <td class="inv-dim">${esc(u.installed || '—')}</td>
-            <td class="up-new">${esc(u.candidate)}</td>
+            <td class="inv-dim up-ver">${esc(u.installed || '—')}</td>
+            <td class="up-new up-ver">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
             <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
             <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</div></td>
@@ -2756,21 +2756,25 @@ pageRenderers.updates = (() => {
 
         <div class="sched-notif">
           <label class="sched-toggle sched-toggle-main">
-            <span>Enable notifications</span>
             <span class="set-switch"><input type="checkbox" data-sch="notify" ${(cfg.emailEnabled || cfg.telegramEnabled) ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+            <svg class="sched-tg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span>Enable notifications</span>
           </label>
           <div class="sched-subnotif" data-sch-subnotif ${(cfg.emailEnabled || cfg.telegramEnabled) ? '' : 'hidden'}>
             <label class="sched-toggle">
-              <span>Email</span>
               <span class="set-switch"><input type="checkbox" data-sch="email" ${cfg.emailEnabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+              <svg class="sched-tg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+              <span>Email</span>
             </label>
             <label class="sched-toggle">
-              <span>Telegram</span>
               <span class="set-switch"><input type="checkbox" data-sch="telegram" ${cfg.telegramEnabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+              <svg class="sched-tg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              <span>Telegram</span>
             </label>
             <label class="sched-toggle">
-              <span>Security updates only</span>
               <span class="set-switch"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></span>
+              <svg class="sched-tg-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <span>Security updates only</span>
             </label>
           </div>
         </div>
