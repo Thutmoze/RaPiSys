@@ -62,8 +62,8 @@ describe('remote access', () => {
   it('the generated key is parseable by ssh2 (valid for real auth)', async () => {
     const { ra, secrets } = fixture();
     await ra.generateKey();
-    const { utils } = await import('ssh2');
-    const parsed = utils.parseKey(secrets.get('remote.ssh.privkey'));
+    const ssh2 = (await import('ssh2')).default;
+    const parsed = ssh2.utils.parseKey(secrets.get('remote.ssh.privkey'));
     expect(parsed instanceof Error).toBe(false);
     expect(parsed.type).toBe('ssh-rsa');
   });

@@ -69,13 +69,13 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
   // Store the private key encrypted and the OpenSSH public key for the user to
   // install in ~/.ssh/authorized_keys.
   async function generateKey() {
-    const { utils } = await import('ssh2');
+    const ssh2 = (await import('ssh2')).default;
     const { privateKey } = crypto.generateKeyPairSync('rsa', {
       modulusLength: 3072,
       publicKeyEncoding: { format: 'pem', type: 'spki' },
       privateKeyEncoding: { format: 'pem', type: 'pkcs1' },
     });
-    const parsed = utils.parseKey(privateKey);
+    const parsed = ssh2.utils.parseKey(privateKey);
     if (parsed instanceof Error) throw new Error('key generation failed: ' + parsed.message);
     const openssh = `${parsed.type} ${parsed.getPublicSSH().toString('base64')} rapisys@dashboard`;
     secrets.set(SSH_KEY_SECRET, privateKey);
@@ -113,7 +113,7 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
   async function attach(server) {
     // lazy-load so a missing optional dep can't crash boot
     ({ WebSocketServer } = await import('ws'));
-    ({ Client: SSHClient } = await import('ssh2'));
+    SSHClient = (await import('ssh2')).default.Client;
 
     const wssSsh = new WebSocketServer({ noServer: true });
     const wssVnc = new WebSocketServer({ noServer: true });
