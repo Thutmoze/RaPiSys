@@ -5709,15 +5709,10 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sched-subnotif { padding-left: 14px; margin-top: 2px; border-left: 2px solid var(--border-color); }
 .sched-subnotif[hidden] { display: none; }
 
-/* Site-wide: Cancel buttons are red (danger styling) regardless of base class */
-.set-btn[data-sm="cancel"], .set-btn[data-nf="cancel"], .set-btn[data-sch="cancel"],
-.set-btn[data-acc="pwcancel"], .set-btn[data-set="dbcancel"], .set-btn[data-new="cancel"],
-button[data-rc="cancel"], button[data-lg="cancel"],
-.action-btn[data-nf="cancel"], .action-btn[data-set="dbcancel"] {
+/* Site-wide: shared Cancel button styling (red/danger), independent of context */
+.set-btn-cancel, button.set-btn-cancel {
   color: #ef4444; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.1);
 }
-.set-btn[data-sm="cancel"]:hover, .set-btn[data-nf="cancel"]:hover, .set-btn[data-sch="cancel"]:hover,
-.set-btn[data-acc="pwcancel"]:hover, .set-btn[data-set="dbcancel"]:hover, .set-btn[data-new="cancel"]:hover,
-button[data-rc="cancel"]:hover, button[data-lg="cancel"]:hover {
+.set-btn-cancel:hover, button.set-btn-cancel:hover {
   background: rgba(239,68,68,0.18); border-color: #ef4444; color: #ef4444;
 }

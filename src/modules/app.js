@@ -52,7 +52,7 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', htm
         <p class="rconfirm-msg"></p>
         <div class="wz-row rconfirm-row">
           <button class="action-btn ${danger ? 'rconfirm-danger' : 'wz-primary'}" data-rc="ok"></button>
-          <button class="action-btn" data-rc="cancel">Cancel</button>
+          <button class="action-btn set-btn-cancel" data-rc="cancel">Cancel</button>
         </div>
       </div>`;
     // html:true is only ever passed our own escaped strings (names run
@@ -177,7 +177,7 @@ function showLogin() {
           <label data-lg="codewrap">Authenticator code <input data-lg="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></label>
           <div class="wz-row">
             <button class="action-btn wz-primary" data-lg="go">Sign in</button>
-            <button class="action-btn" data-lg="cancel">Cancel</button>
+            <button class="action-btn set-btn-cancel" data-lg="cancel">Cancel</button>
             <span data-lg="status"></span>
           </div>
         </div>
@@ -889,7 +889,7 @@ pageRenderers.alerts = (() => {
               </div>
               <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
               <label class="wz-inline"><input type="checkbox" data-new="telegram"> Also send Telegram</label>
-              <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
+              <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn set-btn-cancel" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
             </div>
             <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s.</p>
           </div>
@@ -992,7 +992,7 @@ pageRenderers.settings = (() => {
         </select></label>
         <label>Username <input data-nf="user" placeholder="admin"></label>
         <label>Password <input data-nf="pass" type="password"></label>
-        <div class="set-actions"><button class="set-btn set-btn-primary" data-nf="mount">${SAVE_ICON}<span>Mount &amp; persist</span></button>${nas ? `<button class="set-btn" data-nf="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}<span data-nf="msg"></span></div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-nf="mount">${SAVE_ICON}<span>Mount &amp; persist</span></button>${nas ? `<button class="set-btn set-btn-cancel" data-nf="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}<span data-nf="msg"></span></div>
       </div>` : '';
     if (nas?.smbVersion) { const sel = $('[data-nf=smb]', host); if (sel) sel.value = nas.smbVersion; }
     enhanceSelects(host);   // dynamic selects appear after this render
@@ -1008,7 +1008,7 @@ pageRenderers.settings = (() => {
         <div class="set-actions"><button class="set-btn set-btn-edit" data-set="dbedit">${EDIT_ICON}<span>Edit location</span></button></div>` : `
         <div class="wz-form">
           <label>Database directory <input data-set="dbdir" value="${esc(dbDirVal)}" placeholder="/mnt/rapisys/mybook"></label>
-          <div class="set-actions"><button class="set-btn set-btn-primary" data-set="relocate">${SAVE_ICON}<span>Relocate database</span></button><button class="set-btn" data-set="dbcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-set="stmsg"></span></div>
+          <div class="set-actions"><button class="set-btn set-btn-primary" data-set="relocate">${SAVE_ICON}<span>Relocate database</span></button><button class="set-btn set-btn-cancel" data-set="dbcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-set="stmsg"></span></div>
         </div>`}`;
 
     // ---- services health pane (main tab) ----
@@ -1087,7 +1087,7 @@ pageRenderers.settings = (() => {
           </div>
           <div class="set-actions">
             <button class="set-btn set-btn-primary" data-sm="save">${SAVE_ICON}<span>Save SMTP settings</span></button>
-            ${st.smtpConfigured ? `<button class="set-btn" data-sm="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
+            ${st.smtpConfigured ? `<button class="set-btn set-btn-cancel" data-sm="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
             <span data-sm="msg"></span>
           </div>
         </div>`}`;
@@ -1120,7 +1120,7 @@ pageRenderers.settings = (() => {
             <label>Current password <input data-acc="cur" type="password" autocomplete="current-password"></label>
             <label>New password <input data-acc="new" type="password" autocomplete="new-password" placeholder="at least 8 characters"></label>
             <label>Confirm new password <input data-acc="new2" type="password" autocomplete="new-password"></label>
-            <div class="set-actions"><button class="set-btn set-btn-primary" data-acc="pwsave">${SAVE_ICON}<span>Update password</span></button><button class="set-btn" data-acc="pwcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="pwmsg"></span></div>
+            <div class="set-actions"><button class="set-btn set-btn-primary" data-acc="pwsave">${SAVE_ICON}<span>Update password</span></button><button class="set-btn set-btn-cancel" data-acc="pwcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="pwmsg"></span></div>
           </div>` : ''}
 
         <div data-acc="mfazone"></div>`;
@@ -1250,7 +1250,7 @@ pageRenderers.settings = (() => {
           <label class="wz-inline"><input type="checkbox" data-tg="enabled" ${tg.enabled ? 'checked' : ''}> Enable Telegram notifications</label>
           <div class="set-actions">
             <button class="set-btn set-btn-primary" data-tg="save">${SAVE_ICON}<span>Save Telegram Settings</span></button>
-            ${tgConfigured ? `<button class="set-btn" data-tg="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
+            ${tgConfigured ? `<button class="set-btn set-btn-cancel" data-tg="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
             <button class="set-btn set-btn-test" data-tg="test">${TEST_ICON}<span>Send Test Message</span></button>
             <span data-tg="msg"></span>
           </div>
@@ -2207,7 +2207,7 @@ pageRenderers.updates = (() => {
       + ACTION_BTN('security', ICN.shield, sec ? `Install security updates (${sec})` : 'No security updates', 'up-act-sec', !sec)
       + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel', selected.size === 0)
       + ACTION_BTN('full', ICN.rocket, 'Full Upgrade', 'up-act-danger', !updates.length)
-      + ACTION_BTN('firmware', ICN.chip, fw ? 'Update firmware' : 'Firmware up to date', 'up-act-fw', !fw);
+      + ACTION_BTN('firmware', ICN.chip, fw ? 'Update firmware' : 'Firmware', 'up-act-fw', !fw);
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
@@ -2499,7 +2499,7 @@ pageRenderers.updates = (() => {
     ov.innerHTML = `<div class="wizard card rconfirm">
       <p class="rconfirm-msg">Full system upgrade (<b>apt dist-upgrade</b>) can install, remove, and change many packages at once. Type <b>UPGRADE</b> to confirm.</p>
       <input class="inv-search" data-up="typed" placeholder="Type UPGRADE" autocomplete="off" style="margin-bottom:12px">
-      <div class="wz-row"><button class="action-btn rconfirm-danger" data-up="go" disabled>Full upgrade</button><button class="action-btn" data-up="cancel">Cancel</button></div>
+      <div class="wz-row"><button class="action-btn rconfirm-danger" data-up="go" disabled>Full upgrade</button><button class="action-btn set-btn-cancel" data-up="cancel">Cancel</button></div>
     </div>`;
     document.body.appendChild(ov);
     const typed = ov.querySelector('[data-up=typed]'), go = ov.querySelector('[data-up=go]');
@@ -2744,7 +2744,7 @@ pageRenderers.updates = (() => {
         </div>
         <div class="set-actions">
           <button class="set-btn set-btn-primary" data-sch="save"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Save schedule</span></button>
-          ${cfg.enabled ? `<button class="set-btn" data-sch="cancel"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button>` : ''}
+          ${cfg.enabled ? `<button class="set-btn set-btn-cancel" data-sch="cancel"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button>` : ''}
           <button class="set-btn set-btn-test" data-sch="run"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg><span>Run check now</span></button>
           <span data-sch="msg"></span>
         </div>
