@@ -1126,10 +1126,10 @@ pageRenderers.settings = (() => {
         <div data-acc="mfazone"></div>`;
     }
 
-    wire(host, nas);
+    wire(host, nas, st);
   }
 
-  function wire(host, nas) {
+  function wire(host, nas, st) {
     const proto = $('[data-nf=proto]', host);
     const smbWrap = $('[data-nf-smb]', host);
     if (proto && smbWrap) {
