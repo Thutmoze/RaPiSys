@@ -5613,7 +5613,8 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 /* account 2FA toggle switch */
 .set-kv-toggle { display: flex; align-items: center; justify-content: space-between; }
 .set-switch { position: relative; display: inline-block; cursor: pointer; }
-.set-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.set-switch input, .wz-form .set-switch input { position: absolute; opacity: 0; width: 0; height: 0;
+  padding: 0; margin: 0; border: 0; background: none; min-height: 0; }
 .set-switch-track { display: block; width: 44px; height: 24px; border-radius: 999px; background: var(--bg-secondary);
   border: 1px solid var(--border-color); transition: background 0.18s, border-color 0.18s; }
 .set-switch-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
@@ -5700,8 +5701,23 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 
 /* Auto-check — notification toggle group (master + sub-toggles) */
 .sched-notif { margin: 6px 0 4px; }
-.sched-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 9px 0; font-size: 13px; color: var(--text-secondary); }
+.wz-form .sched-toggle, .sched-toggle { display: flex; flex-direction: row; align-items: center;
+  justify-content: flex-start; gap: 12px; padding: 9px 0; font-size: 13px;
+  color: var(--text-secondary); cursor: pointer; text-align: left; }
+.sched-toggle > span:first-child { flex: 1; }
 .sched-toggle-main { font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); }
 .sched-subnotif { padding-left: 14px; margin-top: 2px; border-left: 2px solid var(--border-color); }
 .sched-subnotif[hidden] { display: none; }
+
+/* Site-wide: Cancel buttons are red (danger styling) regardless of base class */
+.set-btn[data-sm="cancel"], .set-btn[data-nf="cancel"], .set-btn[data-sch="cancel"],
+.set-btn[data-acc="pwcancel"], .set-btn[data-set="dbcancel"], .set-btn[data-new="cancel"],
+button[data-rc="cancel"], button[data-lg="cancel"],
+.action-btn[data-nf="cancel"], .action-btn[data-set="dbcancel"] {
+  color: #ef4444; border-color: rgba(239,68,68,0.45); background: rgba(239,68,68,0.1);
+}
+.set-btn[data-sm="cancel"]:hover, .set-btn[data-nf="cancel"]:hover, .set-btn[data-sch="cancel"]:hover,
+.set-btn[data-acc="pwcancel"]:hover, .set-btn[data-set="dbcancel"]:hover, .set-btn[data-new="cancel"]:hover,
+button[data-rc="cancel"]:hover, button[data-lg="cancel"]:hover {
+  background: rgba(239,68,68,0.18); border-color: #ef4444; color: #ef4444;
+}

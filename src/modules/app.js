@@ -2654,7 +2654,6 @@ pageRenderers.updates = (() => {
             <div class="set-kv"><span>Status</span><b class="set-ok">● Enabled</b></div>
             <div class="set-kv"><span>Schedule</span><b>${scheduleText} at ${timeText}</b></div>
             <div class="set-kv"><span>Next run</span><b class="sched-next">${nextRunText}</b></div>
-            <div class="set-kv"><span>Email to</span><b>${esc(cfg.emailTo || '(SMTP recipient)')}</b></div>
             <div class="set-kv"><span>Notify via</span><b>${[cfg.emailEnabled ? 'Email' : null, cfg.telegramEnabled ? 'Telegram' : null].filter(Boolean).join(' + ') || 'None'}</b></div>
             <div class="set-kv"><span>Last run</span><b>${cfg.lastRun ? `${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked}` : 'not yet'}</b></div>
           </div>
@@ -2723,10 +2722,6 @@ pageRenderers.updates = (() => {
           </label>
         </div>
 
-        <label class="sched-email">Email security updates to
-          <input data-sch="to" value="${esc(cfg.emailTo || '')}" placeholder="you@example.com (falls back to SMTP recipient)" autocomplete="off">
-        </label>
-
         <div class="sched-notif">
           <label class="sched-toggle sched-toggle-main">
             <span>Enable notifications</span>
@@ -2793,7 +2788,6 @@ pageRenderers.updates = (() => {
         dayOfMonth: Number($('[data-sch=dom]', host).value),
         emailEnabled: $('[data-sch=email]', host).checked,
         telegramEnabled: $('[data-sch=telegram]', host).checked,
-        emailTo: $('[data-sch=to]', host).value.trim(),
         onlySecurity: $('[data-sch=onlysec]', host).checked,
         // minutes to ADD to UTC to get local time (Doha UTC+3 → +180)
         tzOffsetMinutes: -new Date().getTimezoneOffset(),
