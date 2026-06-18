@@ -17,10 +17,11 @@
  *   }
  */
 
-export function createUpdateScheduler({ updates, mailer, loadSettings, saveSettings, withFileLock, events }) {
+export function createUpdateScheduler({ updates, mailer, telegram, loadSettings, saveSettings, withFileLock, events }) {
   const DEFAULTS = {
     enabled: false, frequency: 'daily', time: '03:00', dayOfWeek: 1, dayOfMonth: 1,
-    tzOffsetMinutes: 0, emailEnabled: true, emailTo: '', onlySecurity: true, lastRun: null, runHistory: [],
+    tzOffsetMinutes: 0, emailEnabled: true, emailTo: '', onlySecurity: true,
+    telegramEnabled: false, lastRun: null, runHistory: [],
   };
 
   async function getConfig() {
@@ -46,6 +47,7 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
         emailEnabled: patch.emailEnabled != null ? !!patch.emailEnabled : cur.emailEnabled,
         emailTo: patch.emailTo != null ? String(patch.emailTo).slice(0, 254) : cur.emailTo,
         onlySecurity: patch.onlySecurity != null ? !!patch.onlySecurity : cur.onlySecurity,
+        telegramEnabled: patch.telegramEnabled != null ? !!patch.telegramEnabled : cur.telegramEnabled,
         lastRun: cur.lastRun || null,   // preserve the last-run summary across edits
         runHistory: cur.runHistory || [],
       };
@@ -53,6 +55,27 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
       await saveSettings(s);
     });
     return saved;
+  }
+
+  // HTML-escape for Telegram HTML parse mode.
+  function tgEsc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // Build the Telegram message listing security (and optionally all) updates.
+  function buildTelegram(list) {
+    const security = list.filter((u) => u.security);
+    const shown = (security.length ? security : list).slice(0, 20);
+    const header = security.length
+      ? `🔒 <b>RaPiSys: ${security.length} security update${security.length === 1 ? '' : 's'}</b>`
+      : `📦 <b>RaPiSys: ${list.length} update${list.length === 1 ? '' : 's'} available</b>`;
+    const lines = shown.map((u) =>
+      `• <b>${tgEsc(u.package)}</b> <code>${tgEsc(u.installed || '?')} → ${tgEsc(u.candidate)}</code>`
+      + (u.cves ? ` (${u.cves} CVE${u.cves > 1 ? 's' : ''})` : ''));
+    const more = shown.length < (security.length || list.length)
+      ? `\n…and ${(security.length || list.length) - shown.length} more.` : '';
+    return `${header}\n${list.length} package update${list.length === 1 ? '' : 's'} on your Raspberry Pi.\n\n`
+      + `${lines.join('\n')}${more}\n\nApply them from the Updates page in RaPiSys.`;
   }
 
   // Build the email body listing security (and optionally all) updates.
@@ -103,7 +126,18 @@ export function createUpdateScheduler({ updates, mailer, loadSettings, saveSetti
         events?.add?.('update.email.fail', 'warning', { error: err.message });
       }
     }
-    const result = { ts: Date.now(), checked: list.length, security: security.length, emailed, checkedAt: out.checkedAt };
+
+    let telegrammed = false;
+    if (cfg.telegramEnabled && telegram && (security.length > 0 || (!cfg.onlySecurity && list.length > 0))) {
+      try {
+        await telegram.send({ text: buildTelegram(list) });
+        telegrammed = true;
+        events?.add?.('update.telegram', 'info', { security: security.length, total: list.length });
+      } catch (err) {
+        events?.add?.('update.telegram.fail', 'warning', { error: err.message });
+      }
+    }
+    const result = { ts: Date.now(), checked: list.length, security: security.length, emailed, telegrammed, checkedAt: out.checkedAt };
     // persist the last-run summary + a short history so the UI can show both
     await withFileLock(async () => {
       const s = await loadSettings();

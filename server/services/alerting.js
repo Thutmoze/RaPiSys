@@ -9,8 +9,13 @@
  *  - pending → firing only after the breach lasts `sustain_s`
  *  - notifications respect `cooldown_s` (no re-notify storms)
  *  - optional escalation: re-notify if still firing after `escalate_after_s`
- *  - channels: "ui" (event log → toast/banner) and "email" (mailer)
+ *  - channels: "ui" (event log → toast/banner), "email" (mailer), "telegram"
  */
+
+// Escape values interpolated into Telegram HTML-parse-mode messages.
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 const OPS = {
   '>': (a, b) => a > b,
@@ -24,7 +29,7 @@ const METRIC_LABELS = {
   'fan.rpm': 'Fan speed', 'power.watts': 'Board power', 'load.avg1': 'Load (1m)',
 };
 
-export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer, getSettings }) {
+export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer, telegram, getSettings }) {
 
   async function notify(rule, kind, value) {
     const channels = safeChannels(rule.channels);
@@ -55,6 +60,20 @@ export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer,
         }
       } catch (err) {
         eventsRepo.add('alert.email_failed', 'warning', { ruleId: rule.id, error: err.message });
+      }
+    }
+
+    if (channels.includes('telegram')) {
+      try {
+        const tg = await getSettings().then((s) => s.rapisys?.telegram);
+        if (tg?.chatId) {
+          const icon = kind === 'fired' ? (rule.severity === 'critical' ? '🔴' : '🟠') : '🟢';
+          await telegram.send({
+            text: `${icon} <b>${esc(title)}</b>\n${esc(body)}`,
+          });
+        }
+      } catch (err) {
+        eventsRepo.add('alert.telegram_failed', 'warning', { ruleId: rule.id, error: err.message });
       }
     }
     return channels;

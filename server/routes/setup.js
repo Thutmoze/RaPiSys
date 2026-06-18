@@ -24,7 +24,7 @@ import { fsTypeOf } from '../core/db.js';
 const RETENTION_PRESETS = [7, 30, 90, 180, 365];
 
 export function setupRouter({ loadSettings, saveSettings, withFileLock,
-  secrets, mailer, reopenDb, dbMeta, requireAuth, events }) {
+  secrets, mailer, telegram, reopenDb, dbMeta, requireAuth, events }) {
   const r = express.Router();
 
   /** Gate: open until setup completed, admin-token protected afterwards. */
@@ -56,6 +56,12 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
         host: settings.rapisys.smtp.host, port: settings.rapisys.smtp.port,
         secure: !!settings.rapisys.smtp.secure, user: settings.rapisys.smtp.user,
         from: settings.rapisys.smtp.from, to: settings.rapisys.smtp.to,
+      } : null,
+      telegramConfigured: !!(settings.rapisys?.telegram?.chatId && secrets.has('telegram.token')),
+      telegram: settings.rapisys?.telegram ? {
+        enabled: !!settings.rapisys.telegram.enabled,
+        chatId: settings.rapisys.telegram.chatId || '',
+        hasToken: secrets.has('telegram.token'),
       } : null,
       mode: settings.rapisys?.mode === 'full' ? 'full' : 'monitor',
       nas: settings.rapisys?.nas || null,
@@ -234,6 +240,50 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
   r.post('/smtp/test', async (req, res) => {
     try {
       await mailer.sendTest(req.body?.to);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(502).json({ ok: false, error: err.message });
+    }
+  });
+
+  // -- Telegram notifications ----------------------------------------------------
+  r.post('/telegram', async (req, res) => {
+    const { token, chatId, enabled } = req.body || {};
+    if (token && !hasSecretKey()) {
+      return res.status(400).json({ error: 'SECRET_KEY not set — cannot store the bot token securely. Run deploy.sh or set SECRET_KEY in .env.' });
+    }
+    // if a new token was supplied, verify it before saving
+    if (token) {
+      try { await telegram.verifyToken(String(token)); }
+      catch (err) { return res.status(400).json({ error: `Token rejected by Telegram: ${err.message}` }); }
+    }
+    await withFileLock(async () => {
+      const settings = await loadSettings();
+      settings.rapisys = settings.rapisys || {};
+      const cur = settings.rapisys.telegram || {};
+      settings.rapisys.telegram = {
+        enabled: enabled != null ? !!enabled : (cur.enabled || false),
+        chatId: chatId != null ? String(chatId).slice(0, 64) : (cur.chatId || ''),
+      };
+      await saveSettings(settings);
+    });
+    if (token) secrets.set('telegram.token', String(token));
+    res.json({ ok: true, tokenStored: !!token });
+  });
+
+  // Auto-detect the chat id from recent messages sent to the bot.
+  r.post('/telegram/detect', async (req, res) => {
+    try {
+      const chat = await telegram.getChatId();
+      res.json({ ok: true, chatId: chat.id, name: chat.name });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message });
+    }
+  });
+
+  r.post('/telegram/test', async (req, res) => {
+    try {
+      await telegram.sendTest(req.body?.chatId);
       res.json({ ok: true });
     } catch (err) {
       res.status(502).json({ ok: false, error: err.message });

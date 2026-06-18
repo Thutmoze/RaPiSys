@@ -750,6 +750,7 @@ pageRenderers.alerts = (() => {
     const cooldown = $('[data-new=cooldown]', host); if (cooldown) cooldown.value = 900;
     const sev = $('[data-new=severity]', host); if (sev) sev.value = 'warning';
     const email = $('[data-new=email]', host); if (email) email.checked = false;
+    const tgch = $('[data-new=telegram]', host); if (tgch) tgch.checked = false;
     enhanceSelects(host);
     updateFormMode(host);
   }
@@ -839,6 +840,7 @@ pageRenderers.alerts = (() => {
       $('[data-new=severity]', host).value = rule.severity || 'warning';
       $('[data-new=cooldown]', host).value = rule.cooldown_s ?? 900;
       $('[data-new=email]', host).checked = (rule.channels || []).includes('email');
+      $('[data-new=telegram]', host).checked = (rule.channels || []).includes('telegram');
       // re-sync any enhanced selects, then reflect edit mode in the form
       enhanceSelects(host);
       updateFormMode(host);
@@ -886,6 +888,7 @@ pageRenderers.alerts = (() => {
                 <label>Cooldown (s) <input data-new="cooldown" type="number" value="900"></label>
               </div>
               <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
+              <label class="wz-inline"><input type="checkbox" data-new="telegram"> Also send Telegram</label>
               <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
             </div>
             <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s.</p>
@@ -907,7 +910,9 @@ pageRenderers.alerts = (() => {
           sustain_s: Number($('[data-new=sustain]', host).value),
           severity: $('[data-new=severity]', host).value,
           cooldown_s: Number($('[data-new=cooldown]', host).value),
-          channels: $('[data-new=email]', host).checked ? ['ui', 'email'] : ['ui'],
+          channels: ['ui',
+            ...($('[data-new=email]', host).checked ? ['email'] : []),
+            ...($('[data-new=telegram]', host).checked ? ['telegram'] : [])],
         };
         try {
           if (editingId) {
@@ -939,7 +944,7 @@ pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
-  let editSmtp = false, editDb = false, editNas = false, editPw = false;
+  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false;
   // shared glyphs for the colored edit / test buttons
   const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
   const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
@@ -1218,6 +1223,80 @@ pageRenderers.settings = (() => {
       finally { smTest.disabled = false; }
     };
 
+    // ---- Telegram config pane ----
+    const tg = st.telegram || {};
+    const tgConfigured = !!st.telegramConfigured;
+    const showTgForm = editTg || !tgConfigured;
+    const tgEl = $('[data-set=telegram]', host);
+    if (tgEl) {
+      tgEl.innerHTML = !showTgForm ? `
+        <div class="set-summary">
+          <div class="set-kv"><span>Status</span><b class="${tg.enabled ? 'set-ok' : ''}">${tg.enabled ? '● Enabled' : '○ Configured (disabled)'}</b></div>
+          <div class="set-kv"><span>Bot token</span><b>•••••••• (stored)</b></div>
+          <div class="set-kv"><span>Chat ID</span><b>${esc(tg.chatId || '—')}</b></div>
+          <div class="set-actions">
+            <button class="set-btn set-btn-edit" data-tg="edit">${EDIT_ICON}<span>Edit</span></button>
+            <button class="set-btn set-btn-test" data-tg="test">${TEST_ICON}<span>Send Test Message</span></button>
+            <span data-tg="msg"></span>
+          </div>
+        </div>` : `
+        <p class="hw-hint">Send alerts and security-update summaries to Telegram. Create a bot with <b>@BotFather</b> (/newbot) to get a token, send your bot any message, then use “Detect” to fill your chat ID automatically.</p>
+        <div class="wz-form">
+          <label>Bot token <input data-tg="token" type="password" placeholder="${tg.hasToken ? '•••••• (unchanged)' : '123456:ABC-DEF…'}" autocomplete="off"></label>
+          <div class="al-form-row" style="grid-template-columns:1fr auto">
+            <label>Chat ID <input data-tg="chatid" value="${esc(tg.chatId || '')}" placeholder="123456789"></label>
+            <label style="align-self:end"><button class="set-btn" data-tg="detect" style="margin-top:2px">Detect</button></label>
+          </div>
+          <label class="wz-inline"><input type="checkbox" data-tg="enabled" ${tg.enabled ? 'checked' : ''}> Enable Telegram notifications</label>
+          <div class="set-actions">
+            <button class="set-btn set-btn-primary" data-tg="save">${SAVE_ICON}<span>Save Telegram Settings</span></button>
+            ${tgConfigured ? `<button class="set-btn" data-tg="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
+            <button class="set-btn set-btn-test" data-tg="test">${TEST_ICON}<span>Send Test Message</span></button>
+            <span data-tg="msg"></span>
+          </div>
+        </div>`;
+      const tgEdit = $('[data-tg=edit]', host);
+      if (tgEdit) tgEdit.onclick = () => { editTg = true; load(host); };
+      const tgCancel = $('[data-tg=cancel]', host);
+      if (tgCancel) tgCancel.onclick = () => { editTg = false; load(host); };
+      const tgDetect = $('[data-tg=detect]', host);
+      if (tgDetect) tgDetect.onclick = async () => {
+        const msg = $('[data-tg=msg]', host);
+        tgDetect.disabled = true; setStatus(msg, true, 'Looking for your chat…');
+        try {
+          // a token must be saved first for detect to work; if the user typed a
+          // new one, save it (token-only) before detecting
+          const typed = $('[data-tg=token]', host)?.value.trim();
+          if (typed) await api('/setup/telegram', { method: 'POST', body: { token: typed } });
+          const r = await api('/setup/telegram/detect', { method: 'POST', body: {} });
+          $('[data-tg=chatid]', host).value = r.chatId;
+          setStatus(msg, true, `✓ found ${r.name || r.chatId}`);
+        } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+        finally { tgDetect.disabled = false; }
+      };
+      const tgSave = $('[data-tg=save]', host);
+      if (tgSave) tgSave.onclick = async () => {
+        const msg = $('[data-tg=msg]', host);
+        const body = {
+          token: $('[data-tg=token]', host).value.trim() || undefined,
+          chatId: $('[data-tg=chatid]', host).value.trim(),
+          enabled: $('[data-tg=enabled]', host).checked,
+        };
+        tgSave.disabled = true; setStatus(msg, true, 'Saving…');
+        try { await api('/setup/telegram', { method: 'POST', body }); editTg = false; toast('success', 'Telegram', 'Telegram settings saved'); load(host); }
+        catch (err) { setStatus(msg, false, `✗ ${err.message}`); tgSave.disabled = false; }
+      };
+      const tgTest = $('[data-tg=test]', host);
+      if (tgTest) tgTest.onclick = async () => {
+        const msg = $('[data-tg=msg]', host);
+        const chatId = $('[data-tg=chatid]', host)?.value.trim() || undefined;
+        tgTest.disabled = true; setStatus(msg, true, 'Sending test message…');
+        try { await api('/setup/telegram/test', { method: 'POST', body: { chatId } }); setStatus(msg, true, '✓ test message sent'); }
+        catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+        finally { tgTest.disabled = false; }
+      };
+    }
+
     // ---- account: change password ----
     const pwEdit = $('[data-acc=pwedit]', host);
     if (pwEdit) pwEdit.onclick = () => { editPw = true; load(host); };
@@ -1301,7 +1380,7 @@ pageRenderers.settings = (() => {
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Email (SMTP)' }, { id: 'account', label: 'Account' }])}
+          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Notifications' }, { id: 'account', label: 'Account' }])}
           <div class="card-body" data-pane="health">
             <div data-set="health"></div>
           </div>
@@ -1312,7 +1391,10 @@ pageRenderers.settings = (() => {
             <div data-set="storage"></div>
           </div>
           <div class="card-body" data-pane="email" style="display:none">
+            <h4 class="sess-h">Email (SMTP)</h4>
             <div data-set="smtp"></div>
+            <h4 class="sess-h" style="margin-top:24px">Telegram</h4>
+            <div data-set="telegram"></div>
           </div>
           <div class="card-body" data-pane="account" style="display:none">
             <div data-set="account"></div>
@@ -2570,6 +2652,7 @@ pageRenderers.updates = (() => {
             <div class="set-kv"><span>Schedule</span><b>${scheduleText} at ${timeText}</b></div>
             <div class="set-kv"><span>Next run</span><b class="sched-next">${nextRunText}</b></div>
             <div class="set-kv"><span>Email to</span><b>${esc(cfg.emailTo || '(SMTP recipient)')}</b></div>
+            <div class="set-kv"><span>Notify via</span><b>${[cfg.emailEnabled ? 'Email' : null, cfg.telegramEnabled ? 'Telegram' : null].filter(Boolean).join(' + ') || 'None'}</b></div>
             <div class="set-kv"><span>Last run</span><b>${cfg.lastRun ? `${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked}` : 'not yet'}</b></div>
           </div>
           <div class="sched-sum-acts">
@@ -2634,7 +2717,8 @@ pageRenderers.updates = (() => {
         </label>
 
         <label class="wz-inline"><input type="checkbox" data-sch="email" ${cfg.emailEnabled ? 'checked' : ''}> Send an email when updates are found</label>
-        <label class="wz-inline"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}> Only email when there are security updates</label>
+        <label class="wz-inline"><input type="checkbox" data-sch="telegram" ${cfg.telegramEnabled ? 'checked' : ''}> Send a Telegram message when updates are found</label>
+        <label class="wz-inline"><input type="checkbox" data-sch="onlysec" ${cfg.onlySecurity ? 'checked' : ''}> Only notify when there are security updates</label>
         <div class="set-actions">
           <button class="set-btn set-btn-primary" data-sch="save"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg><span>Save schedule</span></button>
           ${cfg.enabled ? `<button class="set-btn" data-sch="cancel"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button>` : ''}
@@ -2667,6 +2751,7 @@ pageRenderers.updates = (() => {
         dayOfWeek: Number($('[data-sch=dow]', host).value),
         dayOfMonth: Number($('[data-sch=dom]', host).value),
         emailEnabled: $('[data-sch=email]', host).checked,
+        telegramEnabled: $('[data-sch=telegram]', host).checked,
         emailTo: $('[data-sch=to]', host).value.trim(),
         onlySecurity: $('[data-sch=onlysec]', host).checked,
         // minutes to ADD to UTC to get local time (Doha UTC+3 → +180)
@@ -2696,7 +2781,7 @@ pageRenderers.updates = (() => {
           if (msg) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`;
           runBtn.innerHTML = original;
         } else {
-          if (msg) msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}`;
+          if (msg) msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}${r.telegrammed ? ' · telegrammed' : ''}`;
           runBtn.innerHTML = '<span>✓ Done</span>';
           setTimeout(() => loadSchedule(host), 1400);
         }

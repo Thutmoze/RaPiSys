@@ -29,6 +29,7 @@ import { createUpdatesRepo } from './repositories/updates.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
+import { createTelegram } from './services/telegram.js';
 import { createUpdateScheduler } from './services/update-scheduler.js';
 import { createAlertEngine } from './services/alerting.js';
 import { createSessionTracker } from './services/session-tracker.js';
@@ -124,6 +125,11 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     secrets: secretsFacade,
     events: eventsFacade,
   });
+  const telegram = createTelegram({
+    getTelegramSettings: async () => (await loadSettings()).rapisys?.telegram || null,
+    secrets: secretsFacade,
+    events: eventsFacade,
+  });
 
   const sessions = createSessionsCollector();
   const network = createNetworkCollector();
@@ -140,11 +146,11 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   const updatesRepoFacade = new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) });
   const updates = createUpdatesCollector({ updatesRepo: updatesRepoFacade });
   const updateScheduler = createUpdateScheduler({
-    updates, mailer, loadSettings, saveSettings, withFileLock, events: eventsFacade,
+    updates, mailer, telegram, loadSettings, saveSettings, withFileLock, events: eventsFacade,
   });
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
-    eventsRepo: eventsFacade, mailer, getSettings: loadSettings,
+    eventsRepo: eventsFacade, mailer, telegram, getSettings: loadSettings,
   });
   alertEngine.seedDefaults();
   const sessionTracker = createSessionTracker({
@@ -215,7 +221,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/layouts', layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
-    secrets: secretsFacade, mailer, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,
+    secrets: secretsFacade, mailer, telegram, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,
   }));
 
   console.log(`[rapisys] db=${handle.meta.path} engine=${handle.meta.engine} `
