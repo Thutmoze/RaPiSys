@@ -4788,6 +4788,9 @@ select, select option {
   padding: 4px;
   display: flex; flex-direction: column; max-height: 280px; overflow: hidden;
 }
+/* the [hidden] attribute must win over display:flex above, or close() can't
+   hide the portaled list (it stays display:flex despite hidden=true). */
+.rsel-list[hidden] { display: none !important; }
 .rsel-item {
   display: block; width: 100%; text-align: left; padding: 9px 10px;
   font: inherit; font-size: 13px; color: var(--text-secondary);
