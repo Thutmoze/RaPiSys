@@ -25,6 +25,46 @@ const el = (tag, cls, html) => {
   return n;
 };
 
+// ---- date / time formatting preference --------------------------------------
+// Stored in localStorage (mirrored from Settings → Preferences). Affects all
+// timestamp rendering across the app via rapisysFmtTime / rapisysFmtDate.
+const RAPISYS_DATEFMT_KEY = 'rapisys.dateFormat';   // 'auto'|'iso'|'us'|'eu'|'long'
+const RAPISYS_TIMEFMT_KEY = 'rapisys.timeFormat';   // 'auto'|'24'|'12'
+function rapisysDateFmtPref() {
+  return {
+    date: localStorage.getItem(RAPISYS_DATEFMT_KEY) || 'auto',
+    time: localStorage.getItem(RAPISYS_TIMEFMT_KEY) || 'auto',
+  };
+}
+function rapisysHour12() {
+  const t = rapisysDateFmtPref().time;
+  if (t === '12') return true;
+  if (t === '24') return false;
+  return undefined;   // 'auto' → locale default
+}
+// Date+time (used for log timestamps). dateOnly omits the time part.
+function rapisysFmtTime(ts, { dateOnly = false } = {}) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const pref = rapisysDateFmtPref();
+  const pad = (n) => String(n).padStart(2, '0');
+  const Y = d.getFullYear(), M = pad(d.getMonth() + 1), D = pad(d.getDate());
+  const h12 = rapisysHour12();
+  const timeStr = h12 === undefined
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: h12 });
+  let dateStr;
+  switch (pref.date) {
+    case 'iso': dateStr = `${Y}-${M}-${D}`; break;
+    case 'us': dateStr = `${M}/${D}/${Y}`; break;
+    case 'eu': dateStr = `${D}/${M}/${Y}`; break;
+    case 'long': dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }); break;
+    default: dateStr = d.toLocaleDateString([], { month: 'short', day: 'numeric' }); break;   // 'auto'
+  }
+  return dateOnly ? dateStr : `${dateStr} ${timeStr}`;
+}
+const rapisysFmtDate = (ts) => rapisysFmtTime(ts, { dateOnly: true });
+
 async function api(path, opts = {}, retried = false) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin',
@@ -349,6 +389,8 @@ function pageTabs(tabs) {
 function wirePageTabs(host, onShow) {
   host.querySelectorAll('[data-tab]').forEach((t) => {
     t.onclick = () => {
+      // hide any open portaled dropdown belonging to the pane we're leaving
+      document.querySelectorAll('body > .rsel-list').forEach((l) => { l.hidden = true; });
       host.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('page-tab-active', x === t));
       host.querySelectorAll('[data-pane]').forEach((p) => { p.style.display = p.dataset.pane === t.dataset.tab ? '' : 'none'; });
       if (onShow) onShow(t.dataset.tab);
@@ -458,6 +500,10 @@ function route() {
   activeRenderer?.unmount?.();
   activeRenderer = null;
   $('.rapisys-page')?.remove();
+  // Portaled dropdown lists live on <body>, outside the page host, so they
+  // survive the host being torn down. Remove them all on navigation — every
+  // page rebuilds its own selects on mount.
+  document.querySelectorAll('body > .rsel-list').forEach((l) => l.remove());
 
   const legacy = $('.container');
   document.querySelectorAll('.nav-item').forEach((n) =>
@@ -786,7 +832,7 @@ pageRenderers.sessions = (() => {
     const m = Math.floor(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
     return d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m`;
   };
-  const fmtTime = (ts) => ts ? new Date(ts).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+  const fmtTime = (ts) => rapisysFmtTime(ts);
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   async function refresh(host) {
@@ -1089,7 +1135,7 @@ pageRenderers.alerts = (() => {
           <span class="al-sev ${SEV_CLASS[h.severity] || ''}">${esc(h.severity || '')}</span>
           <span><b>${esc(h.name || 'deleted rule')}</b> <small>${esc(h.metric || '')}</small></span>
           <span>peak ${h.peak_value != null ? Math.round(h.peak_value * 10) / 10 : '—'}</span>
-          <span>${new Date(h.fired_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${h.resolved_at ? '' : ' · <span class="sess-live">ongoing</span>'}</span>
+          <span>${rapisysFmtTime(h.fired_at)}${h.resolved_at ? '' : ' · <span class="sess-live">ongoing</span>'}</span>
         </div>`).join('')
       : '<p class="sess-empty">No incidents recorded</p>';
 
@@ -1357,6 +1403,9 @@ pageRenderers.settings = (() => {
             <span data-sm="msg"></span>
           </div>
         </div>`}`;
+
+    // ---- display preferences ----
+    renderPrefs(host);
 
     // ---- account pane ----
     let me = null;
@@ -1795,6 +1844,48 @@ pageRenderers.settings = (() => {
     };
   }
 
+  // ---- Display preferences: date & time format (stored in localStorage) ----
+  function renderPrefs(host) {
+    const el2 = $('[data-set=prefs]', host);
+    if (!el2) return;
+    const pref = rapisysDateFmtPref();
+    const sample = Date.now();
+    const preview = () => rapisysFmtTime(sample);
+    el2.innerHTML = `
+      <p class="up-sec-hint">Choose how dates and times appear across the dashboard (logs, history, inventory). Saved on this device.</p>
+      <div class="wz-row">
+        <label style="flex:1">Date format
+          <select data-pref="date">
+            <option value="auto" ${pref.date === 'auto' ? 'selected' : ''}>Auto (your locale) — ${esc(new Date(sample).toLocaleDateString([], { month: 'short', day: 'numeric' }))}</option>
+            <option value="iso" ${pref.date === 'iso' ? 'selected' : ''}>ISO — 2026-06-19</option>
+            <option value="us" ${pref.date === 'us' ? 'selected' : ''}>US — 06/19/2026</option>
+            <option value="eu" ${pref.date === 'eu' ? 'selected' : ''}>EU — 19/06/2026</option>
+            <option value="long" ${pref.date === 'long' ? 'selected' : ''}>Long — Jun 19, 2026</option>
+          </select>
+        </label>
+        <label style="flex:1">Time format
+          <select data-pref="time">
+            <option value="auto" ${pref.time === 'auto' ? 'selected' : ''}>Auto (your locale)</option>
+            <option value="24" ${pref.time === '24' ? 'selected' : ''}>24-hour — 18:30</option>
+            <option value="12" ${pref.time === '12' ? 'selected' : ''}>12-hour — 6:30 PM</option>
+          </select>
+        </label>
+      </div>
+      <div class="set-summary" style="margin-top:8px">
+        <div class="set-kv"><span>Preview</span><b data-pref="preview">${esc(preview())}</b></div>
+      </div>`;
+    enhanceSelects(host);
+    const apply = () => {
+      const dv = $('[data-pref=date]', host).value;
+      const tv = $('[data-pref=time]', host).value;
+      localStorage.setItem(RAPISYS_DATEFMT_KEY, dv);
+      localStorage.setItem(RAPISYS_TIMEFMT_KEY, tv);
+      const pv = $('[data-pref=preview]', host); if (pv) pv.textContent = preview();
+      toast('success', 'Preferences', 'Date/time format updated');
+    };
+    ['date', 'time'].forEach((f) => { const s = $(`[data-pref=${f}]`, host); if (s) s.addEventListener('change', apply); });
+  }
+
   return {
     mount(host) {
       host.innerHTML = `
@@ -1822,6 +1913,9 @@ pageRenderers.settings = (() => {
             <div data-set="remote"></div>
           </div>
           <div class="card-body" data-pane="account" style="display:none">
+            <h4 class="sess-h">Display Preferences</h4>
+            <div data-set="prefs"></div>
+            <h4 class="sess-h" style="margin-top:24px">Administrator Account</h4>
             <div data-set="account"></div>
           </div>
         </div>
@@ -2277,7 +2371,7 @@ pageRenderers.inventory = (() => {
   const LIMIT = 50;
   let searchTimer = null;
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const fmtDate = (ts) => ts ? new Date(ts).toLocaleDateString() : '—';
+  const fmtDate = (ts) => ts ? rapisysFmtDate(ts) : '—';
   const fmtSize = (kb) => kb ? (kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`) : '';
 
   function statusBadge(kind, status) {
@@ -2614,7 +2708,7 @@ pageRenderers.updates = (() => {
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.round(mins / 60);
     if (hrs < 24) return `${hrs}h ago`;
-    return new Date(ts).toLocaleDateString();
+    return rapisysFmtDate(ts);
   }
 
   function render(host) {
@@ -2656,7 +2750,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim up-ver">${esc(u.installed || '—')}</td>
             <td class="up-new up-ver">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
-            <td class="inv-dim">${u.installedAt ? new Date(u.installedAt).toLocaleDateString() : '—'}</td>
+            <td class="inv-dim">${u.installedAt ? rapisysFmtDate(u.installedAt) : '—'}</td>
             <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</div></td>
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
@@ -3098,7 +3192,7 @@ pageRenderers.updates = (() => {
           if (/linux-image|kernel/.test(log) || /kernel/i.test(e.package)) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
         }
         return `<tr>
-        <td class="inv-dim">${new Date(e.ts).toLocaleString()}</td>
+        <td class="inv-dim">${rapisysFmtTime(e.ts)}</td>
         <td><b>${esc(e.package)}</b></td>
         <td class="inv-dim inv-desc">${esc(e.description || '—')}</td>
         <td>${ver}</td>
@@ -3154,7 +3248,7 @@ pageRenderers.updates = (() => {
       <div class="up-table-scroll">
       <table class="inv-table"><thead><tr><th>When</th><th>Updates</th><th>Security</th><th>Email</th><th>Telegram</th></tr></thead>
       <tbody>${history.map((h) => `<tr>
-        <td class="inv-dim">${new Date(h.ts).toLocaleString()}</td>
+        <td class="inv-dim">${rapisysFmtTime(h.ts)}</td>
         <td><b>${h.checked}</b></td>
         <td><b class="${h.security ? 'sched-sec' : ''}">${h.security}</b></td>
         <td>${h.emailed ? '<span class="inv-badge inv-ok">sent</span>' : '<span class="inv-dim">—</span>'}</td>
