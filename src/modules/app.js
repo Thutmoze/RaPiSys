@@ -808,13 +808,14 @@ pageRenderers.sessions = (() => {
       : '<p class="sess-empty">No active VNC connections</p>';
 
     const ts = snap.tailscale;
+    const onlinePeers = (ts.peers || []).filter((p) => p.online);
     const tsHtml = !ts.installed
       ? '<p class="sess-empty">Tailscale not detected on this Pi</p>'
-      : (ts.peers.length ? ts.peers.map((p) => row4([
-          `<span class="sess-dot ${p.online ? 'on' : ''}"></span> <b>${esc(p.username)}</b>`,
+      : (onlinePeers.length ? onlinePeers.map((p) => row4([
+          `<span class="sess-dot on"></span> <b>${esc(p.username)}</b>`,
           esc(p.source), esc(p.os),
-          p.online ? 'active now' : `last seen ${fmtTime(p.lastActive)}`,
-        ])).join('') : '<p class="sess-empty">No peers in the tailnet</p>');
+          'active now',
+        ])).join('') : '<p class="sess-empty">No active Tailscale sessions</p>');
 
     const consoleHtml = (snap.console || []).length
       ? snap.console.map((s) => row4([
@@ -827,6 +828,12 @@ pageRenderers.sessions = (() => {
     if ($('[data-sess=console]', host)) $('[data-sess=console]', host).innerHTML = consoleHtml;
     $('[data-sess=vnc]', host).innerHTML = vncHtml;
     $('[data-sess=ts]', host).innerHTML = tsHtml;
+    // animate the type glyph when that type has live sessions
+    const setActive = (type, on) => { const h = $(`[data-sess-head=${type}]`, host); if (h) h.classList.toggle('sess-h-live', on); };
+    setActive('ssh', snap.ssh.length > 0);
+    setActive('console', (snap.console || []).length > 0);
+    setActive('vnc', snap.vnc.length > 0);
+    setActive('ts', onlinePeers.length > 0);
     host.querySelectorAll('[data-kick]').forEach((b) => b.onclick = async () => {
       if (!await rapisysConfirm(`Disconnect ${b.dataset.who}? Their session ends immediately.`,
         { danger: true, confirmLabel: 'Disconnect' })) return;
@@ -842,10 +849,14 @@ pageRenderers.sessions = (() => {
 
   async function refreshHistory(host) {
     try {
-      const data = await api('/sessions/history?range=7d');
+      const range = ($('[data-hist=range]', host) && $('[data-hist=range]', host).value) || '7d';
+      const kind = ($('[data-hist=kind]', host) && $('[data-hist=kind]', host).value) || '';
+      const qs = `range=${encodeURIComponent(range)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
+      const data = await api(`/sessions/history?${qs}`);
       const el2 = $('[data-sess=hist]', host);
-      if (!data.history.length) { el2.innerHTML = '<p class="sess-empty">No login history yet</p>'; return; }
-      el2.innerHTML = data.history.slice(0, 30).map((h) => `
+      if (!el2) return;
+      if (!data.history.length) { el2.innerHTML = '<p class="sess-empty">No login history for this filter</p>'; return; }
+      el2.innerHTML = data.history.slice(0, 100).map((h) => `
         <div class="sess-row">
           <span><b>${esc(h.username)}</b> <span class="sess-kind">${esc(h.kind)}</span></span>
           <span>${esc(h.source || '')}</span>
@@ -869,13 +880,30 @@ pageRenderers.sessions = (() => {
           ])}
           <div class="card-body" data-pane="active">
             <div class="sess-counts" data-sess="counts" style="margin-bottom:14px"></div>
-            <h4 class="sess-h">SSH</h4><div data-sess="ssh"></div>
-            <h4 class="sess-h">Local console</h4><div data-sess="console"></div>
-            <h4 class="sess-h">VNC</h4><div data-sess="vnc"></div>
-            <h4 class="sess-h">Tailscale</h4><div data-sess="ts"></div>
+            <h4 class="sess-h sess-h-typed" data-sess-head="ssh"><svg class="sess-h-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg><span>SSH</span></h4><div data-sess="ssh"></div>
+            <h4 class="sess-h sess-h-typed" data-sess-head="console"><svg class="sess-h-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>Local console</span></h4><div data-sess="console"></div>
+            <h4 class="sess-h sess-h-typed" data-sess-head="vnc"><svg class="sess-h-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M2 9h20M7 14h2M11 14h6"/></svg><span>VNC</span></h4><div data-sess="vnc"></div>
+            <h4 class="sess-h sess-h-typed" data-sess-head="ts"><svg class="sess-h-ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0M2 8.82a16 16 0 0 1 20 0M8.5 16.43a6 6 0 0 1 7 0"/><circle cx="12" cy="20" r="1"/></svg><span>Tailscale</span></h4><div data-sess="ts"></div>
           </div>
           <div class="card-body" data-pane="history" style="display:none">
-            <h4 class="sess-h">Login History (7 days)</h4>
+            <div class="sess-hist-filters">
+              <label>Range
+                <select data-hist="range">
+                  <option value="24h">Last 24 hours</option>
+                  <option value="7d" selected>Last 7 days</option>
+                  <option value="30d">Last 30 days</option>
+                </select>
+              </label>
+              <label>Type
+                <select data-hist="kind">
+                  <option value="">All types</option>
+                  <option value="ssh">SSH</option>
+                  <option value="console">Local console</option>
+                  <option value="vnc">VNC</option>
+                  <option value="tailscale">Tailscale</option>
+                </select>
+              </label>
+            </div>
             <div data-sess="hist"></div>
           </div>
           <div class="card-body" data-pane="terminal" style="display:none">
@@ -892,6 +920,12 @@ pageRenderers.sessions = (() => {
         if (tab === 'terminal') openTerminal(host);
         if (tab === 'desktop') openDesktop(host);
       });
+      // login-history filters
+      ['range', 'kind'].forEach((f) => {
+        const sel = $(`[data-hist=${f}]`, host);
+        if (sel) sel.addEventListener('change', () => refreshHistory(host));
+      });
+      enhanceSelects(host);
       refresh(host); refreshHistory(host);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
       // popout window: ?pop=terminal|desktop → jump straight to that tab and
