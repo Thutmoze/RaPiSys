@@ -2392,18 +2392,24 @@ pageRenderers.inventory = (() => {
       package: '<path d="M16.5 9.4 7.5 4.21M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/>',
       service: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
       container: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+      cleanup: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/>',
     };
     $('[data-inv=chips]', host).innerHTML = `
       <div class="page-tabs inv-kind-tabs">
         <button class="page-tab ${kind === 'package' ? 'page-tab-active' : ''}" data-inv-kind="package"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.package}</svg>Packages <span class="inv-tab-count">${c.package || 0}</span></button>
         <button class="page-tab ${kind === 'service' ? 'page-tab-active' : ''}" data-inv-kind="service"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.service}</svg>Services <span class="inv-tab-count">${c.service || 0}</span></button>
         <button class="page-tab ${kind === 'container' ? 'page-tab-active' : ''}" data-inv-kind="container"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.container}</svg>Containers <span class="inv-tab-count">${c.container || 0}</span></button>
+        <button class="page-tab inv-tab-cleanup ${kind === 'cleanup' ? 'page-tab-active' : ''}" data-inv-kind="cleanup"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.cleanup}</svg>Recommended to Remove</button>
       </div>`;
     host.querySelectorAll('[data-inv-kind]').forEach((b) => b.onclick = () => {
       kind = b.dataset.invKind; offset = 0;
       fCategory = fPriority = fSection = '';
       host.querySelectorAll('[data-inv-kind]').forEach((x) => x.classList.toggle('page-tab-active', x === b));
-      renderFilters(host); loadRows(host);
+      // cleanup tab has its own view; hide the search/filter chrome
+      const isCleanup = kind === 'cleanup';
+      const search = $('[data-inv=search]', host); if (search) search.style.display = isCleanup ? 'none' : '';
+      if (isCleanup) { renderFilters(host); loadRecommendations(host); }
+      else { renderFilters(host); loadRows(host); }
     });
   }
 
@@ -2523,6 +2529,77 @@ pageRenderers.inventory = (() => {
     enhanceSelects(host);
   }
 
+  // Reload whichever view is active after an action.
+  function reloadActive(host) {
+    loadSummary(host);
+    if (kind === 'cleanup') loadRecommendations(host); else loadRows(host);
+  }
+
+  const REC_REASON = {
+    orphaned: { label: 'Orphaned', cls: 'rec-safe', icon: '🔗' },
+    failed: { label: 'Failed', cls: 'rec-review', icon: '✕' },
+    inactive: { label: 'Inactive', cls: 'rec-review', icon: '○' },
+    stopped: { label: 'Stopped', cls: 'rec-safe', icon: '■' },
+    'large-old': { label: 'Large & old', cls: 'rec-review', icon: '◇' },
+  };
+
+  async function loadRecommendations(host) {
+    const tbl = $('[data-inv=table]', host);
+    const pager = $('[data-inv=pager]', host);
+    if (pager) pager.innerHTML = '';
+    if (tbl) tbl.innerHTML = '<p class="sess-empty">Analyzing installed software…</p>';
+    let data;
+    try { data = await api('/inventory/recommendations'); }
+    catch (e) { if (tbl) tbl.innerHTML = `<p class="sess-empty">Could not analyze: ${esc(e.message)}</p>`; return; }
+    const recs = data.recommendations || [];
+    if (!recs.length) {
+      if (tbl) tbl.innerHTML = '<p class="sess-empty">Nothing to recommend — no orphaned packages, failed services, or stopped containers found.</p>';
+      return;
+    }
+    // group by kind for readability
+    const groups = { package: [], service: [], container: [] };
+    recs.forEach((r) => { (groups[r.kind] || (groups[r.kind] = [])).push(r); });
+    const KIND_TITLE = { package: 'Packages', service: 'Services', container: 'Containers' };
+    const stopIco = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>';
+    const trash = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+
+    const actionBtn = (r) => {
+      if (r.kind === 'package') return `<button class="inv-act inv-act-danger" data-rec-act="pkg" data-name="${esc(r.name)}" title="Uninstall ${esc(r.name)}">${trash}</button>`;
+      if (r.kind === 'service') return `<button class="inv-act" data-rec-act="svc" data-name="${esc(r.name)}" title="Stop & disable ${esc(r.name)}">${stopIco}</button>`;
+      return `<button class="inv-act inv-act-danger" data-rec-act="ctr" data-name="${esc(r.name)}" title="Remove container ${esc(r.name)}">${trash}</button>`;
+    };
+
+    const sections = Object.entries(groups).filter(([, arr]) => arr.length).map(([k, arr]) => `
+      <h4 class="sess-h" style="margin-top:18px">${KIND_TITLE[k] || k} <span class="inv-tab-count">${arr.length}</span></h4>
+      <div class="up-table-scroll"><table class="inv-table inv-table-fixed">
+        <colgroup><col style="width:24%"><col style="width:16%"><col style="width:auto"><col style="width:72px"></colgroup>
+        <thead><tr><th>Name</th><th>Reason</th><th>Why</th><th></th></tr></thead>
+        <tbody>${arr.map((r) => {
+          const meta = REC_REASON[r.reason] || { label: r.reason, cls: 'rec-review' };
+          return `<tr>
+            <td><b>${esc(r.name)}</b>${r.version ? ` <span class="inv-dim">${esc(r.version)}</span>` : ''}</td>
+            <td><span class="rec-badge ${meta.cls}">${esc(meta.label)}</span></td>
+            <td class="inv-dim inv-desc">${esc(r.detail || '')}</td>
+            <td class="inv-actions">${actionBtn(r)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`).join('');
+
+    if (tbl) tbl.innerHTML = `
+      <div class="rec-summary">
+        <span class="rec-chip"><b>${data.counts.total}</b> suggestion${data.counts.total === 1 ? '' : 's'}</span>
+        <span class="rec-chip rec-safe">${data.counts.safe} safe</span>
+        <span class="rec-chip rec-review">${data.counts.review} to review</span>
+      </div>
+      <p class="up-sec-hint">These are observations, not certainties — RaPiSys can't tell intent. "Orphaned" and "Stopped" are generally safe; "Failed", "Inactive" and "Large &amp; old" deserve a look before removing. Removal always asks for confirmation and shows the full dependency cascade.</p>
+      ${sections}`;
+
+    // wire actions (each reuses the audited remove/stop flows, then re-analyzes)
+    host.querySelectorAll('[data-rec-act=pkg]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name, b));
+    host.querySelectorAll('[data-rec-act=svc]').forEach((b) => b.onclick = () => svcToggle(host, b.dataset.name, 'stop'));
+    host.querySelectorAll('[data-rec-act=ctr]').forEach((b) => b.onclick = () => ctrRemove(host, b.dataset.name));
+  }
+
   async function pkgRemove(host, name, btn) {
     // Computing the cascade (apt-get -s remove) takes a moment — show a
     // spinner on the button so the click feels responsive, not frozen.
@@ -2542,17 +2619,17 @@ pageRenderers.inventory = (() => {
     try {
       await api('/inventory/package/remove', { method: 'POST', body: { name, confirm: name } });
       toast('success', 'Inventory', `${name} removed`);
-      loadSummary(host); loadRows(host);
+      reloadActive(host);
     } catch (e) { toast('error', 'Inventory', e.message); }
   }
   async function svcToggle(host, name, action) {
     if (!await rapisysConfirm(`${action === 'stop' ? 'Stop' : 'Start'} service <b>${esc(name)}</b>?`, { confirmLabel: action === 'stop' ? 'Stop' : 'Start', html: true, danger: action === 'stop' })) return;
-    try { await api('/inventory/service/control', { method: 'POST', body: { name, action } }); toast('success', 'Service', `${name} ${action}ed`); setTimeout(() => loadRows(host), 800); }
+    try { await api('/inventory/service/control', { method: 'POST', body: { name, action } }); toast('success', 'Service', `${name} ${action}ed`); setTimeout(() => reloadActive(host), 800); }
     catch (e) { toast('error', 'Service', e.message); }
   }
   async function ctrRemove(host, name) {
     if (!await rapisysConfirm(`Stop and remove container <b>${esc(name)}</b>?`, { danger: true, confirmLabel: 'Remove', html: true })) return;
-    try { await api('/inventory/container/remove', { method: 'POST', body: { name } }); toast('success', 'Container', `${name} removed`); loadSummary(host); loadRows(host); }
+    try { await api('/inventory/container/remove', { method: 'POST', body: { name } }); toast('success', 'Container', `${name} removed`); reloadActive(host); }
     catch (e) { toast('error', 'Container', e.message); }
   }
 

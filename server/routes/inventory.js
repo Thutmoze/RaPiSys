@@ -24,6 +24,13 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
     res.json(await inventory.serviceDetail(req.params.name));
   });
 
+  // "Recommended to remove": orphaned packages, failed/inactive services,
+  // stopped containers, large-and-old packages — each with a reason.
+  r.get('/recommendations', async (req, res) => {
+    try { res.json(await inventory.recommendations()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Preview a package removal (simulate; shows full cascade + protections).
   r.post('/package/simulate', requireControl, async (req, res) => {
     const name = String(req.body?.name || '');

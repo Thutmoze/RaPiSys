@@ -5570,6 +5570,18 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .page-tab-active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
 .page-tab-ic { flex-shrink: 0; opacity: 0.9; }
 .inv-kind-tabs { margin-bottom: 14px; }
+/* recommended-to-remove view */
+.rec-summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.rec-chip { font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 999px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }
+.rec-chip.rec-safe { color: #22c55e; border-color: rgba(34,197,94,0.3); }
+.rec-chip.rec-review { color: #f59e0b; border-color: rgba(245,158,11,0.3); }
+.rec-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); }
+.rec-badge.rec-safe { color: #22c55e; border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.08); }
+.rec-badge.rec-review { color: #f59e0b; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.08); }
+.inv-tab-cleanup { color: var(--text-secondary); }
+.inv-tab-cleanup.page-tab-active { color: #f59e0b; border-bottom-color: #f59e0b; }
 .inv-tab-count { display: inline-flex; align-items: center; justify-content: center;
   min-width: 20px; height: 18px; padding: 0 6px; margin-left: 2px;
   font-size: 11px; font-weight: 700; line-height: 1;

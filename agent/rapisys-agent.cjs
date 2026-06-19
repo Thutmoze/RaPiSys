@@ -214,6 +214,20 @@ const OPS = {
     return { packages };
   },
 
+  // List orphaned (auto-removable) packages — dependencies no longer needed by
+  // anything explicitly installed. Read-only: uses apt-get's simulate mode, makes
+  // no changes. These are the safest removal candidates.
+  async 'inventory.autoremovable'() {
+    const r = await run('apt-get', ['-s', 'autoremove'], 20000).catch(() => ({ code: 1, stdout: '' }));
+    if (r.code !== 0) return { packages: [] };
+    const names = [];
+    for (const line of (r.stdout || '').split('\n')) {
+      const m = line.match(/^Remv\s+(\S+)/);
+      if (m) names.push(m[1]);
+    }
+    return { packages: names };
+  },
+
   // ---- simulate + perform package removal (destructive, guarded) ----------
   async 'inventory.removeSimulate'({ name }) {
     assert(/^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,128}$/.test(name), 'invalid package name');

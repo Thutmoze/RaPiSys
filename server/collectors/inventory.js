@@ -110,5 +110,97 @@ export function createInventoryCollector() {
     return [...pkgs, ...svcs, ...ctrs];
   }
 
-  return { packages, services, containers, serviceDetail, removeSimulate, removePackage, serviceControl, removeContainer, collectAll };
+  async function autoremovable() {
+    if (!agentConfigured()) return [];
+    try { const { packages } = await agentCall('inventory.autoremovable', {}, null, 25000); return packages || []; }
+    catch { return []; }
+  }
+
+  /**
+   * "Recommended to remove" analysis. Combines several conservative signals,
+   * each tagged with a reason + severity so the UI can explain *why* (we never
+   * claim something is malware — only observable facts: orphaned, failed,
+   * inactive, stopped, oversized-and-old).
+   */
+  async function recommendations() {
+    const [pkgs, svcs, ctrs, orphans] = await Promise.all([packages(), services(), containers(), autoremovable()]);
+    const orphanSet = new Set(orphans);
+    const recs = [];
+    const now = Date.now();
+    const DAY = 86400e3;
+
+    // 1) Orphaned (auto-removable) packages — safest, highest-confidence signal.
+    for (const name of orphans) {
+      const p = pkgs.find((x) => x.name === name);
+      recs.push({
+        kind: 'package', name, version: p?.version || '',
+        reason: 'orphaned', severity: 'safe',
+        detail: 'No longer required by any installed package (apt autoremove candidate).',
+        sizeKB: p?.meta?.sizeKB || 0,
+      });
+    }
+
+    // 2) Failed services — something is wrong; review/remove.
+    for (const s of svcs) {
+      const active = s.meta?.active, sub = s.meta?.sub;
+      if (active === 'failed' || sub === 'failed') {
+        recs.push({ kind: 'service', name: s.name, reason: 'failed', severity: 'review',
+          detail: `Service is in a failed state (${s.status}).`, description: s.meta?.description || '' });
+      }
+    }
+
+    // 3) Dead/inactive + not-loaded services (loaded but inactive for a while,
+    //    or unit no longer found). Lower confidence → 'review'.
+    for (const s of svcs) {
+      const active = s.meta?.active, sub = s.meta?.sub, load = s.meta?.load;
+      if (load === 'not-found') {
+        recs.push({ kind: 'service', name: s.name, reason: 'orphaned', severity: 'review',
+          detail: 'Unit file no longer present (leftover from a removed package).', description: s.meta?.description || '' });
+      } else if (active === 'inactive' && sub === 'dead') {
+        recs.push({ kind: 'service', name: s.name, reason: 'inactive', severity: 'review',
+          detail: 'Loaded but inactive/dead — not currently doing anything.', description: s.meta?.description || '' });
+      }
+    }
+
+    // 4) Stopped / exited / dead containers — taking up space, not running.
+    for (const c of ctrs) {
+      if (['exited', 'dead', 'created'].includes(c.status)) {
+        const ageD = c.installedAt ? Math.floor((now - c.installedAt) / DAY) : null;
+        recs.push({ kind: 'container', name: c.name, reason: 'stopped', severity: 'safe',
+          detail: `Container is ${c.status}${ageD != null ? `, created ${ageD}d ago` : ''} (${c.meta?.statusText || ''}).`,
+          description: c.meta?.image || '' });
+      }
+    }
+
+    // 5) Large + old user packages (low confidence informational nudge). Only
+    //    user-category, > 50 MB, installed > 180d ago, and NOT system/library.
+    //    Framed as "review" — we can't prove it's unused, just a candidate.
+    for (const p of pkgs) {
+      const isUser = !(p.meta?.essential || p.meta?.priority === 'required' || p.meta?.priority === 'important'
+        || p.meta?.section === 'libs' || p.meta?.section === 'oldlibs' || /^lib/.test(p.name));
+      const big = (p.meta?.sizeKB || 0) > 50000;
+      const old = p.installedAt && (now - p.installedAt) > 180 * DAY;
+      if (isUser && big && old && !orphanSet.has(p.name)) {
+        recs.push({ kind: 'package', name: p.name, version: p.version, reason: 'large-old', severity: 'review',
+          detail: `Large (${Math.round((p.meta.sizeKB) / 1024)} MB) and installed over 6 months ago — review if still needed.`,
+          description: p.meta?.description || '', sizeKB: p.meta?.sizeKB || 0 });
+      }
+    }
+
+    // de-dup (a service could match failed + inactive); keep highest severity
+    const order = { review: 1, safe: 0 };
+    const byKey = new Map();
+    for (const r of recs) {
+      const k = `${r.kind}:${r.name}`;
+      const prev = byKey.get(k);
+      if (!prev || (order[r.severity] ?? 0) > (order[prev.severity] ?? 0)) byKey.set(k, r);
+    }
+    const out = [...byKey.values()];
+    const counts = { total: out.length,
+      safe: out.filter((r) => r.severity === 'safe').length,
+      review: out.filter((r) => r.severity === 'review').length };
+    return { recommendations: out, counts, generatedAt: now };
+  }
+
+  return { packages, services, containers, serviceDetail, removeSimulate, removePackage, serviceControl, removeContainer, collectAll, recommendations };
 }
