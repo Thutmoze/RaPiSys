@@ -4752,10 +4752,10 @@ select, select option {
 .rsel-btn svg { transition: transform 0.15s ease; color: var(--text-muted); flex: none; }
 .rsel-list {
   position: absolute; z-index: 7000; top: calc(100% + 4px); left: 0; right: 0;
-  max-height: 240px; overflow-y: auto;
   background: #101014; border: 1px solid var(--border-color);
   border-radius: var(--radius-sm); box-shadow: 0 12px 30px rgba(0,0,0,0.6);
   padding: 4px;
+  display: flex; flex-direction: column; max-height: 280px; overflow: hidden;
 }
 .rsel-item {
   display: block; width: 100%; text-align: left; padding: 9px 10px;
@@ -4820,7 +4820,7 @@ body.ultra .al-btn, body.ultra .sess-kick { padding: 4px 9px; font-size: 10px; }
   border: 1px solid var(--border-color); border-radius: 8px; outline: none;
 }
 .rsel-filter:focus { border-color: rgba(0, 212, 255, 0.45); }
-.rsel-items { max-height: 200px; overflow-y: auto; }
+.rsel-items { flex: 1; min-height: 0; overflow-y: auto; }
 .rsel-none { padding: 10px; font-size: 12px; color: var(--text-muted); }
 
 /* Flex buttons eat whitespace between text nodes: give multi-part button
@@ -5534,6 +5534,13 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .page-tab:hover { color: var(--text-secondary); }
 .page-tab-active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
 .page-tab-ic { flex-shrink: 0; opacity: 0.9; }
+.inv-kind-tabs { margin-bottom: 14px; }
+.inv-tab-count { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 18px; padding: 0 6px; margin-left: 2px;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 9px; color: var(--text-secondary); }
+.page-tab-active .inv-tab-count { background: rgba(0,212,255,0.12); border-color: rgba(0,212,255,0.3); color: var(--accent-cyan); }
 
 /* standalone page header above the card grid (not inside a card) */
 .page-lead { margin-bottom: 8px; }

@@ -862,7 +862,7 @@ pageRenderers.sessions = (() => {
       <div class="rapisys-grid">
         <div class="card sess-span">
           ${pageTabs([
-            { id: 'active', label: 'Active Sessions', icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>' },
+            { id: 'active', label: 'Active Sessions', icon: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
             { id: 'history', label: 'Login History', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>' },
             { id: 'terminal', label: 'Terminal', icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>' },
             { id: 'desktop', label: 'Desktop', icon: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>' },
@@ -1301,7 +1301,7 @@ pageRenderers.settings = (() => {
             </label>
           </div>
           <div class="set-actions">
-            <button class="set-btn set-btn-edit" data-acc="pwedit">${EDIT_ICON}<span>Edit password</span></button>
+            <button class="set-btn set-btn-edit" data-acc="pwedit">${EDIT_ICON}<span>Reset Password</span></button>
           </div>
         </div>
 
@@ -2219,14 +2219,21 @@ pageRenderers.inventory = (() => {
     const c = s.counts || {};
     facetData = s.facets || null;
     renderFilters(host);
+    const KIND_ICONS = {
+      package: '<path d="M16.5 9.4 7.5 4.21M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/>',
+      service: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+      container: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+    };
     $('[data-inv=chips]', host).innerHTML = `
-      <button class="inv-chip ${kind === 'package' ? 'active' : ''}" data-inv-kind="package">Packages <b>${c.package || 0}</b></button>
-      <button class="inv-chip ${kind === 'service' ? 'active' : ''}" data-inv-kind="service">Services <b>${c.service || 0}</b></button>
-      <button class="inv-chip ${kind === 'container' ? 'active' : ''}" data-inv-kind="container">Containers <b>${c.container || 0}</b></button>`;
+      <div class="page-tabs inv-kind-tabs">
+        <button class="page-tab ${kind === 'package' ? 'page-tab-active' : ''}" data-inv-kind="package"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.package}</svg>Packages <span class="inv-tab-count">${c.package || 0}</span></button>
+        <button class="page-tab ${kind === 'service' ? 'page-tab-active' : ''}" data-inv-kind="service"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.service}</svg>Services <span class="inv-tab-count">${c.service || 0}</span></button>
+        <button class="page-tab ${kind === 'container' ? 'page-tab-active' : ''}" data-inv-kind="container"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.container}</svg>Containers <span class="inv-tab-count">${c.container || 0}</span></button>
+      </div>`;
     host.querySelectorAll('[data-inv-kind]').forEach((b) => b.onclick = () => {
       kind = b.dataset.invKind; offset = 0;
       fCategory = fPriority = fSection = '';
-      host.querySelectorAll('[data-inv-kind]').forEach((x) => x.classList.toggle('active', x === b));
+      host.querySelectorAll('[data-inv-kind]').forEach((x) => x.classList.toggle('page-tab-active', x === b));
       renderFilters(host); loadRows(host);
     });
   }
@@ -3283,9 +3290,9 @@ pageRenderers.updates = (() => {
   return {
     mount(host) {
       host.innerHTML = `
+      <div class="page-lead">${pageHeader('updates', 'Software Updates')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageHeader('updates', 'Software Updates')}
           ${pageTabs([{ id: 'available', label: 'Available Updates' }, { id: 'history', label: 'Update History' }, { id: 'schedule', label: 'Auto-Check' }])}
           <div class="card-body" data-pane="available">
             <div class="up-chips" data-up="chips"></div>
