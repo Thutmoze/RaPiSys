@@ -4637,19 +4637,36 @@ body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }
 /* Sessions + Alerts pages */
 .sess-span { grid-column: 1 / -1; }
 /* login-history filter bar */
-.sess-hist-filters { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.sess-hist-filters { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; align-items: flex-end; }
 .sess-hist-filters label { display: flex; flex-direction: column; gap: 5px;
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.sess-hist-filters input[type=date] { padding: 8px 10px; font: inherit; font-size: 13px;
+  background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); color-scheme: dark; }
+/* history table: column titles + a connection-type column */
+.sess-hist-head { display: grid; grid-template-columns: 1.4fr 1fr 1.4fr 1.4fr 1fr; gap: 8px;
+  padding: 6px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border-color); }
+.sess-hist-row { grid-template-columns: 1.4fr 1fr 1.4fr 1.4fr 1fr; }
+.sess-type-badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); }
+.sess-type-ssh { color: var(--accent-cyan); border-color: rgba(0,212,255,0.3); background: rgba(0,212,255,0.08); }
+.sess-type-vnc { color: var(--accent-purple); border-color: rgba(168,85,247,0.3); background: rgba(168,85,247,0.08); }
+.sess-type-console { color: #f59e0b; border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.08); }
+.sess-type-tailscale { color: #22c55e; border-color: rgba(34,197,94,0.3); background: rgba(34,197,94,0.08); }
+.sess-live-anim { color: #22c55e; font-weight: 700; animation: sessLivePulse 1.4s ease-in-out infinite; }
+@keyframes sessLivePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .sess-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--text-muted); margin: 14px 0 6px; }
-/* typed section headers: brighter title + a type glyph that pulses when live */
-.sess-h-typed { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); }
-.sess-h-typed .sess-h-ic { flex-shrink: 0; color: var(--text-muted); transition: color 0.2s ease; }
-.sess-h-live { color: var(--accent-cyan); }
-.sess-h-live .sess-h-ic { color: var(--accent-cyan); animation: sessGlyphPulse 1.8s ease-in-out infinite; }
+/* typed section headers: larger title + a type glyph; live = bold green pulse */
+.sess-h-typed { display: flex; align-items: center; gap: 10px; color: var(--text-secondary);
+  font-size: 15px; text-transform: none; letter-spacing: 0.01em; }
+.sess-h-typed .sess-h-ic { width: 22px; height: 22px; flex-shrink: 0; color: var(--text-muted); transition: color 0.2s ease; }
+.sess-h-live { color: #22c55e; font-weight: 700; }
+.sess-h-live .sess-h-ic { color: #22c55e; animation: sessGlyphPulse 1.6s ease-in-out infinite; }
 @keyframes sessGlyphPulse {
-  0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(0,212,255,0)); }
-  50% { opacity: 0.65; filter: drop-shadow(0 0 5px rgba(0,212,255,0.6)); }
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(34,197,94,0)); transform: scale(1); }
+  50% { opacity: 0.7; filter: drop-shadow(0 0 6px rgba(34,197,94,0.7)); transform: scale(1.12); }
 }
 .sess-row { display: grid; grid-template-columns: 2fr 1.5fr 1fr 1fr; gap: 8px;
   padding: 8px 0; font-size: 13px; color: var(--text-secondary);
@@ -4774,7 +4791,7 @@ select, select option {
   display: block; width: 100%; text-align: left; padding: 9px 10px;
   font: inherit; font-size: 13px; color: var(--text-secondary);
   background: none; border: 0; border-radius: 8px; cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rsel-item:hover { background: rgba(0, 212, 255, 0.08); color: var(--text-primary); }
 .rsel-item.sel { color: var(--accent-cyan); background: rgba(0, 212, 255, 0.06); }

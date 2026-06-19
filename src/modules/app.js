@@ -120,7 +120,8 @@ function enhanceSelects(root) {
         const item = el('button', 'rsel-item' + (i === sel.selectedIndex ? ' sel' : ''));
         item.type = 'button';
         item.textContent = o.text;
-        item.onclick = () => {
+        item.onclick = (ev) => {
+          ev.stopPropagation();
           sel.selectedIndex = i;
           sel.dispatchEvent(new Event('change', { bubbles: true }));
           labEl.textContent = labelOf();
@@ -132,8 +133,12 @@ function enhanceSelects(root) {
     }
     function position() {
       const r = btn.getBoundingClientRect();
+      // Let the list grow wider than the button to fit long option text, but
+      // never overflow the viewport. min-width keeps it at least button-width.
       list.style.left = `${r.left}px`;
-      list.style.width = `${r.width}px`;
+      list.style.minWidth = `${r.width}px`;
+      list.style.width = 'max-content';
+      list.style.maxWidth = `${Math.max(r.width, window.innerWidth - r.left - 16)}px`;
       const below = window.innerHeight - r.bottom;
       // NB: reset the unused edge to 'auto' (not ''), else the stylesheet's
       // top: calc(100% + 4px) stays in force and, combined with an explicit
@@ -849,20 +854,37 @@ pageRenderers.sessions = (() => {
 
   async function refreshHistory(host) {
     try {
-      const range = ($('[data-hist=range]', host) && $('[data-hist=range]', host).value) || '7d';
+      const rangeSel = $('[data-hist=range]', host);
+      const range = (rangeSel && rangeSel.value) || '7d';
       const kind = ($('[data-hist=kind]', host) && $('[data-hist=kind]', host).value) || '';
-      const qs = `range=${encodeURIComponent(range)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
+      let qs = `${kind ? `kind=${encodeURIComponent(kind)}&` : ''}`;
+      if (range === 'custom') {
+        const fromV = $('[data-hist=from]', host) && $('[data-hist=from]', host).value;
+        const toV = $('[data-hist=to]', host) && $('[data-hist=to]', host).value;
+        if (!fromV && !toV) { $('[data-sess=hist]', host).innerHTML = '<p class="sess-empty">Pick a From and/or To date.</p>'; return; }
+        const fromMs = fromV ? new Date(fromV + 'T00:00:00').getTime() : 0;
+        const toMs = toV ? new Date(toV + 'T23:59:59').getTime() : Date.now();
+        qs += `from=${fromMs}&to=${toMs}`;
+      } else {
+        qs += `range=${encodeURIComponent(range)}`;
+      }
       const data = await api(`/sessions/history?${qs}`);
       const el2 = $('[data-sess=hist]', host);
       if (!el2) return;
       if (!data.history.length) { el2.innerHTML = '<p class="sess-empty">No login history for this filter</p>'; return; }
-      el2.innerHTML = data.history.slice(0, 100).map((h) => `
-        <div class="sess-row">
-          <span><b>${esc(h.username)}</b> <span class="sess-kind">${esc(h.kind)}</span></span>
-          <span>${esc(h.source || '')}</span>
-          <span>${fmtTime(h.started_at)}</span>
-          <span>${h.ended_at ? fmtDur(h.ended_at - h.started_at) : '<span class="sess-live">active</span>'}</span>
-        </div>`).join('');
+      const KIND_LABEL = { ssh: 'SSH', console: 'Console', vnc: 'VNC', tailscale: 'Tailscale' };
+      el2.innerHTML = `
+        <div class="sess-hist-head">
+          <span>User</span><span>Type</span><span>Source</span><span>Started</span><span>Duration</span>
+        </div>
+        ${data.history.slice(0, 200).map((h) => `
+          <div class="sess-row sess-hist-row">
+            <span><b>${esc(h.username)}</b></span>
+            <span><span class="sess-type-badge sess-type-${esc(h.kind)}">${esc(KIND_LABEL[h.kind] || h.kind)}</span></span>
+            <span>${esc(h.source || '—')}</span>
+            <span>${fmtTime(h.started_at)}</span>
+            <span>${h.ended_at ? fmtDur(h.ended_at - h.started_at) : '<span class="sess-live sess-live-anim">● active</span>'}</span>
+          </div>`).join('')}`;
     } catch { /* keep last */ }
   }
 
@@ -892,7 +914,15 @@ pageRenderers.sessions = (() => {
                   <option value="24h">Last 24 hours</option>
                   <option value="7d" selected>Last 7 days</option>
                   <option value="30d">Last 30 days</option>
+                  <option value="90d">Last 90 days</option>
+                  <option value="custom">Custom…</option>
                 </select>
+              </label>
+              <label data-hist-custom hidden>From
+                <input type="date" data-hist="from">
+              </label>
+              <label data-hist-custom hidden>To
+                <input type="date" data-hist="to">
               </label>
               <label>Type
                 <select data-hist="kind">
@@ -914,18 +944,29 @@ pageRenderers.sessions = (() => {
           </div>
         </div>
       </div>`;
+      let histEnhanced = false;
       wirePageTabs(host, (tab) => {
         // tear down any live remote session when leaving its tab
         teardownTerm(); teardownVnc();
         if (tab === 'terminal') openTerminal(host);
         if (tab === 'desktop') openDesktop(host);
+        // enhance the history filter selects the first time the pane is visible
+        // (enhancing while display:none gives them a zero-size anchor rect)
+        if (tab === 'history' && !histEnhanced) { histEnhanced = true; enhanceSelects(host); }
       });
       // login-history filters
-      ['range', 'kind'].forEach((f) => {
-        const sel = $(`[data-hist=${f}]`, host);
-        if (sel) sel.addEventListener('change', () => refreshHistory(host));
+      const rangeSel = $('[data-hist=range]', host);
+      const toggleCustom = () => {
+        const on = rangeSel && rangeSel.value === 'custom';
+        host.querySelectorAll('[data-hist-custom]').forEach((l) => { l.hidden = !on; });
+      };
+      if (rangeSel) rangeSel.addEventListener('change', () => { toggleCustom(); refreshHistory(host); });
+      const kindSel = $('[data-hist=kind]', host);
+      if (kindSel) kindSel.addEventListener('change', () => refreshHistory(host));
+      ['from', 'to'].forEach((f) => {
+        const inp = $(`[data-hist=${f}]`, host);
+        if (inp) inp.addEventListener('change', () => refreshHistory(host));
       });
-      enhanceSelects(host);
       refresh(host); refreshHistory(host);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
       // popout window: ?pop=terminal|desktop → jump straight to that tab and
