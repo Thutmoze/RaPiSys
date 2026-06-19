@@ -2597,7 +2597,7 @@ pageRenderers.inventory = (() => {
       return `<button class="inv-act inv-act-danger" data-rec-act="ctr" data-name="${esc(r.name)}" title="Remove container ${esc(r.name)}">${trash}</button>`;
     };
 
-    const age = recData.generatedAt ? `analyzed ${fmtTime(recData.generatedAt)}` : '';
+    const age = recData.generatedAt ? `analyzed ${rapisysFmtTime(recData.generatedAt)}` : '';
     const KIND_TITLE = { package: 'Packages', service: 'Services', container: 'Containers' };
     const groups = {};
     shown.forEach((r) => { (groups[r.kind] || (groups[r.kind] = [])).push(r); });
