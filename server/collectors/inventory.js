@@ -112,7 +112,7 @@ export function createInventoryCollector() {
 
   async function autoremovable() {
     if (!agentConfigured()) return [];
-    try { const { packages } = await agentCall('inventory.autoremovable', {}, null, 25000); return packages || []; }
+    try { const { packages } = await agentCall('inventory.autoremovable', {}, null, 20000); return packages || []; }
     catch { return []; }
   }
 
@@ -123,7 +123,11 @@ export function createInventoryCollector() {
    * inactive, stopped, oversized-and-old).
    */
   async function recommendations() {
-    const [pkgs, svcs, ctrs, orphans] = await Promise.all([packages(), services(), containers(), autoremovable()]);
+    const [pkgsR, svcsR, ctrsR, orphansR] = await Promise.allSettled([packages(), services(), containers(), autoremovable()]);
+    const pkgs = pkgsR.status === 'fulfilled' ? pkgsR.value : [];
+    const svcs = svcsR.status === 'fulfilled' ? svcsR.value : [];
+    const ctrs = ctrsR.status === 'fulfilled' ? ctrsR.value : [];
+    const orphans = orphansR.status === 'fulfilled' ? orphansR.value : [];
     const orphanSet = new Set(orphans);
     const recs = [];
     const now = Date.now();
@@ -137,6 +141,8 @@ export function createInventoryCollector() {
         reason: 'orphaned', severity: 'safe',
         detail: 'No longer required by any installed package (apt autoremove candidate).',
         sizeKB: p?.meta?.sizeKB || 0,
+        installedAt: p?.installedAt || null, category: p?.category || null, meta: p?.meta || null,
+        description: p?.meta?.description || '',
       });
     }
 
@@ -183,7 +189,8 @@ export function createInventoryCollector() {
       if (isUser && big && old && !orphanSet.has(p.name)) {
         recs.push({ kind: 'package', name: p.name, version: p.version, reason: 'large-old', severity: 'review',
           detail: `Large (${Math.round((p.meta.sizeKB) / 1024)} MB) and installed over 6 months ago — review if still needed.`,
-          description: p.meta?.description || '', sizeKB: p.meta?.sizeKB || 0 });
+          description: p.meta?.description || '', sizeKB: p.meta?.sizeKB || 0,
+          installedAt: p.installedAt || null, category: p.category || null, meta: p.meta || null });
       }
     }
 

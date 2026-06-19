@@ -218,7 +218,9 @@ const OPS = {
   // anything explicitly installed. Read-only: uses apt-get's simulate mode, makes
   // no changes. These are the safest removal candidates.
   async 'inventory.autoremovable'() {
-    const r = await run('apt-get', ['-s', 'autoremove'], 20000).catch(() => ({ code: 1, stdout: '' }));
+    // -s = simulate (no changes); the lock timeout avoids hanging if another
+    // apt process holds the lock — we'd rather return nothing than block.
+    const r = await run('apt-get', ['-s', '-o', 'DPkg::Lock::Timeout=5', 'autoremove'], 18000).catch(() => ({ code: 1, stdout: '' }));
     if (r.code !== 0) return { packages: [] };
     const names = [];
     for (const line of (r.stdout || '').split('\n')) {

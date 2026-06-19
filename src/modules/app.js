@@ -2551,7 +2551,16 @@ pageRenderers.inventory = (() => {
     const tbl = $('[data-inv=table]', host);
     const pager = $('[data-inv=pager]', host);
     if (pager) pager.innerHTML = '';
-    if (tbl && !recData) tbl.innerHTML = '<p class="sess-empty">Loading…</p>';
+    // show an animated indeterminate progress bar while we wait (analysis runs
+    // server-side; on first run / re-analyze it can take a few seconds).
+    if (tbl && (!recData || refresh)) {
+      tbl.innerHTML = `
+        <div class="rec-loading">
+          <div class="rec-loading-head"><span class="up-spinner"></span><span>${refresh ? 'Re-analyzing installed software…' : 'Analyzing installed software…'}</span></div>
+          <div class="rec-progress"><div class="rec-progress-bar"></div></div>
+          <p class="up-sec-hint" style="margin-top:8px">Checking for orphaned packages, failed/inactive services and stopped containers.</p>
+        </div>`;
+    }
     try { recData = await api(`/inventory/recommendations${refresh ? '?refresh=1' : ''}`); }
     catch (e) { if (tbl) tbl.innerHTML = `<p class="sess-empty">Could not analyze: ${esc(e.message)}</p>`; return; }
     recSelected = new Set();   // selection resets on (re)load
@@ -2593,23 +2602,40 @@ pageRenderers.inventory = (() => {
     const groups = {};
     shown.forEach((r) => { (groups[r.kind] || (groups[r.kind] = [])).push(r); });
 
-    const sections = Object.entries(groups).map(([k, arr]) => `
+    const sections = Object.entries(groups).map(([k, arr]) => {
+      const isPkg = k === 'package';
+      const colgroup = isPkg
+        ? '<colgroup><col style="width:36px"><col style="width:18%"><col style="width:13%"><col style="width:auto"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:9%"><col style="width:56px"></colgroup>'
+        : '<colgroup><col style="width:36px"><col style="width:22%"><col style="width:14%"><col style="width:auto"><col style="width:56px"></colgroup>';
+      const headRow = isPkg
+        ? '<th></th><th>Name</th><th>Reason</th><th>Why</th><th>Version</th><th>Size</th><th>Installed</th><th>Category</th><th></th>'
+        : '<th></th><th>Name</th><th>Reason</th><th>Why</th><th></th>';
+      return `
       <h4 class="sess-h" style="margin-top:18px">${KIND_TITLE[k] || k} <span class="inv-tab-count">${arr.length}</span></h4>
       <div class="up-table-scroll"><table class="inv-table inv-table-fixed">
-        <colgroup><col style="width:36px"><col style="width:22%"><col style="width:15%"><col style="width:auto"><col style="width:60px"></colgroup>
-        <thead><tr><th></th><th>Name</th><th>Reason</th><th>Why</th><th></th></tr></thead>
+        ${colgroup}
+        <thead><tr>${headRow}</tr></thead>
         <tbody>${arr.map((r) => {
           const meta = REC_REASON[r.reason] || { label: r.reason, cls: 'rec-review' };
           const key = `${r.kind}:${r.name}`;
+          const cap = (v, cls) => v ? `<span class="inv-cap ${cls}">${esc(v)}</span>` : '<span class="inv-dim">—</span>';
+          const extra = isPkg
+            ? `<td>${esc(r.version || '—')}</td>`
+              + `<td class="inv-dim">${fmtSize(r.sizeKB || r.meta?.sizeKB)}</td>`
+              + `<td class="inv-dim">${fmtDate(r.installedAt)}</td>`
+              + `<td>${cap(r.category, 'inv-cap-cat')}</td>`
+            : '';
           return `<tr>
             <td><input type="checkbox" class="rec-cb" data-rec-key="${esc(key)}" ${recSelected.has(key) ? 'checked' : ''}></td>
-            <td><b>${esc(r.name)}</b>${r.version ? ` <span class="inv-dim">${esc(r.version)}</span>` : ''}</td>
+            <td><b>${esc(r.name)}</b></td>
             <td><span class="rec-badge ${meta.cls}">${esc(meta.label)}</span></td>
             <td class="inv-dim inv-desc">${esc(r.detail || '')}</td>
+            ${extra}
             <td class="inv-actions">${actionBtn(r)}</td>
           </tr>`;
         }).join('')}</tbody>
-      </table></div>`).join('');
+      </table></div>`;
+    }).join('');
 
     tbl.innerHTML = `
       <div class="rec-toolbar">

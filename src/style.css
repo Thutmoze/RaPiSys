@@ -4603,11 +4603,11 @@ body.ultra .rapisys-grid { gap: 8px; }
   width: auto;
   min-width: 110px;
   height: auto;
-  padding: 10px 22px;
-  font-size: 14px;
+  padding: 9px 16px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
 }
 body.compact .wizard .action-btn { padding: 8px 18px; font-size: 13px; }
 body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }
@@ -4619,6 +4619,9 @@ body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }
 /* Form action buttons (Mount share, Save, Send test): the bare .action-btn
    is nearly invisible on the dark glass — give these a clear cyan identity */
 .wz-form .action-btn {
+  width: auto; height: auto; min-width: 0;
+  padding: 9px 16px; border-radius: 10px; font-size: 13px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   background: rgba(0, 212, 255, 0.12);
   border: 1px solid rgba(0, 212, 255, 0.45);
   color: var(--accent-cyan);
@@ -4924,8 +4927,11 @@ body.ultra .net-chart { height: 90px; }
 body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 
 /* Network: toggles, domain rows, empty history bars */
-.net-toggle { background: none; border: 1px solid rgba(0,212,255,0.3); color: var(--accent-cyan);
-  font-size: 11px; padding: 5px 11px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+.net-toggle { display: inline-flex; align-items: center; gap: 8px; background: var(--bg-card);
+  border: 1px solid rgba(0,212,255,0.3); color: var(--accent-cyan);
+  font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 10px; cursor: pointer;
+  font-family: inherit; white-space: nowrap; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.net-toggle svg { width: 15px; height: 15px; flex-shrink: 0; }
 .net-toggle:hover { border-color: var(--accent-cyan); box-shadow: var(--glow-cyan); }
 .net-toggle:disabled { opacity: 0.5; cursor: progress; }
 .net-dns-cta { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -5594,6 +5600,18 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .rec-bulk { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .rec-age { font-size: 11px; color: var(--text-muted); }
 .rec-cb { width: 16px; height: 16px; accent-color: var(--accent-cyan); cursor: pointer; }
+/* animated loading state for the cleanup analysis */
+.rec-loading { padding: 18px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.rec-loading-head { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+.rec-progress { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; position: relative; }
+.rec-progress-bar { position: absolute; left: 0; top: 0; bottom: 0; width: 40%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+  animation: recIndeterminate 1.25s ease-in-out infinite; }
+@keyframes recIndeterminate {
+  0% { left: -40%; width: 40%; }
+  50% { width: 55%; }
+  100% { left: 100%; width: 40%; }
+}
 .inv-tab-count { display: inline-flex; align-items: center; justify-content: center;
   min-width: 20px; height: 18px; padding: 0 6px; margin-left: 2px;
   font-size: 11px; font-weight: 700; line-height: 1;
