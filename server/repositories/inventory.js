@@ -64,5 +64,18 @@ export function createInventoryRepo(db) {
     return db.prepare(`SELECT MAX(installed_at) AS t FROM inventory`).get()?.t || null;
   }
 
-  return { sync, search, counts, facets, lastSync };
+  // ---- "recommended to remove" cache (single-row JSON snapshot) -------------
+  db.exec(`CREATE TABLE IF NOT EXISTS inventory_recs (id INTEGER PRIMARY KEY CHECK (id=1), generated_at INTEGER, payload TEXT)`);
+  function saveRecommendations(result) {
+    db.prepare(`INSERT INTO inventory_recs (id, generated_at, payload) VALUES (1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET generated_at=excluded.generated_at, payload=excluded.payload`)
+      .run(result.generatedAt || Date.now(), JSON.stringify(result));
+  }
+  function getRecommendations() {
+    const row = db.prepare(`SELECT generated_at AS generatedAt, payload FROM inventory_recs WHERE id=1`).get();
+    if (!row) return null;
+    try { return { ...JSON.parse(row.payload), generatedAt: row.generatedAt }; } catch { return null; }
+  }
+
+  return { sync, search, counts, facets, lastSync, saveRecommendations, getRecommendations };
 }

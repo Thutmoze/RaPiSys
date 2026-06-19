@@ -1,5 +1,10 @@
 /** RaPiSys — inventory "recommended to remove" analyzer tests. */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+process.env.SECRET_KEY = process.env.SECRET_KEY || 'a'.repeat(64);
 
 // Mock the agent client so we can feed controlled package/service/orphan data.
 const agentResponses = {};
@@ -64,5 +69,26 @@ describe('inventory recommendations', () => {
     const inv = createInventoryCollector();
     const { recommendations } = await inv.recommendations();
     expect(recommendations.find((r) => r.name === 'systemd')).toBeFalsy();
+  });
+});
+
+describe('inventory recommendations cache', () => {
+  it('persists and returns the recommendations snapshot', async () => {
+    const { openDatabase } = await import('../server/core/db.js');
+    const { createInventoryRepo } = await import('../server/repositories/inventory.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-rec-'));
+    const handle = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });
+    const repo = createInventoryRepo(handle.db);
+    expect(repo.getRecommendations()).toBeNull();
+    const snap = { recommendations: [{ kind: 'package', name: 'libfoo1', reason: 'orphaned', severity: 'safe' }],
+      counts: { total: 1, safe: 1, review: 0 }, generatedAt: 1700000000000 };
+    repo.saveRecommendations(snap);
+    const got = repo.getRecommendations();
+    expect(got.recommendations).toHaveLength(1);
+    expect(got.recommendations[0].name).toBe('libfoo1');
+    expect(got.generatedAt).toBe(1700000000000);
+    // upsert (single row) overwrites
+    repo.saveRecommendations({ recommendations: [], counts: { total: 0, safe: 0, review: 0 }, generatedAt: 1700000001000 });
+    expect(repo.getRecommendations().recommendations).toHaveLength(0);
   });
 });

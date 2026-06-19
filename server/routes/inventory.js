@@ -25,10 +25,18 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
   });
 
   // "Recommended to remove": orphaned packages, failed/inactive services,
-  // stopped containers, large-and-old packages — each with a reason.
+  // stopped containers, large-and-old packages — each with a reason. Served from
+  // a stored snapshot; pass ?refresh=1 to re-analyze and persist.
   r.get('/recommendations', async (req, res) => {
-    try { res.json(await inventory.recommendations()); }
-    catch (err) { res.status(500).json({ error: err.message }); }
+    try {
+      if (req.query.refresh !== '1') {
+        const cached = inventoryRepo.getRecommendations();
+        if (cached) return res.json({ ...cached, cached: true });
+      }
+      const fresh = await inventory.recommendations();
+      inventoryRepo.saveRecommendations(fresh);
+      res.json({ ...fresh, cached: false });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // Preview a package removal (simulate; shows full cascade + protections).

@@ -217,7 +217,12 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // Refresh today's partial report every 10 min so the Reports page stays live.
   scheduler.register('reports-today', 600e3, () => { try { reports.materializeDay(Date.now()); } catch { /* */ } });
   scheduler.register('inventory-sync', 30 * 60e3, async () => {
-    try { const items = await inventory.collectAll(); inventoryRepoFacade.sync(items, ['package', 'service', 'container']); } catch { /* */ }
+    try {
+      const items = await inventory.collectAll();
+      inventoryRepoFacade.sync(items, ['package', 'service', 'container']);
+      const recs = await inventory.recommendations();
+      inventoryRepoFacade.saveRecommendations(recs);
+    } catch { /* */ }
   }, { runNow: true });
 
   // ---- routes ----------------------------------------------------------------------

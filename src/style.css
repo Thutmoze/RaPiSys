@@ -5582,6 +5582,18 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .rec-badge.rec-review { color: #f59e0b; border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.08); }
 .inv-tab-cleanup { color: var(--text-secondary); }
 .inv-tab-cleanup.page-tab-active { color: #f59e0b; border-bottom-color: #f59e0b; }
+/* cleanup toolbar: clickable reason filters + bulk actions */
+.rec-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.rec-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.rec-fchip { font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary); transition: var(--transition); }
+.rec-fchip:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.rec-fchip b { color: var(--text-muted); margin-left: 2px; }
+.rec-fchip.active { color: #f59e0b; border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.1); }
+.rec-fchip.active b { color: #f59e0b; }
+.rec-bulk { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rec-age { font-size: 11px; color: var(--text-muted); }
+.rec-cb { width: 16px; height: 16px; accent-color: var(--accent-cyan); cursor: pointer; }
 .inv-tab-count { display: inline-flex; align-items: center; justify-content: center;
   min-width: 20px; height: 18px; padding: 0 6px; margin-left: 2px;
   font-size: 11px; font-weight: 700; line-height: 1;

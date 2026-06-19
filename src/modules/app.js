@@ -2532,7 +2532,7 @@ pageRenderers.inventory = (() => {
   // Reload whichever view is active after an action.
   function reloadActive(host) {
     loadSummary(host);
-    if (kind === 'cleanup') loadRecommendations(host); else loadRows(host);
+    if (kind === 'cleanup') { recData = null; loadRecommendations(host, { refresh: true }); } else loadRows(host);
   }
 
   const REC_REASON = {
@@ -2543,40 +2543,66 @@ pageRenderers.inventory = (() => {
     'large-old': { label: 'Large & old', cls: 'rec-review', icon: '◇' },
   };
 
-  async function loadRecommendations(host) {
+  let recFilter = 'all';        // 'all' | reason key
+  let recSelected = new Set();   // `${kind}:${name}`
+  let recData = null;            // last loaded snapshot
+
+  async function loadRecommendations(host, { refresh = false } = {}) {
     const tbl = $('[data-inv=table]', host);
     const pager = $('[data-inv=pager]', host);
     if (pager) pager.innerHTML = '';
-    if (tbl) tbl.innerHTML = '<p class="sess-empty">Analyzing installed software…</p>';
-    let data;
-    try { data = await api('/inventory/recommendations'); }
+    if (tbl && !recData) tbl.innerHTML = '<p class="sess-empty">Loading…</p>';
+    try { recData = await api(`/inventory/recommendations${refresh ? '?refresh=1' : ''}`); }
     catch (e) { if (tbl) tbl.innerHTML = `<p class="sess-empty">Could not analyze: ${esc(e.message)}</p>`; return; }
-    const recs = data.recommendations || [];
-    if (!recs.length) {
-      if (tbl) tbl.innerHTML = '<p class="sess-empty">Nothing to recommend — no orphaned packages, failed services, or stopped containers found.</p>';
+    recSelected = new Set();   // selection resets on (re)load
+    renderRecommendations(host);
+  }
+
+  function renderRecommendations(host) {
+    const tbl = $('[data-inv=table]', host);
+    if (!tbl || !recData) return;
+    const all = recData.recommendations || [];
+    if (!all.length) {
+      tbl.innerHTML = '<p class="sess-empty">Nothing to recommend — no orphaned packages, failed services, or stopped containers found.</p>';
       return;
     }
-    // group by kind for readability
-    const groups = { package: [], service: [], container: [] };
-    recs.forEach((r) => { (groups[r.kind] || (groups[r.kind] = [])).push(r); });
-    const KIND_TITLE = { package: 'Packages', service: 'Services', container: 'Containers' };
+    // counts per reason for the filter capsules
+    const reasonCounts = {};
+    all.forEach((r) => { reasonCounts[r.reason] = (reasonCounts[r.reason] || 0) + 1; });
+    const REASONS = [
+      ['all', 'All', all.length],
+      ['orphaned', 'Orphaned', reasonCounts.orphaned || 0],
+      ['failed', 'Failed', reasonCounts.failed || 0],
+      ['inactive', 'Inactive', reasonCounts.inactive || 0],
+      ['stopped', 'Stopped', reasonCounts.stopped || 0],
+      ['large-old', 'Large & old', reasonCounts['large-old'] || 0],
+    ].filter(([k, , n]) => k === 'all' || n > 0);
+
+    const shown = recFilter === 'all' ? all : all.filter((r) => r.reason === recFilter);
+
     const stopIco = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>';
     const trash = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-
     const actionBtn = (r) => {
       if (r.kind === 'package') return `<button class="inv-act inv-act-danger" data-rec-act="pkg" data-name="${esc(r.name)}" title="Uninstall ${esc(r.name)}">${trash}</button>`;
-      if (r.kind === 'service') return `<button class="inv-act" data-rec-act="svc" data-name="${esc(r.name)}" title="Stop & disable ${esc(r.name)}">${stopIco}</button>`;
+      if (r.kind === 'service') return `<button class="inv-act" data-rec-act="svc" data-name="${esc(r.name)}" title="Stop ${esc(r.name)}">${stopIco}</button>`;
       return `<button class="inv-act inv-act-danger" data-rec-act="ctr" data-name="${esc(r.name)}" title="Remove container ${esc(r.name)}">${trash}</button>`;
     };
 
-    const sections = Object.entries(groups).filter(([, arr]) => arr.length).map(([k, arr]) => `
+    const age = recData.generatedAt ? `analyzed ${fmtTime(recData.generatedAt)}` : '';
+    const KIND_TITLE = { package: 'Packages', service: 'Services', container: 'Containers' };
+    const groups = {};
+    shown.forEach((r) => { (groups[r.kind] || (groups[r.kind] = [])).push(r); });
+
+    const sections = Object.entries(groups).map(([k, arr]) => `
       <h4 class="sess-h" style="margin-top:18px">${KIND_TITLE[k] || k} <span class="inv-tab-count">${arr.length}</span></h4>
       <div class="up-table-scroll"><table class="inv-table inv-table-fixed">
-        <colgroup><col style="width:24%"><col style="width:16%"><col style="width:auto"><col style="width:72px"></colgroup>
-        <thead><tr><th>Name</th><th>Reason</th><th>Why</th><th></th></tr></thead>
+        <colgroup><col style="width:36px"><col style="width:22%"><col style="width:15%"><col style="width:auto"><col style="width:60px"></colgroup>
+        <thead><tr><th></th><th>Name</th><th>Reason</th><th>Why</th><th></th></tr></thead>
         <tbody>${arr.map((r) => {
           const meta = REC_REASON[r.reason] || { label: r.reason, cls: 'rec-review' };
+          const key = `${r.kind}:${r.name}`;
           return `<tr>
+            <td><input type="checkbox" class="rec-cb" data-rec-key="${esc(key)}" ${recSelected.has(key) ? 'checked' : ''}></td>
             <td><b>${esc(r.name)}</b>${r.version ? ` <span class="inv-dim">${esc(r.version)}</span>` : ''}</td>
             <td><span class="rec-badge ${meta.cls}">${esc(meta.label)}</span></td>
             <td class="inv-dim inv-desc">${esc(r.detail || '')}</td>
@@ -2585,19 +2611,73 @@ pageRenderers.inventory = (() => {
         }).join('')}</tbody>
       </table></div>`).join('');
 
-    if (tbl) tbl.innerHTML = `
-      <div class="rec-summary">
-        <span class="rec-chip"><b>${data.counts.total}</b> suggestion${data.counts.total === 1 ? '' : 's'}</span>
-        <span class="rec-chip rec-safe">${data.counts.safe} safe</span>
-        <span class="rec-chip rec-review">${data.counts.review} to review</span>
+    tbl.innerHTML = `
+      <div class="rec-toolbar">
+        <div class="rec-filters">
+          ${REASONS.map(([k, label, n]) => `<button class="rec-fchip ${recFilter === k ? 'active' : ''}" data-rec-filter="${k}">${label} <b>${n}</b></button>`).join('')}
+        </div>
+        <div class="rec-bulk">
+          <span class="rec-age">${age}</span>
+          <button class="net-toggle" data-rec="reanalyze">↻ Re-analyze</button>
+          <button class="set-btn set-btn-danger" data-rec="removesel" disabled>Remove selected <span data-rec="selcount">(0)</span></button>
+        </div>
       </div>
-      <p class="up-sec-hint">These are observations, not certainties — RaPiSys can't tell intent. "Orphaned" and "Stopped" are generally safe; "Failed", "Inactive" and "Large &amp; old" deserve a look before removing. Removal always asks for confirmation and shows the full dependency cascade.</p>
-      ${sections}`;
+      <p class="up-sec-hint">Observations, not certainties — RaPiSys can't judge intent. "Orphaned"/"Stopped" are generally safe; "Failed"/"Inactive"/"Large &amp; old" deserve a look. Each removal still confirms and shows the dependency cascade.</p>
+      ${sections || '<p class="sess-empty">No items match this filter.</p>'}`;
 
-    // wire actions (each reuses the audited remove/stop flows, then re-analyzes)
+    // filter capsules
+    host.querySelectorAll('[data-rec-filter]').forEach((b) => b.onclick = () => { recFilter = b.dataset.recFilter; renderRecommendations(host); });
+    // re-analyze (force fresh)
+    const reBtn = $('[data-rec=reanalyze]', host);
+    if (reBtn) reBtn.onclick = async () => { reBtn.textContent = 'Analyzing…'; reBtn.disabled = true; recData = null; await loadRecommendations(host, { refresh: true }); };
+    // row checkboxes
+    const updateSelCount = () => {
+      const n = recSelected.size;
+      const btn = $('[data-rec=removesel]', host), cnt = $('[data-rec=selcount]', host);
+      if (cnt) cnt.textContent = `(${n})`;
+      if (btn) btn.disabled = n === 0;
+    };
+    host.querySelectorAll('.rec-cb').forEach((cb) => cb.onchange = () => {
+      if (cb.checked) recSelected.add(cb.dataset.recKey); else recSelected.delete(cb.dataset.recKey);
+      updateSelCount();
+    });
+    updateSelCount();
+    // bulk remove
+    const rmBtn = $('[data-rec=removesel]', host);
+    if (rmBtn) rmBtn.onclick = () => removeSelectedRecs(host);
+    // per-row actions
     host.querySelectorAll('[data-rec-act=pkg]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name, b));
     host.querySelectorAll('[data-rec-act=svc]').forEach((b) => b.onclick = () => svcToggle(host, b.dataset.name, 'stop'));
     host.querySelectorAll('[data-rec-act=ctr]').forEach((b) => b.onclick = () => ctrRemove(host, b.dataset.name));
+  }
+
+  // Remove all checked items in sequence, with one upfront confirmation.
+  async function removeSelectedRecs(host) {
+    const keys = [...recSelected];
+    if (!keys.length) return;
+    const items = keys.map((k) => { const i = k.indexOf(':'); return { kind: k.slice(0, i), name: k.slice(i + 1) }; });
+    const byKind = { package: [], service: [], container: [] };
+    items.forEach((it) => { (byKind[it.kind] || (byKind[it.kind] = [])).push(it.name); });
+    const lines = [];
+    if (byKind.package.length) lines.push(`Uninstall ${byKind.package.length} package(s): <span class="inv-cascade">${byKind.package.map(esc).join(', ')}</span>`);
+    if (byKind.service.length) lines.push(`Stop ${byKind.service.length} service(s): <span class="inv-cascade">${byKind.service.map(esc).join(', ')}</span>`);
+    if (byKind.container.length) lines.push(`Remove ${byKind.container.length} container(s): <span class="inv-cascade">${byKind.container.map(esc).join(', ')}</span>`);
+    const ok = await rapisysConfirm(`Remove ${keys.length} selected item(s)?<br><br>${lines.join('<br>')}<br><br>Each is processed in turn; packages show their own cascade is skipped here — protected items are refused automatically.`,
+      { danger: true, confirmLabel: `Remove ${keys.length}`, html: true });
+    if (!ok) return;
+    let done = 0, failed = 0;
+    for (const it of items) {
+      try {
+        if (it.kind === 'package') await api('/inventory/package/remove', { method: 'POST', body: { name: it.name, confirm: it.name } });
+        else if (it.kind === 'service') await api('/inventory/service/control', { method: 'POST', body: { name: it.name, action: 'stop' } });
+        else await api('/inventory/container/remove', { method: 'POST', body: { name: it.name } });
+        done++;
+      } catch { failed++; }
+    }
+    toast(failed ? 'info' : 'success', 'Cleanup', `${done} removed${failed ? `, ${failed} failed/skipped` : ''}`);
+    loadSummary(host);
+    recData = null;
+    await loadRecommendations(host, { refresh: true });
   }
 
   async function pkgRemove(host, name, btn) {
