@@ -4614,6 +4614,10 @@ body.ultra .wizard .action-btn { padding: 6px 14px; font-size: 12px; }
 
 /* Wizard inline status messages */
 .wz-status-ok { color: #10b981; font-weight: 700; }
+.wz-https-gate { border: 1px solid rgba(245,158,11,0.4); background: rgba(245,158,11,0.08);
+  border-radius: var(--radius-sm); padding: 14px 16px; margin-top: 6px; }
+.wz-https-gate .wz-hint { color: var(--text-secondary); font-size: 12px; }
+.wz-https-gate .wz-hint b { color: #f59e0b; }
 .wz-status-err { color: var(--accent-red, #ef4444); font-weight: 700; }
 
 /* Form action buttons (Mount share, Save, Send test): the bare .action-btn

@@ -4017,7 +4017,15 @@ async function maybeShowWizard() {
           </div>
           <div class="wz-admin" data-adm="panel" ${state.mode === 'full' ? '' : 'hidden'}>
             <h4 class="sess-h">Administrator account</h4>
-            <div class="wz-form" data-adm="step1" ${state.adminReady ? 'hidden' : ''}>
+            <div class="wz-https-gate" data-adm="httpsgate" ${(location.protocol === 'https:' || state.adminReady) ? 'hidden' : ''}>
+              <p class="wz-hint">⚠ This connection is <b>not encrypted</b>. Creating an administrator account sends a password, so HTTPS must be enabled first — your password is never transmitted in clear text.</p>
+              <div class="wz-row">
+                <button class="action-btn wz-primary" data-adm="enablehttps">Enable HTTPS &amp; continue securely</button>
+                <span data-adm="httpsmsg"></span>
+              </div>
+              <p class="wz-hint" style="margin-top:8px">A self-signed certificate is generated on the Pi; your browser shows a one-time warning you accept once. You'll be redirected to the secure address to finish setup.</p>
+            </div>
+            <div class="wz-form" data-adm="step1" ${(state.adminReady || location.protocol !== 'https:') ? 'hidden' : ''}>
               <label>Username <input data-adm="user" autocomplete="off" maxlength="32" placeholder="admin"></label>
               <label>Password <input data-adm="pass" type="password" autocomplete="new-password" placeholder="min. 8 characters"></label>
               <label>Confirm password <input data-adm="pass2" type="password" autocomplete="new-password"></label>
@@ -4045,6 +4053,23 @@ async function maybeShowWizard() {
           $('[data-adm=panel]', body).hidden = state.mode !== 'full';
         });
 
+        // Full-control needs HTTPS before a password is entered. Over plain HTTP,
+        // show the gate and hide the registration form until HTTPS is on.
+        $('[data-adm=enablehttps]', body)?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget; const stat = $('[data-adm=httpsmsg]', body);
+          btn.disabled = true; setStatus(stat, true, 'Generating certificate…');
+          try {
+            const r = await api('/tls/enable', { method: 'POST', body: { mode: 'selfsigned' } });
+            const port = r.listener?.port || 3443;
+            setStatus(stat, true, '✓ HTTPS enabled — redirecting…');
+            // jump to the secure URL; the wizard resumes there (setup still open)
+            setTimeout(() => { location.href = `https://${location.hostname}:${port}/`; }, 700);
+          } catch (err) {
+            btn.disabled = false;
+            setStatus(stat, false, '✗ ' + (err.message || 'could not enable HTTPS'));
+          }
+        });
+
         $('[data-adm=create]', body)?.addEventListener('click', async () => {
           const stat = $('[data-adm=status1]', body);
           const pass = $('[data-adm=pass]', body).value;
@@ -4067,7 +4092,16 @@ async function maybeShowWizard() {
               $('[data-adm=secret]', body).textContent = r.secret;
               $('[data-adm=step2]', body).hidden = false;
             }
-          } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
+          } catch (err) {
+            // Safety net: if the server rejects for lack of HTTPS, re-show the gate.
+            if (/https/i.test(err.message)) {
+              $('[data-adm=step1]', body).hidden = true;
+              const gate = $('[data-adm=httpsgate]', body); if (gate) gate.hidden = false;
+              setStatus($('[data-adm=httpsmsg]', body), false, '✗ HTTPS required before creating an account');
+            } else {
+              setStatus(stat, false, `✗ ${err.message}`);
+            }
+          }
         });
 
         $('[data-adm=verify]', body)?.addEventListener('click', async () => {
