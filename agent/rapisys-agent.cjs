@@ -1103,7 +1103,9 @@ const server = net.createServer((sock) => {
     }
     console.log(`[agent] op=${req.op} params=${JSON.stringify(req.params || {})}`);
     try {
-      const result = await handler(req.params || {}, (streamLine) => reply({ stream: streamLine }));
+      // Invoke via OPS so handlers that call this['other.op'] (e.g. removePackage
+      // → removeSimulate guard) have `this` bound to the ops table.
+      const result = await OPS[req.op](req.params || {}, (streamLine) => reply({ stream: streamLine }));
       reply({ ok: true, result });
     } catch (err) {
       reply({ ok: false, error: err.message });
