@@ -77,5 +77,20 @@ export function createInventoryRepo(db) {
     try { return { ...JSON.parse(row.payload), generatedAt: row.generatedAt }; } catch { return null; }
   }
 
-  return { sync, search, counts, facets, lastSync, saveRecommendations, getRecommendations };
+  // ---- install / uninstall activity history --------------------------------
+  db.exec(`CREATE TABLE IF NOT EXISTS inventory_history (
+    id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, kind TEXT NOT NULL,
+    name TEXT NOT NULL, action TEXT NOT NULL, version TEXT, result TEXT, detail TEXT
+  )`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_inv_hist_ts ON inventory_history(ts)`);
+  function recordHistory({ kind, name, action, version = null, result = 'ok', detail = null }) {
+    db.prepare(`INSERT INTO inventory_history (ts, kind, name, action, version, result, detail)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(Date.now(), kind, name, action, version, result, detail);
+  }
+  function history(limit = 100) {
+    return db.prepare(`SELECT id, ts, kind, name, action, version, result, detail
+      FROM inventory_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 500));
+  }
+
+  return { sync, search, counts, facets, lastSync, saveRecommendations, getRecommendations, recordHistory, history };
 }

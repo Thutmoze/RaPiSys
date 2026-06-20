@@ -72,11 +72,38 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
     try {
       const out = await inventory.removePackage(name, confirm, (line) => send('progress', { line }));
       events?.add('inventory.removed', 'warning', { name, removed: out.removed });
+      inventoryRepo.recordHistory({ kind: 'package', name, action: 'uninstall', result: out.ok === false ? 'failed' : 'ok',
+        detail: (out.removed && out.removed.length > 1) ? `with ${out.removed.length - 1} dependent package(s)` : null });
       const items = await inventory.collectAll();
       inventoryRepo.sync(items, ['package', 'service', 'container']);
       send('done', out);
-    } catch (err) { send('failed', { message: err.message }); }
+    } catch (err) { inventoryRepo.recordHistory({ kind: 'package', name, action: 'uninstall', result: 'failed', detail: err.message }); send('failed', { message: err.message }); }
     res.end();
+  });
+
+  // Install (or reinstall) a package — used by the activity-history reinstall
+  // action. SSE-streamed so the UI shows apt output. ?name=
+  r.get('/package/install/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const name = String(req.query.name || '');
+    send('start', { name });
+    try {
+      const out = await inventory.installPackage(name, (line) => send('progress', { line }));
+      events?.add('inventory.installed', 'info', { name });
+      inventoryRepo.recordHistory({ kind: 'package', name, action: 'install', result: out.ok === false ? 'failed' : 'ok' });
+      const items = await inventory.collectAll();
+      inventoryRepo.sync(items, ['package', 'service', 'container']);
+      send('done', out);
+    } catch (err) { inventoryRepo.recordHistory({ kind: 'package', name, action: 'install', result: 'failed', detail: err.message }); send('failed', { message: err.message }); }
+    res.end();
+  });
+
+  // Activity history: install / uninstall events with reversible actions.
+  r.get('/history', (req, res) => {
+    res.json({ history: inventoryRepo.history(Number(req.query.limit) || 100) });
   });
 
   // Service control: stop/start/restart/enable/disable.
@@ -85,6 +112,8 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
     try {
       const out = await inventory.serviceControl(String(name), String(action));
       events?.add('inventory.service', 'info', { name, action });
+      // stop/start are reversible; record so the activity tab can offer the inverse
+      if (action === 'stop' || action === 'start') inventoryRepo.recordHistory({ kind: 'service', name, action: action === 'stop' ? 'stop' : 'start' });
       res.json(out);
     } catch (err) { res.status(502).json({ error: err.message }); }
   });
@@ -95,6 +124,7 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
     try {
       const out = await inventory.removeContainer(name);
       events?.add('inventory.container_removed', 'warning', { name });
+      inventoryRepo.recordHistory({ kind: 'container', name, action: 'remove' });
       res.json(out);
     } catch (err) { res.status(502).json({ error: err.message }); }
   });

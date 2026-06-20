@@ -282,6 +282,19 @@ const OPS = {
     return { ok: r.code === 0, log: (r.stdout || '') + (r.stderr || ''), removed: guard.removed };
   },
 
+  // Install (or reinstall) a package — used by the activity-history "reinstall"
+  // action. Name is strictly validated; apt resolves dependencies. Streams
+  // output when a sink is provided.
+  async 'inventory.install'({ name }, send) {
+    assert(/^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,128}$/.test(name), 'invalid package name');
+    if (typeof send === 'function') {
+      const r = await runStreaming('apt-get', ['install', '-y', name], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+      return { ok: r.code === 0 };
+    }
+    const r = await run('apt-get', ['install', '-y', name], 180000);
+    return { ok: r.code === 0, log: (r.stdout || '') + (r.stderr || '') };
+  },
+
   async 'inventory.serviceControl'({ name, action }) {
     assert(/^[a-zA-Z0-9@._\\-]{1,128}$/.test(name), 'invalid service');
     assert(['stop', 'start', 'restart', 'disable', 'enable'].includes(action), 'invalid action');

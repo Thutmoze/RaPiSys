@@ -107,4 +107,20 @@ describe('inventory recommendations cache', () => {
     repo.saveRecommendations({ recommendations: [], counts: { total: 0, safe: 0, review: 0 }, generatedAt: 1700000001000 });
     expect(repo.getRecommendations().recommendations).toHaveLength(0);
   });
+
+  it('records and returns install/uninstall activity history (newest first)', async () => {
+    const { openDatabase } = await import('../server/core/db.js');
+    const { createInventoryRepo } = await import('../server/repositories/inventory.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-hist-'));
+    const handle = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });
+    const repo = createInventoryRepo(handle.db);
+    expect(repo.history()).toHaveLength(0);
+    repo.recordHistory({ kind: 'package', name: 'python3-flask', action: 'uninstall', detail: 'with 5 dependent package(s)' });
+    repo.recordHistory({ kind: 'package', name: 'python3-flask', action: 'install', result: 'ok' });
+    const h = repo.history();
+    expect(h).toHaveLength(2);
+    expect(h[0].action).toBe('install');         // newest first
+    expect(h[1].action).toBe('uninstall');
+    expect(h[1].detail).toContain('5 dependent');
+  });
 });

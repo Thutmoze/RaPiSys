@@ -2393,6 +2393,7 @@ pageRenderers.inventory = (() => {
       service: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
       container: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
       cleanup: '<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/>',
+      history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     };
     $('[data-inv=chips]', host).innerHTML = `
       <div class="page-tabs inv-kind-tabs">
@@ -2400,15 +2401,17 @@ pageRenderers.inventory = (() => {
         <button class="page-tab ${kind === 'service' ? 'page-tab-active' : ''}" data-inv-kind="service"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.service}</svg>Services <span class="inv-tab-count">${c.service || 0}</span></button>
         <button class="page-tab ${kind === 'container' ? 'page-tab-active' : ''}" data-inv-kind="container"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.container}</svg>Containers <span class="inv-tab-count">${c.container || 0}</span></button>
         <button class="page-tab inv-tab-cleanup ${kind === 'cleanup' ? 'page-tab-active' : ''}" data-inv-kind="cleanup"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.cleanup}</svg>Recommended to Remove</button>
+        <button class="page-tab ${kind === 'history' ? 'page-tab-active' : ''}" data-inv-kind="history"><svg class="page-tab-ic" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KIND_ICONS.history}</svg>Activity History</button>
       </div>`;
     host.querySelectorAll('[data-inv-kind]').forEach((b) => b.onclick = () => {
       kind = b.dataset.invKind; offset = 0;
       fCategory = fPriority = fSection = '';
       host.querySelectorAll('[data-inv-kind]').forEach((x) => x.classList.toggle('page-tab-active', x === b));
-      // cleanup tab has its own view; hide the search/filter chrome
-      const isCleanup = kind === 'cleanup';
-      const search = $('[data-inv=search]', host); if (search) search.style.display = isCleanup ? 'none' : '';
-      if (isCleanup) { renderFilters(host); loadRecommendations(host); }
+      // cleanup + history tabs have their own views; hide the search/filter chrome
+      const special = kind === 'cleanup' || kind === 'history';
+      const search = $('[data-inv=search]', host); if (search) search.style.display = special ? 'none' : '';
+      if (kind === 'cleanup') { renderFilters(host); loadRecommendations(host); }
+      else if (kind === 'history') { renderFilters(host); loadActivityHistory(host); }
       else { renderFilters(host); loadRows(host); }
     });
   }
@@ -2532,7 +2535,9 @@ pageRenderers.inventory = (() => {
   // Reload whichever view is active after an action.
   function reloadActive(host) {
     loadSummary(host);
-    if (kind === 'cleanup') { recData = null; loadRecommendations(host, { refresh: true }); } else loadRows(host);
+    if (kind === 'cleanup') { recData = null; loadRecommendations(host, { refresh: true }); }
+    else if (kind === 'history') loadActivityHistory(host);
+    else loadRows(host);
   }
 
   const REC_REASON = {
@@ -2834,6 +2839,89 @@ pageRenderers.inventory = (() => {
     if (!await rapisysConfirm(`Stop and remove container <b>${esc(name)}</b>?`, { danger: true, confirmLabel: 'Remove', html: true })) return;
     try { await api('/inventory/container/remove', { method: 'POST', body: { name } }); toast('success', 'Container', `${name} removed`); reloadActive(host); }
     catch (e) { toast('error', 'Container', e.message); }
+  }
+
+  // Install/reinstall a package via the streamed install endpoint, with the same
+  // progress overlay used for removal.
+  async function pkgInstall(host, name) {
+    if (!await rapisysConfirm(`Install <b>${esc(name)}</b>?<br><br>apt will fetch it and any dependencies it needs.`, { confirmLabel: 'Install', html: true })) return;
+    const prog = removalOverlay(`Installing ${name}`);
+    prog.setStatus(`Installing ${name}…`);
+    await streamRemoval(`/inventory/package/install/stream?name=${encodeURIComponent(name)}`, prog, {
+      onDone: (out) => prog.finish({ ok: out?.ok !== false, message: out?.ok === false ? 'Install failed.' : `${name} installed.`,
+        onClose: () => reloadActive(host) }),
+      onError: (msg) => prog.finish({ ok: false, message: msg, onClose: () => reloadActive(host) }),
+    });
+  }
+
+  // Map a recorded action to its reverse action + display metadata.
+  const HIST_ACTION = {
+    install: { label: 'Installed', cls: 'hist-add', reverse: 'uninstall' },
+    uninstall: { label: 'Uninstalled', cls: 'hist-rem', reverse: 'install' },
+    start: { label: 'Started', cls: 'hist-add', reverse: 'stop' },
+    stop: { label: 'Stopped', cls: 'hist-rem', reverse: 'start' },
+    remove: { label: 'Removed', cls: 'hist-rem', reverse: null },   // containers: not reversible from here
+  };
+
+  async function loadActivityHistory(host) {
+    const tbl = $('[data-inv=table]', host);
+    const pager = $('[data-inv=pager]', host);
+    if (pager) pager.innerHTML = '';
+    if (tbl) tbl.innerHTML = '<p class="sess-empty">Loading…</p>';
+    let data;
+    try { data = await api('/inventory/history'); }
+    catch (e) { if (tbl) tbl.innerHTML = `<p class="sess-empty">Could not load history: ${esc(e.message)}</p>`; return; }
+    const rows = data.history || [];
+    if (!rows.length) {
+      if (tbl) tbl.innerHTML = '<p class="sess-empty">No activity yet. Installs and removals you perform here will be recorded.</p>';
+      return;
+    }
+    // reverse-action icons
+    const reinstallIco = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>';
+    const trash = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+    const stopIco = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>';
+    const startIco = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 4v16l13-8z"/></svg>';
+
+    // a reverse-action button appropriate to the recorded action
+    const reverseBtn = (r) => {
+      const meta = HIST_ACTION[r.action]; if (!meta || !meta.reverse) return '';
+      if (r.kind === 'package') {
+        return meta.reverse === 'install'
+          ? `<button class="inv-act hist-revertch" data-hist="reinstall" data-name="${esc(r.name)}" title="Reinstall ${esc(r.name)}">${reinstallIco}</button>`
+          : `<button class="inv-act inv-act-danger" data-hist="uninstall" data-name="${esc(r.name)}" title="Uninstall ${esc(r.name)}">${trash}</button>`;
+      }
+      if (r.kind === 'service') {
+        return meta.reverse === 'start'
+          ? `<button class="inv-act" data-hist="svc-start" data-name="${esc(r.name)}" title="Start ${esc(r.name)}">${startIco}</button>`
+          : `<button class="inv-act" data-hist="svc-stop" data-name="${esc(r.name)}" title="Stop ${esc(r.name)}">${stopIco}</button>`;
+      }
+      return '';
+    };
+
+    const kindLabel = { package: 'Package', service: 'Service', container: 'Container' };
+    if (tbl) tbl.innerHTML = `
+      <p class="up-sec-hint">Install and removal activity performed from the dashboard. Use the action icon to reverse an entry — reinstall something you uninstalled, or uninstall something you installed.</p>
+      <div class="up-table-scroll"><table class="inv-table inv-table-fixed">
+        <colgroup><col style="width:21%"><col style="width:auto"><col style="width:13%"><col style="width:11%"><col style="width:11%"><col style="width:64px"></colgroup>
+        <thead><tr><th>When</th><th>Name</th><th>Type</th><th>Action</th><th>Result</th><th></th></tr></thead>
+        <tbody>${rows.map((r) => {
+          const meta = HIST_ACTION[r.action] || { label: r.action, cls: '' };
+          const failed = r.result && r.result !== 'ok';
+          return `<tr>
+            <td class="inv-dim">${esc(rapisysFmtTime(r.ts))}</td>
+            <td><b>${esc(r.name)}</b>${r.detail ? ` <span class="inv-dim">${esc(r.detail)}</span>` : ''}</td>
+            <td class="inv-dim">${kindLabel[r.kind] || r.kind}</td>
+            <td><span class="hist-badge ${meta.cls}">${esc(meta.label)}</span></td>
+            <td>${failed ? '<span class="hist-badge hist-fail">failed</span>' : '<span class="inv-dim">ok</span>'}</td>
+            <td class="inv-actions">${failed ? '' : reverseBtn(r)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+
+    host.querySelectorAll('[data-hist=reinstall]').forEach((b) => b.onclick = () => pkgInstall(host, b.dataset.name));
+    host.querySelectorAll('[data-hist=uninstall]').forEach((b) => b.onclick = () => pkgRemove(host, b.dataset.name, b));
+    host.querySelectorAll('[data-hist=svc-start]').forEach((b) => b.onclick = () => svcToggle(host, b.dataset.name, 'start'));
+    host.querySelectorAll('[data-hist=svc-stop]').forEach((b) => b.onclick = () => svcToggle(host, b.dataset.name, 'stop'));
   }
 
   return {
