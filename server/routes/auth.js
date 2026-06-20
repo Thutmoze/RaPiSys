@@ -15,9 +15,22 @@ export function authRouter({ auth, loadSettings }) {
     return !s.rapisys?.setupCompleted;
   }
 
+  // Registration sends a password — refuse over plain HTTP so it is never
+  // transported in clear text. Loopback is exempt (no network exposure, and the
+  // dev/localhost case has no cert). Full-control setup therefore requires HTTPS.
+  function connectionIsSecure(req) {
+    if (req.secure || req.protocol === 'https') return true;
+    const ip = (req.ip || '').replace('::ffff:', '');
+    return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost';
+  }
+
   // -- wizard: create the admin account, return QR for the authenticator app --
   r.post('/register', async (req, res) => {
     if (!await setupOpen()) return res.status(403).json({ error: 'setup already completed' });
+    if (!connectionIsSecure(req)) {
+      return res.status(426).json({ error: 'HTTPS required', code: 'https_required',
+        detail: 'Enable HTTPS before creating an administrator account so the password is sent encrypted.' });
+    }
     try {
       const { username, password, mfa } = req.body || {};
       const r = auth.register(username, password, { mfa: mfa !== false });
@@ -84,6 +97,10 @@ export function authRouter({ auth, loadSettings }) {
 
   // -- account: change password (requires current password) -----------------
   r.post('/account/password', auth.requireControl, async (req, res) => {
+    if (!connectionIsSecure(req)) {
+      return res.status(426).json({ error: 'HTTPS required', code: 'https_required',
+        detail: 'Enable HTTPS before changing the password so it is sent encrypted.' });
+    }
     try {
       const { currentPassword, newPassword } = req.body || {};
       auth.changePassword(currentPassword, newPassword);

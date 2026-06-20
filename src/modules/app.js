@@ -1689,6 +1689,80 @@ pageRenderers.settings = (() => {
     };
   }
 
+  // ---- HTTPS / TLS settings pane ----
+  async function loadTls(host) {
+    const el2 = $('[data-set=tls]', host);
+    if (!el2) return;
+    let st, ts;
+    try { st = await api('/tls/status'); } catch { el2.innerHTML = '<p class="sess-empty">Could not load TLS status.</p>'; return; }
+    try { ts = await api('/tls/tailscale'); } catch { ts = { available: false }; }
+
+    const onHttps = location.protocol === 'https:';
+    const httpsUrl = (port) => `https://${location.hostname}:${port || st.port || 3443}/`;
+    const expiry = st.notAfter ? `<div class="set-kv"><span>Certificate expires</span><b>${esc(st.notAfter)}</b></div>` : '';
+    const tsLine = ts.available
+      ? `Tailscale detected — node <b>${esc(ts.dnsName || '')}</b>. Trusted certs require HTTPS enabled in your tailnet admin console.`
+      : `Tailscale not available${ts.reason ? ` (${esc(ts.reason)})` : ''} — self-signed is the zero-config option.`;
+
+    el2.innerHTML = `
+      <p class="up-sec-hint">Serve the dashboard over encrypted HTTPS. Required before creating or changing the administrator password, so credentials are never sent in clear text. Certificates are provisioned on the Pi by the host agent.</p>
+      <div class="set-summary">
+        <div class="set-kv"><span>HTTPS</span><b class="${st.enabled ? 'set-ok' : ''}">${st.enabled ? '● Enabled' : '○ Disabled'}</b></div>
+        <div class="set-kv"><span>Mode</span><b>${st.mode === 'tailscale' ? 'Tailscale (trusted)' : 'Self-signed'}</b></div>
+        <div class="set-kv"><span>Listening</span><b class="${st.listening ? 'set-ok' : ''}">${st.listening ? `● yes, port ${st.port}` : '○ no'}</b></div>
+        ${st.dnsName ? `<div class="set-kv"><span>Cert name</span><b>${esc(st.dnsName)}</b></div>` : ''}
+        ${expiry}
+      </div>
+      <p class="up-sec-hint" style="margin-top:10px">${tsLine}</p>
+      <div class="set-actions" style="margin-top:12px">
+        <label class="rsel-wrap" style="min-width:200px"><select data-tls="mode">
+          <option value="selfsigned" ${st.mode !== 'tailscale' ? 'selected' : ''}>Self-signed (no setup)</option>
+          <option value="tailscale" ${st.mode === 'tailscale' ? 'selected' : ''} ${ts.available ? '' : 'disabled'}>Tailscale (trusted, *.ts.net)</option>
+        </select></label>
+        ${st.enabled
+          ? `<button class="set-btn set-btn-primary" data-tls="provision">${SAVE_ICON}<span>Renew now</span></button>
+             <button class="set-btn set-btn-cancel" data-tls="disable">${CANCEL_ICON}<span>Disable HTTPS</span></button>`
+          : `<button class="set-btn set-btn-primary" data-tls="enable">${SAVE_ICON}<span>Enable HTTPS</span></button>`}
+        <span data-tls="msg"></span>
+      </div>
+      ${st.enabled && st.listening && !onHttps ? `<p class="up-sec-hint" style="margin-top:8px">HTTPS is active. <a href="${httpsUrl(st.port)}" style="color:var(--accent-cyan)">Open the secure URL →</a> (self-signed shows a one-time browser warning you can accept.)</p>` : ''}`;
+
+    enhanceSelects(el2);
+    const msg = $('[data-tls=msg]', el2);
+
+    $('[data-tls=enable]', el2)?.addEventListener('click', async (e) => {
+      const mode = $('[data-tls=mode]', el2).value;
+      const btn = e.currentTarget; btn.disabled = true;
+      setStatus(msg, true, 'Provisioning certificate…');
+      try {
+        const r = await api('/tls/enable', { method: 'POST', body: { mode } });
+        setStatus(msg, true, '✓ HTTPS enabled');
+        toast('success', 'HTTPS', `Enabled (${mode})`);
+        // offer to jump to the secure URL
+        if (r.listener?.listening && location.protocol !== 'https:') {
+          const url = httpsUrl(r.listener.port);
+          if (await rapisysConfirm(`HTTPS is now active on port ${r.listener.port}.<br><br>Switch to the secure URL now?${mode === 'selfsigned' ? '<br><br><span class="inv-dim">Your browser will show a one-time warning for the self-signed certificate — accept it to continue.</span>' : ''}`, { confirmLabel: 'Go to HTTPS', html: true })) {
+            location.href = url;
+          }
+        }
+        loadTls(host);
+      } catch (err) {
+        btn.disabled = false;
+        setStatus(msg, false, '✗ ' + (err.message || 'failed'));
+      }
+    });
+    $('[data-tls=provision]', el2)?.addEventListener('click', async (e) => {
+      e.currentTarget.disabled = true; setStatus(msg, true, 'Renewing…');
+      try { await api('/tls/provision', { method: 'POST', body: {} }); setStatus(msg, true, '✓ renewed'); loadTls(host); }
+      catch (err) { setStatus(msg, false, '✗ ' + err.message); }
+    });
+    $('[data-tls=disable]', el2)?.addEventListener('click', async () => {
+      if (!await rapisysConfirm('Disable HTTPS? The dashboard will be reachable over plain HTTP only, and you won\'t be able to change the admin password until you re-enable it.', { danger: true, confirmLabel: 'Disable' })) return;
+      try { await api('/tls/disable', { method: 'POST', body: {} }); toast('success', 'HTTPS', 'Disabled'); loadTls(host); }
+      catch (err) { toast('error', 'HTTPS', err.message); }
+    });
+  }
+
   // ---- Remote Access settings pane ----
   let editRemote = false;
   async function loadRemote(host) {
@@ -1909,7 +1983,9 @@ pageRenderers.settings = (() => {
             <div data-set="telegram"></div>
           </div>
           <div class="card-body" data-pane="remote" style="display:none">
-            <h4 class="sess-h">In-Browser Remote Access</h4>
+            <h4 class="sess-h">HTTPS / TLS</h4>
+            <div data-set="tls"></div>
+            <h4 class="sess-h" style="margin-top:24px">In-Browser Remote Access</h4>
             <div data-set="remote"></div>
           </div>
           <div class="card-body" data-pane="account" style="display:none">
@@ -1920,7 +1996,7 @@ pageRenderers.settings = (() => {
           </div>
         </div>
       </div>`;
-      wirePageTabs(host, (tab) => { if (tab === 'remote') loadRemote(host); });
+      wirePageTabs(host, (tab) => { if (tab === 'remote') { loadTls(host); loadRemote(host); } });
       load(host);
     },
     unmount() {},

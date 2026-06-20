@@ -1087,6 +1087,60 @@ WantedBy=multi-user.target
     setTimeout(() => run('systemctl', ['reboot']), 1500);
     return { ok: true, rebootingIn: '1.5s' };
   },
+
+  // ---- TLS / HTTPS certificate provisioning --------------------------------
+  // Cert+key live in a host dir bind-mounted into the container read-only.
+  // Generate a long-lived self-signed cert covering localhost, the LAN IP and
+  // the hostname. No external dependency; browsers warn once until trusted.
+  async 'tls.selfSigned'({ dir = '/var/lib/rapisys/tls', altNames = [] } = {}) {
+    fs.mkdirSync(dir, { recursive: true });
+    const crt = path.join(dir, 'server.crt');
+    const key = path.join(dir, 'server.key');
+    const host = require('os').hostname();
+    // collect SANs: always localhost + loopback, plus the host's own IPs
+    const ifs = require('os').networkInterfaces();
+    const ips = new Set(['127.0.0.1']);
+    for (const list of Object.values(ifs)) for (const a of list || []) if (a.family === 'IPv4' && !a.internal) ips.add(a.address);
+    const sans = ['DNS:localhost', `DNS:${host}`, `DNS:${host}.local`];
+    for (const n of altNames) { if (/^[a-zA-Z0-9.-]+$/.test(n)) sans.push(`DNS:${n}`); }
+    for (const ip of ips) sans.push(`IP:${ip}`);
+    const r = await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+      '-keyout', key, '-out', crt, '-days', '3650', '-subj', `/CN=${host}`,
+      '-addext', `subjectAltName=${sans.join(',')}`], 30000);
+    assert(r.code === 0, `openssl failed: ${r.stderr || r.stdout}`);
+    fs.chmodSync(key, 0o640); fs.chmodSync(crt, 0o644);
+    const info = await run('openssl', ['x509', '-in', crt, '-noout', '-enddate'], 5000).catch(() => ({ stdout: '' }));
+    return { ok: true, crt, key, mode: 'selfsigned', sans, notAfter: (info.stdout || '').replace('notAfter=', '').trim() };
+  },
+
+  // Tailscale status: is tailscaled up, what's our *.ts.net name, can we cert?
+  async 'tls.tailscaleStatus'() {
+    const r = await run('tailscale', ['status', '--json'], 8000).catch(() => ({ code: 1, stdout: '' }));
+    if (r.code !== 0) return { available: false, reason: 'tailscale not running or not installed' };
+    let j; try { j = JSON.parse(r.stdout); } catch { return { available: false, reason: 'could not parse tailscale status' }; }
+    const dnsName = (j.Self && j.Self.DNSName ? j.Self.DNSName : '').replace(/\.$/, '');
+    const magicDNS = !!(j.CurrentTailnet && j.CurrentTailnet.MagicDNSEnabled);
+    return { available: !!dnsName, dnsName, magicDNS, backendState: j.BackendState || null };
+  },
+
+  // Provision (or renew) a Tailscale cert. Re-running only fetches a new cert
+  // when the current one is near expiry, so a periodic call = auto-renew.
+  async 'tls.tailscaleCert'({ dir = '/var/lib/rapisys/tls', dnsName = null } = {}) {
+    fs.mkdirSync(dir, { recursive: true });
+    let name = dnsName;
+    if (!name) {
+      const st = await run('tailscale', ['status', '--json'], 8000).catch(() => ({ stdout: '' }));
+      try { name = (JSON.parse(st.stdout).Self.DNSName || '').replace(/\.$/, ''); } catch { /* */ }
+    }
+    assert(name && /^[a-zA-Z0-9.-]+\.ts\.net$/.test(name), 'no valid tailscale DNS name');
+    const crt = path.join(dir, 'server.crt');
+    const key = path.join(dir, 'server.key');
+    const r = await run('tailscale', ['cert', '--cert-file', crt, '--key-file', key, name], 60000);
+    assert(r.code === 0, `tailscale cert failed: ${r.stderr || r.stdout}`);
+    fs.chmodSync(key, 0o640); fs.chmodSync(crt, 0o644);
+    const info = await run('openssl', ['x509', '-in', crt, '-noout', '-enddate'], 5000).catch(() => ({ stdout: '' }));
+    return { ok: true, crt, key, mode: 'tailscale', dnsName: name, notAfter: (info.stdout || '').replace('notAfter=', '').trim() };
+  },
 };
 
 // ---------------------------------------------------------------------------

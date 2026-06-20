@@ -42,6 +42,10 @@ services:
       # RaPiSys host agent socket (created by deploy.sh / systemd)
       - /run/rapisys:/run/rapisys
 
+      # TLS certificates provisioned on the host by the agent (self-signed or
+      # tailscale). Read-only in the container — only the agent writes here.
+      - /var/lib/rapisys/tls:/var/lib/rapisys/tls:ro
+
       # NAS mounts managed by the agent (DB can live here).
       # rslave propagation is ESSENTIAL: the agent mounts shares on the
       # host while the container is running — with the default private

@@ -44,6 +44,8 @@ import { sessionsRouter } from './routes/sessions.js';
 import { networkRouter } from './routes/network.js';
 import { reportsRouter } from './routes/reports.js';
 import { inventoryRouter } from './routes/inventory.js';
+import { createTlsService } from './services/tls.js';
+import { tlsRouter } from './routes/tls.js';
 import { layoutsRouter } from './routes/layouts.js';
 import { updatesRouter } from './routes/updates.js';
 import { remoteRouter } from './routes/remote.js';
@@ -225,6 +227,14 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     } catch { /* */ }
   }, { runNow: true });
 
+  // Daily TLS certificate renewal. Acts only when HTTPS is enabled, and only
+  // re-runs `tailscale cert` when the active mode is 'tailscale' (so the agent
+  // never touches Tailscale unless the user turned that mode on). Self-signed
+  // only regenerates within 30 days of expiry. Not runNow — start() handles boot.
+  scheduler.register('tls-renew', 24 * 3600e3, async () => {
+    try { await tls.renewIfNeeded(app); } catch (e) { console.error('[tls] renew failed:', e.message); }
+  });
+
   // ---- routes ----------------------------------------------------------------------
   app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
   app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb }));
@@ -237,6 +247,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/inventory', inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/updates', updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/remote', remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
+  // TLS / HTTPS: self-signed or Tailscale certs, provisioned via the host agent.
+  const tls = createTlsService({ loadSettings, saveSettings, withFileLock });
+  app.use('/api/tls', tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app }));
   app.use('/api/layouts', layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
@@ -247,5 +260,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     + `journal=${handle.meta.journalMode} fs=${handle.meta.fsType}`
     + (handle.meta.degraded ? ' (DEGRADED: NAS unavailable, using local fallback)' : ''));
 
-  return { scheduler, getDb, dbMeta, attachRemoteAccess: (server) => remoteAccess.attach(server) };
+  return { scheduler, getDb, dbMeta,
+    attachRemoteAccess: (server) => remoteAccess.attach(server),
+    attachTls: () => tls.start(app) };
 }

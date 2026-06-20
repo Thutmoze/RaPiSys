@@ -1060,6 +1060,11 @@ import('./rapisys.js')
     if (rapisys && typeof rapisys.attachRemoteAccess === 'function' && serverRef) {
       rapisys.attachRemoteAccess(serverRef).catch((e) => console.error('[rapisys] remote-access attach failed:', e.message));
     }
+    // Start the HTTPS listener if TLS was enabled in a previous session.
+    if (rapisys && typeof rapisys.attachTls === 'function') {
+      rapisys.attachTls().then((s) => { if (s && s.listening) console.log(`[rapisys] HTTPS active on :${s.port}`); })
+        .catch((e) => console.error('[rapisys] tls attach failed:', e.message));
+    }
   })
   .catch((err) => console.error('[rapisys] init failed (legacy dashboard still works):', err));
 
