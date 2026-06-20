@@ -82,9 +82,9 @@ export function createInventoryCollector() {
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('inventory.removeSimulate', { name }, null, 30000);
   }
-  async function removePackage(name, confirm) {
+  async function removePackage(name, confirm, onLine = null) {
     if (!agentConfigured()) throw new Error('host agent required');
-    return agentCall('inventory.remove', { name, confirm }, null, 130000);
+    return agentCall('inventory.remove', { name, confirm }, onLine, 130000);
   }
   async function serviceControl(name, action) {
     if (!agentConfigured()) throw new Error('host agent required');

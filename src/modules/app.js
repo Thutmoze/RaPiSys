@@ -2696,13 +2696,25 @@ pageRenderers.inventory = (() => {
     const failures = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      prog.setStatus(`(${i + 1}/${items.length}) ${it.kind === 'package' ? 'Uninstalling' : it.kind === 'service' ? 'Stopping' : 'Removing'} ${it.name}…`);
+      const verb = it.kind === 'package' ? 'Uninstalling' : it.kind === 'service' ? 'Stopping' : 'Removing';
+      prog.setStatus(`(${i + 1}/${items.length}) ${verb} ${it.name}…`);
+      prog.appendLog(`\n=== (${i + 1}/${items.length}) ${verb} ${it.name} ===`);
       try {
-        if (it.kind === 'package') await api('/inventory/package/remove', { method: 'POST', body: { name: it.name, confirm: it.name } });
-        else if (it.kind === 'service') await api('/inventory/service/control', { method: 'POST', body: { name: it.name, action: 'stop' } });
-        else await api('/inventory/container/remove', { method: 'POST', body: { name: it.name } });
+        if (it.kind === 'package') {
+          await new Promise((resolve, reject) => {
+            streamRemoval(`/inventory/package/remove/stream?name=${encodeURIComponent(it.name)}&confirm=${encodeURIComponent(it.name)}`,
+              { appendLog: prog.appendLog, setStatus: () => {}, finish: () => {} },
+              { onDone: (out) => (out?.ok === false ? reject(new Error('apt failed')) : resolve()), onError: (m) => reject(new Error(m)) });
+          });
+        } else if (it.kind === 'service') {
+          await api('/inventory/service/control', { method: 'POST', body: { name: it.name, action: 'stop' } });
+          prog.appendLog(`stopped ${it.name}`);
+        } else {
+          await api('/inventory/container/remove', { method: 'POST', body: { name: it.name } });
+          prog.appendLog(`removed container ${it.name}`);
+        }
         done++;
-      } catch (e) { failed++; failures.push(`${it.name}: ${e.message}`); }
+      } catch (e) { failed++; failures.push(`${it.name}: ${e.message}`); prog.appendLog(`! ${it.name}: ${e.message}`); }
     }
     prog.finish({
       ok: failed === 0,
@@ -2713,8 +2725,8 @@ pageRenderers.inventory = (() => {
   }
 
   // A progress overlay for removal/stop operations: spinner + animated bar +
-  // status, then a clear completion state with what was removed. Returns
-  // { setStatus, finish }.
+  // status, an expandable live log, then a completion state with a persistent
+  // close button. Returns { setStatus, appendLog, finish }.
   function removalOverlay(title) {
     const ov = el('div', 'wizard-overlay up-install-overlay');
     ov.innerHTML = `
@@ -2725,31 +2737,43 @@ pageRenderers.inventory = (() => {
         </div>
         <div class="up-install-bar"><div class="up-install-bar-fill" data-rmo="bar"></div></div>
         <div class="up-install-status" data-rmo="status">Starting…</div>
+        <button class="up-install-toggle" data-rmo="toggle">▸ Show details</button>
+        <pre class="up-log up-install-log" data-rmo="log" hidden></pre>
         <div class="up-install-result" data-rmo="result" hidden></div>
       </div>`;
     document.body.appendChild(ov);
     const q = (s) => ov.querySelector(`[data-rmo=${s}]`);
     const bar = q('bar'), status = q('status'), result = q('result'), closeBtn = q('close'), spin = q('spin'), titleEl = q('title');
+    const toggle = q('toggle'), logEl = q('log');
     let pct = 8; bar.style.width = pct + '%';
     const tick = setInterval(() => { pct = Math.min(90, pct + 4); bar.style.width = pct + '%'; }, 350);
-    let finished = false;
+    let finished = false, closeCb = null;
     const close = () => { if (closeCb) closeCb(); ov.remove(); };
-    let closeCb = null;
     closeBtn.onclick = close;
+    // expand/collapse the live log
+    toggle.onclick = () => {
+      const show = logEl.hasAttribute('hidden');
+      if (show) { logEl.removeAttribute('hidden'); toggle.textContent = '▾ Hide details'; }
+      else { logEl.setAttribute('hidden', ''); toggle.textContent = '▸ Show details'; }
+    };
+    // only allow click-outside to dismiss once finished
     ov.addEventListener('click', (e) => { if (e.target === ov && finished) close(); });
     return {
       setStatus: (t) => { status.textContent = t; },
+      appendLog: (line) => {
+        const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 4;
+        logEl.textContent += (logEl.textContent ? '\n' : '') + line;
+        if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+      },
       finish: ({ ok, message, detail, onClose }) => {
         clearInterval(tick); finished = true; closeCb = onClose;
         bar.style.width = '100%';
         bar.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
         spin.remove();
-        titleEl.innerHTML = ok ? '✓ ' + esc(titleEl.textContent) : '✕ ' + esc(titleEl.textContent);
+        titleEl.innerHTML = (ok ? '✓ ' : '✕ ') + esc(titleEl.textContent);
         status.textContent = message || (ok ? 'Done.' : 'Failed.');
         if (detail) { result.hidden = false; result.innerHTML = detail; }
-        closeBtn.hidden = false;
-        // auto-close success after a short beat so the flow feels snappy
-        if (ok) setTimeout(() => { if (document.body.contains(ov)) close(); }, 1400);
+        closeBtn.hidden = false;   // persistent close button after completion
       },
     };
   }
@@ -2773,15 +2797,33 @@ pageRenderers.inventory = (() => {
     // progress overlay during the apt operation (can take many seconds)
     const prog = removalOverlay(`Uninstalling ${name}`);
     prog.setStatus(others.length ? `Removing ${name} and ${others.length} dependent package(s)…` : `Removing ${name}…`);
-    try {
-      const res = await api('/inventory/package/remove', { method: 'POST', body: { name, confirm: name } });
-      const removedList = res?.removed && res.removed.length ? res.removed : [name];
-      prog.finish({ ok: true, message: `${removedList.length} package(s) removed.`,
-        detail: `<span class="inv-dim">Removed:</span> <span class="inv-cascade">${removedList.map(esc).join(', ')}</span>`,
-        onClose: () => reloadActive(host) });
-    } catch (e) {
-      prog.finish({ ok: false, message: e.message, onClose: () => reloadActive(host) });
-    }
+    await streamRemoval(`/inventory/package/remove/stream?name=${encodeURIComponent(name)}&confirm=${encodeURIComponent(name)}`, prog, {
+      onDone: (out) => {
+        const removedList = out?.removed && out.removed.length ? out.removed : [name];
+        prog.finish({ ok: out?.ok !== false, message: `${removedList.length} package(s) removed.`,
+          detail: `<span class="inv-dim">Removed:</span> <span class="inv-cascade">${removedList.map(esc).join(', ')}</span>`,
+          onClose: () => reloadActive(host) });
+      },
+      onError: (msg) => prog.finish({ ok: false, message: msg, onClose: () => reloadActive(host) }),
+    });
+  }
+
+  // Drive a removal SSE stream into a progress overlay (progress→log, done, error).
+  function streamRemoval(url, prog, { onDone, onError }) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const es = new EventSource(url);
+      es.addEventListener('progress', (e) => { try { const d = JSON.parse(e.data); if (d.line != null) prog.appendLog(d.line); } catch { /* */ } });
+      es.addEventListener('done', (e) => { if (settled) return; settled = true; es.close(); let out = {}; try { out = JSON.parse(e.data); } catch { /* */ } onDone(out); resolve(); });
+      es.addEventListener('error', (e) => {
+        // SSE 'error' fires both for our server-sent error event and on socket close.
+        let msg = null;
+        try { if (e.data) msg = JSON.parse(e.data).message; } catch { /* */ }
+        if (settled) return;
+        if (msg) { settled = true; es.close(); onError(msg); resolve(); }
+        else if (es.readyState === EventSource.CLOSED) { settled = true; onError('Connection closed before completion'); resolve(); }
+      });
+    });
   }
   async function svcToggle(host, name, action) {
     if (!await rapisysConfirm(`${action === 'stop' ? 'Stop' : 'Start'} service <b>${esc(name)}</b>?`, { confirmLabel: action === 'stop' ? 'Stop' : 'Start', html: true, danger: action === 'stop' })) return;

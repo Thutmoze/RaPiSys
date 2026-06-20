@@ -58,6 +58,27 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
     } catch (err) { res.status(502).json({ error: err.message }); }
   });
 
+  // SSE-streamed package removal: relays apt output line-by-line so the UI can
+  // show what's happening. GET (EventSource) — ?name=&confirm= ; the same
+  // server-side guard re-runs in the agent, so this is no less safe than POST.
+  r.get('/package/remove/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const name = String(req.query.name || '');
+    const confirm = String(req.query.confirm || '');
+    send('start', { name });
+    try {
+      const out = await inventory.removePackage(name, confirm, (line) => send('progress', { line }));
+      events?.add('inventory.removed', 'warning', { name, removed: out.removed });
+      const items = await inventory.collectAll();
+      inventoryRepo.sync(items, ['package', 'service', 'container']);
+      send('done', out);
+    } catch (err) { send('error', { message: err.message }); }
+    res.end();
+  });
+
   // Service control: stop/start/restart/enable/disable.
   r.post('/service/control', requireControl, async (req, res) => {
     const { name, action } = req.body || {};

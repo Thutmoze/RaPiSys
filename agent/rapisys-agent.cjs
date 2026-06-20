@@ -257,12 +257,17 @@ const OPS = {
       reason: protectedHits.length ? `Removal would also remove protected package(s): ${protectedHits.join(', ')}` : null };
   },
 
-  async 'inventory.remove'({ name, confirm }) {
+  async 'inventory.remove'({ name, confirm }, send) {
     assert(/^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,128}$/.test(name), 'invalid package name');
     assert(confirm === name, 'confirmation mismatch');
     // re-run the guard server-side (never trust the client)
     const guard = await this['inventory.removeSimulate']({ name });
     assert(guard.allowed, guard.reason || 'removal not allowed');
+    // stream apt output line-by-line when a sink is provided (SSE relay)
+    if (typeof send === 'function') {
+      const r = await runStreaming('apt-get', ['remove', '-y', name], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+      return { ok: r.code === 0, removed: guard.removed };
+    }
     const r = await run('apt-get', ['remove', '-y', name], 120000);
     return { ok: r.code === 0, log: (r.stdout || '') + (r.stderr || ''), removed: guard.removed };
   },
