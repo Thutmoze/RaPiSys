@@ -2610,11 +2610,11 @@ pageRenderers.inventory = (() => {
     const sections = Object.entries(groups).map(([k, arr]) => {
       const isPkg = k === 'package';
       const colgroup = isPkg
-        ? '<colgroup><col style="width:36px"><col style="width:18%"><col style="width:13%"><col style="width:auto"><col style="width:8%"><col style="width:8%"><col style="width:9%"><col style="width:9%"><col style="width:56px"></colgroup>'
-        : '<colgroup><col style="width:36px"><col style="width:22%"><col style="width:14%"><col style="width:auto"><col style="width:56px"></colgroup>';
+        ? '<colgroup><col style="width:36px"><col style="width:16%"><col style="width:12%"><col style="width:20%"><col style="width:auto"><col style="width:7%"><col style="width:8%"><col style="width:9%"><col style="width:56px"></colgroup>'
+        : '<colgroup><col style="width:36px"><col style="width:20%"><col style="width:13%"><col style="width:24%"><col style="width:auto"><col style="width:56px"></colgroup>';
       const headRow = isPkg
-        ? '<th></th><th>Name</th><th>Reason</th><th>Why</th><th>Version</th><th>Size</th><th>Installed</th><th>Category</th><th></th>'
-        : '<th></th><th>Name</th><th>Reason</th><th>Why</th><th></th>';
+        ? '<th></th><th>Name</th><th>Reason</th><th>Why</th><th>Description</th><th>Size</th><th>Installed</th><th>Category</th><th></th>'
+        : '<th></th><th>Name</th><th>Reason</th><th>Why</th><th>Description</th><th></th>';
       return `
       <h4 class="sess-h" style="margin-top:18px">${KIND_TITLE[k] || k} <span class="inv-tab-count">${arr.length}</span></h4>
       <div class="up-table-scroll"><table class="inv-table inv-table-fixed">
@@ -2624,15 +2624,18 @@ pageRenderers.inventory = (() => {
           const meta = REC_REASON[r.reason] || { label: r.reason, cls: 'rec-review' };
           const key = `${r.kind}:${r.name}`;
           const cap = (v, cls) => v ? `<span class="inv-cap ${cls}">${esc(v)}</span>` : '<span class="inv-dim">—</span>';
+          const desc = r.description
+            ? `<td class="inv-dim inv-desc" title="${esc(r.description)}">${esc(r.description)}</td>`
+            : '<td class="inv-dim">—</td>';
           const extra = isPkg
-            ? `<td>${esc(r.version || '—')}</td>`
+            ? desc
               + `<td class="inv-dim">${fmtSize(r.sizeKB || r.meta?.sizeKB)}</td>`
               + `<td class="inv-dim">${fmtDate(r.installedAt)}</td>`
               + `<td>${cap(r.category, 'inv-cap-cat')}</td>`
-            : '';
+            : desc;
           return `<tr>
             <td><input type="checkbox" class="rec-cb" data-rec-key="${esc(key)}" ${recSelected.has(key) ? 'checked' : ''}></td>
-            <td><b>${esc(r.name)}</b></td>
+            <td><b>${esc(r.name)}</b>${isPkg && r.version ? ` <span class="inv-dim">${esc(r.version)}</span>` : ''}</td>
             <td><span class="rec-badge ${meta.cls}">${esc(meta.label)}</span></td>
             <td class="inv-dim inv-desc">${esc(r.detail || '')}</td>
             ${extra}
