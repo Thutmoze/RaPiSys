@@ -1109,6 +1109,10 @@ WantedBy=multi-user.target
       '-addext', `subjectAltName=${sans.join(',')}`], 30000);
     assert(r.code === 0, `openssl failed: ${r.stderr || r.stdout}`);
     fs.chmodSync(key, 0o640); fs.chmodSync(crt, 0o644);
+    // The dashboard container runs as a non-root user in the shared group; let
+    // that group read the private key (0640 root:rapisys) without making it
+    // world-readable — mirrors how the agent socket is shared.
+    await run('chgrp', [SOCKET_GROUP, key], 5000).catch(() => {});
     const info = await run('openssl', ['x509', '-in', crt, '-noout', '-enddate'], 5000).catch(() => ({ stdout: '' }));
     return { ok: true, crt, key, mode: 'selfsigned', sans, notAfter: (info.stdout || '').replace('notAfter=', '').trim() };
   },
@@ -1138,6 +1142,7 @@ WantedBy=multi-user.target
     const r = await run('tailscale', ['cert', '--cert-file', crt, '--key-file', key, name], 60000);
     assert(r.code === 0, `tailscale cert failed: ${r.stderr || r.stdout}`);
     fs.chmodSync(key, 0o640); fs.chmodSync(crt, 0o644);
+    await run('chgrp', [SOCKET_GROUP, key], 5000).catch(() => {});
     const info = await run('openssl', ['x509', '-in', crt, '-noout', '-enddate'], 5000).catch(() => ({ stdout: '' }));
     return { ok: true, crt, key, mode: 'tailscale', dnsName: name, notAfter: (info.stdout || '').replace('notAfter=', '').trim() };
   },
