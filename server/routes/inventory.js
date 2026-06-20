@@ -75,7 +75,7 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
       const items = await inventory.collectAll();
       inventoryRepo.sync(items, ['package', 'service', 'container']);
       send('done', out);
-    } catch (err) { send('error', { message: err.message }); }
+    } catch (err) { send('failed', { message: err.message }); }
     res.end();
   });
 

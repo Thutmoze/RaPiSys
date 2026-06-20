@@ -233,6 +233,15 @@ const OPS = {
   // ---- simulate + perform package removal (destructive, guarded) ----------
   async 'inventory.removeSimulate'({ name }) {
     assert(/^[a-zA-Z0-9][a-zA-Z0-9+._-]{0,128}$/.test(name), 'invalid package name');
+    // Names that must never be removed from the dashboard regardless of apt
+    // priority: kernels, firmware, bootloader, init, and Pi base packages.
+    const PROTECTED_RE = /^(linux-image|linux-headers|linux-kbuild|raspberrypi-kernel|raspberrypi-bootloader|rpi-eeprom|raspi-firmware|firmware-|systemd$|udev$|grub|initramfs-tools|raspberrypi-sys-mods|raspberrypi-ui-mods)/;
+    const unameR = (await run('uname', ['-r'], 3000).catch(() => ({ stdout: '' }))).stdout.trim();
+    const runningKernelPkg = unameR ? `linux-image-${unameR}` : null;
+    const isHardProtected = (pkg) => PROTECTED_RE.test(pkg) || (runningKernelPkg && pkg === runningKernelPkg);
+    if (isHardProtected(name)) {
+      return { allowed: false, reason: `${name} is a protected system package (kernel / firmware / bootloader) and cannot be removed from the dashboard.` };
+    }
     // refuse essential/required outright
     const meta = await run('dpkg-query', ['-W', '-f=${Essential}\t${Priority}', name], 5000).catch(() => ({ stdout: '' }));
     const [essential, priority] = (meta.stdout || '').split('\t');
@@ -249,6 +258,7 @@ const OPS = {
     // guard: if the cascade would pull in protected packages, flag them
     const protectedHits = [];
     for (const pkg of removed) {
+      if (isHardProtected(pkg)) { protectedHits.push(pkg); continue; }
       const pm = await run('dpkg-query', ['-W', '-f=${Essential}\t${Priority}', pkg], 3000).catch(() => ({ stdout: '' }));
       const [e2, p2] = (pm.stdout || '').split('\t');
       if (e2 === 'yes' || p2 === 'required' || p2 === 'important') protectedHits.push(pkg);

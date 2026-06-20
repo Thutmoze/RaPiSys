@@ -58,6 +58,22 @@ describe('inventory recommendations', () => {
     expect(recommendations.find((r) => r.name === 'broken').reason).toBe('failed');
   });
 
+  it('never recommends kernel/firmware packages even when apt lists them as orphans', async () => {
+    agentResponses['inventory.packages'] = { packages: [
+      { name: 'linux-image-6.12.75+rpt-rpi-2712', version: '1', installedAt: Date.now(), sizeKB: 90000, priority: 'optional', section: 'kernel' },
+      { name: 'oldlib', version: '1', installedAt: Date.now(), sizeKB: 100, priority: 'optional', section: 'utils' },
+    ] };
+    agentResponses['inventory.services'] = { services: [] };
+    // apt reports the kernel AND a normal lib as autoremovable
+    agentResponses['inventory.autoremovable'] = { packages: ['linux-image-6.12.75+rpt-rpi-2712', 'oldlib'] };
+
+    const inv = createInventoryCollector();
+    const { recommendations } = await inv.recommendations();
+    const names = recommendations.map((r) => r.name);
+    expect(names).not.toContain('linux-image-6.12.75+rpt-rpi-2712');   // kernels are protected
+    expect(names).toContain('oldlib');                                  // normal orphan still suggested
+  });
+
   it('does not recommend essential/system packages even if large and old', async () => {
     const old = Date.now() - 400 * 86400e3;
     agentResponses['inventory.packages'] = { packages: [

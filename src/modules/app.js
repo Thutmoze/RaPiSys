@@ -2808,20 +2808,20 @@ pageRenderers.inventory = (() => {
     });
   }
 
-  // Drive a removal SSE stream into a progress overlay (progress→log, done, error).
+  // Drive a removal SSE stream into a progress overlay (progress→log, done, failed).
   function streamRemoval(url, prog, { onDone, onError }) {
     return new Promise((resolve) => {
       let settled = false;
+      const finish = (fn, arg) => { if (settled) return; settled = true; es.close(); fn(arg); resolve(); };
       const es = new EventSource(url);
       es.addEventListener('progress', (e) => { try { const d = JSON.parse(e.data); if (d.line != null) prog.appendLog(d.line); } catch { /* */ } });
-      es.addEventListener('done', (e) => { if (settled) return; settled = true; es.close(); let out = {}; try { out = JSON.parse(e.data); } catch { /* */ } onDone(out); resolve(); });
-      es.addEventListener('error', (e) => {
-        // SSE 'error' fires both for our server-sent error event and on socket close.
-        let msg = null;
-        try { if (e.data) msg = JSON.parse(e.data).message; } catch { /* */ }
+      es.addEventListener('done', (e) => { let out = {}; try { out = JSON.parse(e.data); } catch { /* */ } finish(onDone, out); });
+      // explicit server-sent failure (guard refusal, apt error) carries a message
+      es.addEventListener('failed', (e) => { let msg = 'Removal failed'; try { msg = JSON.parse(e.data).message || msg; } catch { /* */ } finish(onError, msg); });
+      // native error = transport/connection problem (only meaningful if not settled)
+      es.addEventListener('error', () => {
         if (settled) return;
-        if (msg) { settled = true; es.close(); onError(msg); resolve(); }
-        else if (es.readyState === EventSource.CLOSED) { settled = true; onError('Connection closed before completion'); resolve(); }
+        if (es.readyState === EventSource.CLOSED) finish(onError, 'Connection to server lost during removal');
       });
     });
   }

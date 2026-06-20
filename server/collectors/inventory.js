@@ -128,13 +128,20 @@ export function createInventoryCollector() {
     const svcs = svcsR.status === 'fulfilled' ? svcsR.value : [];
     const ctrs = ctrsR.status === 'fulfilled' ? ctrsR.value : [];
     const orphans = orphansR.status === 'fulfilled' ? orphansR.value : [];
-    const orphanSet = new Set(orphans);
+    // Never recommend protected system packages (kernels/firmware/bootloader/
+    // init) even if apt lists them as autoremovable — removing the running or a
+    // fallback kernel can make the Pi unbootable. The agent guard also refuses
+    // these, but they shouldn't appear as suggestions at all.
+    const PROTECTED_RE = /^(linux-image|linux-headers|linux-kbuild|raspberrypi-kernel|raspberrypi-bootloader|rpi-eeprom|raspi-firmware|firmware-|systemd$|udev$|grub|initramfs-tools|raspberrypi-sys-mods|raspberrypi-ui-mods)/;
+    const isProtected = (n) => PROTECTED_RE.test(n);
+    const orphanSet = new Set(orphans.filter((n) => !isProtected(n)));
+    const safeOrphans = [...orphanSet];
     const recs = [];
     const now = Date.now();
     const DAY = 86400e3;
 
     // 1) Orphaned (auto-removable) packages — safest, highest-confidence signal.
-    for (const name of orphans) {
+    for (const name of safeOrphans) {
       const p = pkgs.find((x) => x.name === name);
       recs.push({
         kind: 'package', name, version: p?.version || '',
@@ -183,7 +190,7 @@ export function createInventoryCollector() {
     //    Framed as "review" — we can't prove it's unused, just a candidate.
     for (const p of pkgs) {
       const isUser = !(p.meta?.essential || p.meta?.priority === 'required' || p.meta?.priority === 'important'
-        || p.meta?.section === 'libs' || p.meta?.section === 'oldlibs' || /^lib/.test(p.name));
+        || p.meta?.section === 'libs' || p.meta?.section === 'oldlibs' || /^lib/.test(p.name) || isProtected(p.name));
       const big = (p.meta?.sizeKB || 0) > 50000;
       const old = p.installedAt && (now - p.installedAt) > 180 * DAY;
       if (isUser && big && old && !orphanSet.has(p.name)) {
