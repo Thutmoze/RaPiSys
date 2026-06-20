@@ -2688,22 +2688,70 @@ pageRenderers.inventory = (() => {
     if (byKind.package.length) lines.push(`Uninstall ${byKind.package.length} package(s): <span class="inv-cascade">${byKind.package.map(esc).join(', ')}</span>`);
     if (byKind.service.length) lines.push(`Stop ${byKind.service.length} service(s): <span class="inv-cascade">${byKind.service.map(esc).join(', ')}</span>`);
     if (byKind.container.length) lines.push(`Remove ${byKind.container.length} container(s): <span class="inv-cascade">${byKind.container.map(esc).join(', ')}</span>`);
-    const ok = await rapisysConfirm(`Remove ${keys.length} selected item(s)?<br><br>${lines.join('<br>')}<br><br>Each is processed in turn; packages show their own cascade is skipped here — protected items are refused automatically.`,
+    const ok = await rapisysConfirm(`Remove ${keys.length} selected item(s)?<br><br>${lines.join('<br>')}<br><br>Each is processed in turn; protected items are refused automatically.`,
       { danger: true, confirmLabel: `Remove ${keys.length}`, html: true });
     if (!ok) return;
+    const prog = removalOverlay(`Removing ${keys.length} item(s)`);
     let done = 0, failed = 0;
-    for (const it of items) {
+    const failures = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      prog.setStatus(`(${i + 1}/${items.length}) ${it.kind === 'package' ? 'Uninstalling' : it.kind === 'service' ? 'Stopping' : 'Removing'} ${it.name}…`);
       try {
         if (it.kind === 'package') await api('/inventory/package/remove', { method: 'POST', body: { name: it.name, confirm: it.name } });
         else if (it.kind === 'service') await api('/inventory/service/control', { method: 'POST', body: { name: it.name, action: 'stop' } });
         else await api('/inventory/container/remove', { method: 'POST', body: { name: it.name } });
         done++;
-      } catch { failed++; }
+      } catch (e) { failed++; failures.push(`${it.name}: ${e.message}`); }
     }
-    toast(failed ? 'info' : 'success', 'Cleanup', `${done} removed${failed ? `, ${failed} failed/skipped` : ''}`);
-    loadSummary(host);
-    recData = null;
-    await loadRecommendations(host, { refresh: true });
+    prog.finish({
+      ok: failed === 0,
+      message: `${done} removed${failed ? `, ${failed} failed/skipped` : ''}.`,
+      detail: failures.length ? `<span class="inv-dim">Skipped/failed:</span><br><span class="inv-cascade">${failures.map(esc).join('<br>')}</span>` : null,
+      onClose: () => { loadSummary(host); recData = null; loadRecommendations(host, { refresh: true }); },
+    });
+  }
+
+  // A progress overlay for removal/stop operations: spinner + animated bar +
+  // status, then a clear completion state with what was removed. Returns
+  // { setStatus, finish }.
+  function removalOverlay(title) {
+    const ov = el('div', 'wizard-overlay up-install-overlay');
+    ov.innerHTML = `
+      <div class="up-install-card" role="dialog" aria-modal="true">
+        <div class="up-install-head">
+          <div class="up-install-title"><span class="up-spinner" data-rmo="spin"></span><b data-rmo="title">${esc(title)}</b></div>
+          <button class="up-install-close" data-rmo="close" hidden title="Close">✕</button>
+        </div>
+        <div class="up-install-bar"><div class="up-install-bar-fill" data-rmo="bar"></div></div>
+        <div class="up-install-status" data-rmo="status">Starting…</div>
+        <div class="up-install-result" data-rmo="result" hidden></div>
+      </div>`;
+    document.body.appendChild(ov);
+    const q = (s) => ov.querySelector(`[data-rmo=${s}]`);
+    const bar = q('bar'), status = q('status'), result = q('result'), closeBtn = q('close'), spin = q('spin'), titleEl = q('title');
+    let pct = 8; bar.style.width = pct + '%';
+    const tick = setInterval(() => { pct = Math.min(90, pct + 4); bar.style.width = pct + '%'; }, 350);
+    let finished = false;
+    const close = () => { if (closeCb) closeCb(); ov.remove(); };
+    let closeCb = null;
+    closeBtn.onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov && finished) close(); });
+    return {
+      setStatus: (t) => { status.textContent = t; },
+      finish: ({ ok, message, detail, onClose }) => {
+        clearInterval(tick); finished = true; closeCb = onClose;
+        bar.style.width = '100%';
+        bar.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
+        spin.remove();
+        titleEl.innerHTML = ok ? '✓ ' + esc(titleEl.textContent) : '✕ ' + esc(titleEl.textContent);
+        status.textContent = message || (ok ? 'Done.' : 'Failed.');
+        if (detail) { result.hidden = false; result.innerHTML = detail; }
+        closeBtn.hidden = false;
+        // auto-close success after a short beat so the flow feels snappy
+        if (ok) setTimeout(() => { if (document.body.contains(ov)) close(); }, 1400);
+      },
+    };
   }
 
   async function pkgRemove(host, name, btn) {
@@ -2722,11 +2770,18 @@ pageRenderers.inventory = (() => {
     const msg = `Uninstall <b>${esc(name)}</b>?`
       + (others.length ? `<br><br>This will also remove ${others.length} dependent package(s):<br><span class="inv-cascade">${others.map(esc).join(', ')}</span>` : '<br><br>No other packages are affected.');
     if (!await rapisysConfirm(msg, { danger: true, confirmLabel: `Uninstall ${others.length ? `(${others.length + 1})` : ''}`.trim(), html: true })) return;
+    // progress overlay during the apt operation (can take many seconds)
+    const prog = removalOverlay(`Uninstalling ${name}`);
+    prog.setStatus(others.length ? `Removing ${name} and ${others.length} dependent package(s)…` : `Removing ${name}…`);
     try {
-      await api('/inventory/package/remove', { method: 'POST', body: { name, confirm: name } });
-      toast('success', 'Inventory', `${name} removed`);
-      reloadActive(host);
-    } catch (e) { toast('error', 'Inventory', e.message); }
+      const res = await api('/inventory/package/remove', { method: 'POST', body: { name, confirm: name } });
+      const removedList = res?.removed && res.removed.length ? res.removed : [name];
+      prog.finish({ ok: true, message: `${removedList.length} package(s) removed.`,
+        detail: `<span class="inv-dim">Removed:</span> <span class="inv-cascade">${removedList.map(esc).join(', ')}</span>`,
+        onClose: () => reloadActive(host) });
+    } catch (e) {
+      prog.finish({ ok: false, message: e.message, onClose: () => reloadActive(host) });
+    }
   }
   async function svcToggle(host, name, action) {
     if (!await rapisysConfirm(`${action === 'stop' ? 'Stop' : 'Start'} service <b>${esc(name)}</b>?`, { confirmLabel: action === 'stop' ? 'Stop' : 'Start', html: true, danger: action === 'stop' })) return;
