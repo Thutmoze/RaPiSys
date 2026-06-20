@@ -32,6 +32,12 @@ export function tlsRouter({ tls, requireControl, getApp }) {
       const prov = await tls.provision(mode, { dnsName: req.body?.dnsName || null });
       await tls.setConfig({ enabled: true, mode });
       const started = await tls.start(getApp());
+      if (!started.listening) {
+        // Cert provisioned but the listener didn't come up — surface the reason
+        // so the UI doesn't show a misleading "enabled but not listening" state.
+        return res.status(502).json({ error: `HTTPS could not start: ${started.reason || 'unknown'}`,
+          code: 'tls_not_listening', provision: prov, listener: started });
+      }
       res.json({ ok: true, mode, provision: prov, listener: started });
     } catch (err) { res.status(502).json({ error: err.message }); }
   });

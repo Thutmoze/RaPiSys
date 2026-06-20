@@ -83,9 +83,16 @@ export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
     const cfg = await getConfig();
     await stop();
     if (!cfg.enabled) return { listening: false, reason: 'disabled' };
-    if (!certsExist()) return { listening: false, reason: 'no certificate' };
+    if (!certsExist()) { console.warn('[tls] not starting: certificate files missing'); return { listening: false, reason: 'no certificate' }; }
     let creds;
-    try { creds = readCreds(); } catch (e) { return { listening: false, reason: e.message }; }
+    try { creds = readCreds(); }
+    catch (e) {
+      // Most commonly EACCES on the private key when the container user isn't in
+      // the key's group — log loudly so it's diagnosable from `docker logs`.
+      console.error(`[tls] not starting: cannot read certificate/key (${e.code || ''} ${e.message}). `
+        + `Ensure ${KEY} is readable by the container's group.`);
+      return { listening: false, reason: `cannot read key: ${e.message}` };
+    }
     httpsServer = https.createServer(creds, app);
     return new Promise((resolve) => {
       httpsServer.once('error', (e) => { console.error('[tls] https listen error:', e.message); resolve({ listening: false, reason: e.message }); });
