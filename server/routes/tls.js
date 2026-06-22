@@ -15,7 +15,7 @@ export function tlsRouter({ tls, requireControl, getApp }) {
   r.get('/status', async (req, res) => {
     const cfg = await tls.getConfig();
     res.json({
-      enabled: cfg.enabled, mode: cfg.mode, port: cfg.port,
+      enabled: cfg.enabled, mode: cfg.mode, port: cfg.port, redirect: !!cfg.redirect,
       listening: tls.isListening(), certPresent: tls.certsExist(),
       notAfter: cfg.notAfter || null, dnsName: cfg.dnsName || null, provisionedAt: cfg.provisionedAt || null,
     });
@@ -45,6 +45,16 @@ export function tlsRouter({ tls, requireControl, getApp }) {
   r.post('/disable', requireControl, async (req, res) => {
     try { await tls.setConfig({ enabled: false }); await tls.stop(); res.json({ ok: true }); }
     catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Toggle HTTP→HTTPS redirect (only effective while HTTPS is listening).
+  r.post('/redirect', requireControl, async (req, res) => {
+    try {
+      const on = req.body?.enabled === true;
+      await tls.setConfig({ redirect: on });
+      await tls.refreshRedirect();
+      res.json({ ok: true, redirect: on });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // Manual re-issue / renew for the active mode.

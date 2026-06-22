@@ -26,12 +26,21 @@ const DEFAULT_CONFIG = {
   enabled: false,
   mode: 'selfsigned',   // 'selfsigned' | 'tailscale'
   port: 3443,
+  redirect: false,      // redirect plain-HTTP requests to HTTPS when listening
   // populated after provisioning:
   notAfter: null, dnsName: null, provisionedAt: null,
 };
 
 export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
   let httpsServer = null;
+
+  // Publish a redirect descriptor consumed by the HTTP listener's early
+  // middleware. Only set when redirect is on AND HTTPS is actually listening.
+  async function publishRedirect() {
+    const cfg = await getConfig();
+    globalThis.__rapisysTlsRedirect = (cfg.enabled && cfg.redirect && isListening())
+      ? { port: cfg.port } : null;
+  }
 
   async function getConfig() {
     const s = await loadSettings();
@@ -98,6 +107,7 @@ export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
       httpsServer.once('error', (e) => { console.error('[tls] https listen error:', e.message); resolve({ listening: false, reason: e.message }); });
       httpsServer.listen(cfg.port, () => {
         console.log(`[tls] HTTPS listening on :${cfg.port} (${cfg.mode})`);
+        publishRedirect();
         resolve({ listening: true, port: cfg.port, mode: cfg.mode });
       });
     });
@@ -105,6 +115,7 @@ export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
 
   async function stop() {
     if (httpsServer) { await new Promise((r) => httpsServer.close(r)); httpsServer = null; }
+    globalThis.__rapisysTlsRedirect = null;
   }
 
   function isListening() { return !!httpsServer && httpsServer.listening; }
@@ -129,5 +140,5 @@ export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
     return { renewed: false };
   }
 
-  return { getConfig, setConfig, provision, tailscaleStatus, certsExist, start, stop, isListening, renewIfNeeded, CERT_DIR, certPaths: { crt: CRT, key: KEY } };
+  return { getConfig, setConfig, provision, tailscaleStatus, certsExist, start, stop, isListening, renewIfNeeded, refreshRedirect: publishRedirect, CERT_DIR, certPaths: { crt: CRT, key: KEY } };
 }

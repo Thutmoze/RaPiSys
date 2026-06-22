@@ -41,4 +41,17 @@ describe('tls service', () => {
     const tls = mk({});
     expect(tls.isListening()).toBe(false);
   });
+
+  it('publishes no redirect target when disabled, and persists the redirect flag', async () => {
+    delete globalThis.__rapisysTlsRedirect;
+    const tls = mk({});
+    await tls.refreshRedirect();
+    expect(globalThis.__rapisysTlsRedirect).toBeFalsy();   // disabled → no redirect
+    await tls.setConfig({ redirect: true });
+    const cfg = await tls.getConfig();
+    expect(cfg.redirect).toBe(true);
+    // still no redirect target because HTTPS isn't actually listening
+    await tls.refreshRedirect();
+    expect(globalThis.__rapisysTlsRedirect).toBeFalsy();
+  });
 });

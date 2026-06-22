@@ -1725,6 +1725,7 @@ pageRenderers.settings = (() => {
           : `<button class="set-btn set-btn-primary" data-tls="enable">${SAVE_ICON}<span>Enable HTTPS</span></button>`}
         <span data-tls="msg"></span>
       </div>
+      ${st.enabled ? `<label class="wz-inline" style="margin-top:10px"><input type="checkbox" data-tls="redirect" ${st.redirect ? 'checked' : ''}> Redirect plain HTTP to HTTPS (forces all traffic onto the secure port)</label>` : ''}
       ${st.enabled && st.listening && !onHttps ? `<p class="up-sec-hint" style="margin-top:8px">HTTPS is active. <a href="${httpsUrl(st.port)}" style="color:var(--accent-cyan)">Open the secure URL →</a> (self-signed shows a one-time browser warning you can accept.)</p>` : ''}`;
 
     enhanceSelects(el2);
@@ -1760,6 +1761,13 @@ pageRenderers.settings = (() => {
       if (!await rapisysConfirm('Disable HTTPS? The dashboard will be reachable over plain HTTP only, and you won\'t be able to change the admin password until you re-enable it.', { danger: true, confirmLabel: 'Disable' })) return;
       try { await api('/tls/disable', { method: 'POST', body: {} }); toast('success', 'HTTPS', 'Disabled'); loadTls(host); }
       catch (err) { toast('error', 'HTTPS', err.message); }
+    });
+    $('[data-tls=redirect]', el2)?.addEventListener('change', async (e) => {
+      const on = e.currentTarget.checked;
+      try {
+        await api('/tls/redirect', { method: 'POST', body: { enabled: on } });
+        toast('success', 'HTTPS', on ? 'HTTP will redirect to HTTPS' : 'HTTP/HTTPS both served');
+      } catch (err) { e.currentTarget.checked = !on; toast('error', 'HTTPS', err.message); }
     });
   }
 

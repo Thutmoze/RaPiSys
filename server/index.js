@@ -387,6 +387,18 @@ function checkService(service) {
 
 app.use(express.json({ limit: '10kb' })); // Limit payload size
 
+// HTTP→HTTPS redirect (opt-in, only when HTTPS is listening). Skips the health
+// check and loopback so the Docker healthcheck and internal calls keep working,
+// and only fires on insecure requests to avoid loops on the HTTPS listener.
+app.use((req, res, next) => {
+  const target = globalThis.__rapisysTlsRedirect;
+  if (!target || req.secure) return next();
+  if (req.path === '/api/health' || req.path.startsWith('/api/health')) return next();
+  const host = (req.headers.host || '').split(':')[0];
+  if (!host || host === 'localhost' || host === '127.0.0.1') return next();
+  return res.redirect(308, `https://${host}:${target.port}${req.originalUrl}`);
+});
+
 // CORS - configurable origins
 app.use((req, res, next) => {
   const origin = req.headers.origin;
