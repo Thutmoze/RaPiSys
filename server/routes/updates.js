@@ -142,7 +142,7 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
     if (!full && (!packages || !packages.length)) {
-      send('error', { message: 'no packages specified' });
+      send('failed', { message: 'no packages specified' });
       return res.end();
     }
 
@@ -213,7 +213,7 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
       send('done', { ok, code: result.code });
     } catch (err) {
       updatesRepo.record({ ts: Date.now(), packageName: full ? 'dist-upgrade' : (packages || []).join(','), result: 'error', log: logBuf + '\n' + err.message });
-      send('error', { message: err.message });
+      send('failed', { message: err.message });
     }
     res.end();
   });

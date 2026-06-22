@@ -3713,8 +3713,9 @@ pageRenderers.updates = (() => {
       toast(d.ok ? 'success' : 'error', 'Updates', d.ok ? 'Upgrade complete' : 'Upgrade had errors');
       ev.close(); streaming = false; selected.clear();
     });
-    ev.addEventListener('error', (e) => {
-      let m = 'stream error'; try { m = JSON.parse(e.data).message; } catch { /* */ }
+    ev.addEventListener('failed', (e) => {
+      if (finished) return;
+      let m = 'upgrade failed'; try { m = JSON.parse(e.data).message || m; } catch { /* */ }
       logEl.removeAttribute('hidden'); logEl.textContent += `\n✗ ${m}\n`;
       card.querySelector('.up-spinner')?.remove();
       statusEl.textContent = 'Error';
@@ -3722,6 +3723,20 @@ pageRenderers.updates = (() => {
       resultEl.innerHTML = `<span class="up-install-fail">✗ ${esc(m)}</span>`;
       closeBtn.hidden = false; finished = true;
       ev.close(); streaming = false;
+    });
+    ev.addEventListener('error', () => {
+      // Native EventSource error also fires on normal connection close — if the
+      // upgrade already finished (done/failed), this is just that close: ignore.
+      if (finished) { ev.close(); return; }
+      if (ev.readyState === EventSource.CLOSED) {
+        logEl.removeAttribute('hidden'); logEl.textContent += `\n✗ connection lost\n`;
+        card.querySelector('.up-spinner')?.remove();
+        statusEl.textContent = 'Error';
+        resultEl.removeAttribute('hidden');
+        resultEl.innerHTML = `<span class="up-install-fail">✗ connection lost during upgrade</span>`;
+        closeBtn.hidden = false; finished = true;
+        ev.close(); streaming = false;
+      }
     });
   }
 
