@@ -51,12 +51,20 @@ function findNode(w) {
 
 async function fetchLayout() {
   try {
-    const res = await fetch('/api/layouts/overview', { credentials: 'same-origin' });
+    const res = await fetch(`/api/layouts/${dashPage()}`, { credentials: 'same-origin' });
     if (!res.ok) return null;
     const data = await res.json();
     return Array.isArray(data.layout) ? data.layout : null;
   } catch { return null; }
 }
+
+// --- multiple dashboards ---------------------------------------------------
+// Each dashboard has its own card layout, stored under the layouts page key
+// 'overview' (built-in 'default') or 'overview:<id>'. The tab bar lets the admin
+// switch/add/rename/delete; switching tears down and rebuilds the grid.
+let dashboards = [{ id: 'default', name: 'Overview' }];
+let currentDash = 'default';
+function dashPage() { return currentDash === 'default' ? 'overview' : `overview:${currentDash}`; }
 
 // --- grid construction (shared by locked view + editor) --------------------
 
@@ -269,23 +277,146 @@ function ensureSummaryCards() {
 let rendered = false;
 export async function initOverviewLayout() {
   ensureSummaryCards();
-  // Only the authenticated admin sees the custom layout + edit button. Everyone
-  // else (no login) gets the original Pi-Dashboard view untouched.
+  // Only the authenticated admin sees the custom layout + dashboards + edit
+  // button. Everyone else (no login) gets the original Pi-Dashboard view.
   let isAdmin = false;
   try {
     const me = await fetch('/api/auth/me', { credentials: 'same-origin' }).then((r) => r.json());
     isAdmin = !!me.authenticated && me.mode !== 'monitor';
   } catch { isAdmin = false; }
 
-  if (!isAdmin) return;        // native view, no edit affordance, no saved layout
+  if (!isAdmin) { removeDashTabs(); return; }   // native view, no affordances
 
   ensureEditButton();
+  // Load the dashboards registry and which one is active.
+  try {
+    const reg = await fetch('/api/layouts/dashboards', { credentials: 'same-origin' }).then((r) => r.json());
+    if (reg && Array.isArray(reg.dashboards) && reg.dashboards.length) {
+      dashboards = reg.dashboards;
+      currentDash = reg.active && dashboards.some((d) => d.id === reg.active) ? reg.active : dashboards[0].id;
+    }
+  } catch { /* keep default single dashboard */ }
+  renderDashTabs();
+
   if (rendered) return;
   savedLayout = await fetchLayout();
-  if (savedLayout) {
-    grid = buildGrid({ editable: false });   // locked view of the saved layout
+  // Render the selected dashboard. 'default' with no saved layout → native
+  // defaults; any other (or an explicitly-saved) dashboard → its grid (which may
+  // legitimately be empty for a freshly-created dashboard).
+  if (savedLayout || currentDash !== 'default') {
+    grid = buildGrid({ editable: false });
+    maybeShowEmptyHint();
   }
   rendered = true;
+}
+
+// Switch to a different dashboard: persist the choice, tear down the current
+// grid, load the target's layout, rebuild.
+async function switchDashboard(id) {
+  if (id === currentDash || editing) return;
+  currentDash = id;
+  try { await fetch(`/api/layouts/dashboards/${id}/select`, { method: 'POST', credentials: 'same-origin' }); } catch { /* */ }
+  renderDashTabs();
+  if (grid) { teardownGrid(); grid = null; }
+  removeEmptyHint();
+  savedLayout = await fetchLayout();
+  if (savedLayout || currentDash !== 'default') {
+    grid = buildGrid({ editable: false });
+    maybeShowEmptyHint();
+  }
+  // else: default with no layout → native children restored by teardownGrid
+}
+
+function removeEmptyHint() { document.getElementById('dash-empty-hint')?.remove(); }
+function maybeShowEmptyHint() {
+  removeEmptyHint();
+  // A non-default dashboard whose saved layout has no visible widgets shows a
+  // hint pointing at Edit (where cards are added).
+  const empty = Array.isArray(savedLayout) && savedLayout.filter((p) => p.visible !== false).length === 0;
+  if (!empty) return;
+  const dashboard = document.querySelector('main.dashboard');
+  if (!dashboard) return;
+  const hint = document.createElement('div');
+  hint.id = 'dash-empty-hint';
+  hint.className = 'dash-empty-hint';
+  hint.innerHTML = 'This dashboard is empty. Use <b>Edit layout</b> (top-right) to add cards.';
+  dashboard.appendChild(hint);
+}
+
+// --- dashboard tab bar -----------------------------------------------------
+
+function removeDashTabs() { document.getElementById('dash-tabs')?.remove(); }
+
+function renderDashTabs() {
+  const dashboard = document.querySelector('main.dashboard');
+  if (!dashboard) return;
+  let bar = document.getElementById('dash-tabs');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'dash-tabs';
+    bar.className = 'dash-tabs';
+    dashboard.parentNode.insertBefore(bar, dashboard);
+  }
+  bar.innerHTML = dashboards.map((d) => `
+    <button class="dash-tab ${d.id === currentDash ? 'dash-tab-active' : ''}" data-dash="${d.id}">
+      <span class="dash-tab-name">${escHtml(d.name)}</span>
+      ${d.id === currentDash ? `<span class="dash-tab-edit" data-dash-edit="${d.id}" title="Rename">✎</span>${d.id !== 'default' ? `<span class="dash-tab-del" data-dash-del="${d.id}" title="Delete">✕</span>` : ''}` : ''}
+    </button>`).join('')
+    + `<button class="dash-tab-add" data-dash-add title="New dashboard">+</button>`;
+
+  bar.querySelectorAll('[data-dash]').forEach((b) => b.onclick = (e) => {
+    if (e.target.closest('[data-dash-edit]') || e.target.closest('[data-dash-del]')) return;
+    switchDashboard(b.dataset.dash);
+  });
+  bar.querySelector('[data-dash-add]').onclick = addDashboard;
+  bar.querySelectorAll('[data-dash-edit]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); renameDashboard(b.dataset.dashEdit); });
+  bar.querySelectorAll('[data-dash-del]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); deleteDashboard(b.dataset.dashDel); });
+}
+
+function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+async function addDashboard() {
+  const name = (window.prompt('Name for the new dashboard:', 'New dashboard') || '').trim();
+  if (!name) return;
+  try {
+    const res = await fetch('/api/layouts/dashboards', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not create'); return; }
+    const { dashboard } = await res.json();
+    dashboards.push({ id: dashboard.id, name });
+    toast('success', 'Dashboard', `“${name}” created — it starts empty; use Edit to add cards.`);
+    switchDashboard(dashboard.id);
+  } catch (err) { toast('error', 'Dashboard', err.message); }
+}
+
+async function renameDashboard(id) {
+  const cur = dashboards.find((d) => d.id === id);
+  const name = (window.prompt('Rename dashboard:', cur ? cur.name : '') || '').trim();
+  if (!name || (cur && name === cur.name)) return;
+  try {
+    const res = await fetch(`/api/layouts/dashboards/${id}`, {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not rename'); return; }
+    if (cur) cur.name = name;
+    renderDashTabs();
+  } catch (err) { toast('error', 'Dashboard', err.message); }
+}
+
+async function deleteDashboard(id) {
+  if (id === 'default') return;
+  const cur = dashboards.find((d) => d.id === id);
+  if (!window.confirm(`Delete dashboard “${cur ? cur.name : id}”? Its layout will be removed.`)) return;
+  try {
+    const res = await fetch(`/api/layouts/dashboards/${id}`, { method: 'DELETE', credentials: 'same-origin' });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not delete'); return; }
+    dashboards = dashboards.filter((d) => d.id !== id);
+    toast('success', 'Dashboard', 'Deleted');
+    await switchDashboard('default');
+  } catch (err) { toast('error', 'Dashboard', err.message); }
 }
 
 // --- edit mode -------------------------------------------------------------
@@ -315,6 +446,7 @@ async function enterEditMode() {
 
   editing = true;
   document.body.classList.add('layout-editing');
+  removeEmptyHint();
   // tear down any locked view, rebuild as editable
   if (grid) { teardownGrid(); grid = null; }
   grid = buildGrid({ editable: true });
@@ -429,7 +561,7 @@ function serializeGrid() {
 async function saveLayout() {
   const layout = serializeGrid();
   try {
-    const res = await fetch('/api/layouts/overview', {
+    const res = await fetch(`/api/layouts/${dashPage()}`, {
       method: 'PUT', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ layout }),
@@ -442,7 +574,7 @@ async function saveLayout() {
 }
 
 async function resetLayout() {
-  try { await fetch('/api/layouts/overview', { method: 'DELETE', credentials: 'same-origin' }); } catch { /* */ }
+  try { await fetch(`/api/layouts/${dashPage()}`, { method: 'DELETE', credentials: 'same-origin' }); } catch { /* */ }
   savedLayout = null;
   toast('success', 'Layout reset', 'Restored the default dashboard.');
   finishEdit();
@@ -457,8 +589,11 @@ function finishEdit() {
   editing = false;
   if (grid) { teardownGrid(); grid = null; }
   document.getElementById('layout-parking')?.remove();
-  if (savedLayout) grid = buildGrid({ editable: false });  // locked view
-  // else: native children were un-hidden by teardownGrid → pure native
+  if (savedLayout || currentDash !== 'default') {
+    grid = buildGrid({ editable: false });   // locked view
+    maybeShowEmptyHint();
+  }
+  // else: default with no saved layout → native children un-hidden by teardownGrid
 }
 
 export function getSavedLayout() { return savedLayout; }
