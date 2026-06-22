@@ -104,6 +104,33 @@ describe('auth service', () => {
     await full.auth.requireControl({ headers: { cookie: `rapisys_session=${token}` } }, res, () => { called = true; });
     expect(called).toBe(true);
   });
+
+  it('requireConfig: open in monitor mode, 401 unauthenticated in full mode (guards reads)', async () => {
+    const mk = () => {
+      const res = { code: null, body: null,
+        status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+      return res;
+    };
+    // monitor mode: read endpoints are open (upstream behavior) → next() called
+    const mon = fixture('monitor');
+    let res = mk(); let called = false;
+    await mon.auth.requireConfig({ headers: {} }, res, () => { called = true; });
+    expect(called).toBe(true); expect(res.code).toBe(null);
+
+    // full mode, no credentials: must 401 (this is the read-endpoint bypass fix)
+    const full = fixture('full');
+    res = mk(); called = false;
+    await full.auth.requireConfig({ headers: {} }, res, () => { called = true; });
+    expect(res.code).toBe(401); expect(called).toBe(false);
+
+    // full mode with a valid session: passes
+    const { secret } = full.auth.register('cfg', 'longpassword');
+    full.auth.confirmMfa(totpCode(secret));
+    const token = full.auth.login('cfg', 'longpassword', totpCode(secret), 'ip', '');
+    res = mk(); called = false;
+    await full.auth.requireConfig({ headers: { cookie: `rapisys_session=${token}` } }, res, () => { called = true; });
+    expect(called).toBe(true);
+  });
 });
 
 describe('account management', () => {

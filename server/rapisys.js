@@ -236,21 +236,28 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   });
 
   // ---- routes ----------------------------------------------------------------------
-  app.use('/api/history', historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
+  // requireConfig: open in monitor mode, auth-required in full mode.
+  const rc = auth.requireConfig;
+  app.use('/api/history', rc, historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
   app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb }));
-  app.use('/api/hardware', hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
   app.use('/api/auth', authRouter({ auth, loadSettings }));
-  app.use('/api/alerts', alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
-  app.use('/api/sessions', sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
-  app.use('/api/network', networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
-  app.use('/api/reports', reportsRouter({ reports, reportsRepo: reportsFacade }));
-  app.use('/api/inventory', inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
-  app.use('/api/updates', updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
-  app.use('/api/remote', remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
+  // Mount-level auth on every data router: requireConfig is open in monitor mode
+  // (upstream read-only behavior) but requires a session/admin token in full
+  // mode — for reads AND writes. This closes the gap where individual GET routes
+  // (inventory, network, reports, …) were unguarded and readable without login in
+  // full mode. Mutating routes keep their stricter requireControl on top.
+  app.use('/api/hardware', rc, hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
+  app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
+  app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
+  app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
+  app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
+  app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   // TLS / HTTPS: self-signed or Tailscale certs, provisioned via the host agent.
   const tls = createTlsService({ loadSettings, saveSettings, withFileLock });
-  app.use('/api/tls', tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app }));
-  app.use('/api/layouts', layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app }));
+  app.use('/api/layouts', rc, layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, telegram, reopenDb, dbMeta, requireAuth: auth.requireConfig, events: eventsFacade,
