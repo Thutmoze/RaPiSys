@@ -256,6 +256,15 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   // TLS / HTTPS: self-signed or Tailscale certs, provisioned via the host agent.
   const tls = createTlsService({ loadSettings, saveSettings, withFileLock });
+  // /api/tls/status must be readable WITHOUT auth: the login modal checks it
+  // (over plain HTTP, before any session) to guide the user to the secure URL.
+  // The rest of the TLS router stays behind requireConfig.
+  app.get('/api/tls/status', async (req, res) => {
+    const cfg = await tls.getConfig();
+    res.json({ enabled: cfg.enabled, mode: cfg.mode, port: cfg.port, redirect: !!cfg.redirect,
+      listening: tls.isListening(), certPresent: tls.certsExist(),
+      notAfter: cfg.notAfter || null, dnsName: cfg.dnsName || null, provisionedAt: cfg.provisionedAt || null });
+  });
   app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app }));
   app.use('/api/layouts', rc, layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({

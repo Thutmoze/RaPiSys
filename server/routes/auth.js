@@ -68,6 +68,12 @@ export function authRouter({ auth, loadSettings }) {
 
   // -- login / logout / whoami --
   r.post('/login', async (req, res) => {
+    // Login sends a password — refuse over plain HTTP (loopback exempt) so
+    // credentials are never transmitted unencrypted.
+    if (!connectionIsSecure(req)) {
+      return res.status(426).json({ error: 'HTTPS required', code: 'https_required',
+        detail: 'This connection is not encrypted. Enable HTTPS (or use the secure URL) before signing in.' });
+    }
     try {
       const { username, password, code } = req.body || {};
       const token = auth.login(username, password, code, req.ip, req.headers['user-agent']);

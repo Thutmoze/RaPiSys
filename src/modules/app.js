@@ -212,11 +212,18 @@ function showLogin() {
   if (loginPromise) return loginPromise;       // one modal at a time
   loginPromise = new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay');
+    const insecure = location.protocol !== 'https:'
+      && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
     ov.innerHTML = `
       <div class="wizard card login-card">
         <h2><span class="wz-cyan">Ra</span><span class="wz-purple">Pi</span>Sys admin</h2>
         <p class="wz-lead">This action requires the administrator account.</p>
-        <div class="wz-form">
+        ${insecure ? `
+        <div class="wz-https-gate" data-lg="gate">
+          <p class="wz-hint">⚠ This connection is <b>not encrypted</b>. Signing in here would send your password in clear text, so login is disabled over plain HTTP.</p>
+          <div class="wz-row" data-lg="gateactions"><span data-lg="gatemsg">Checking for a secure address…</span></div>
+        </div>` : ''}
+        <div class="wz-form" data-lg="form" ${insecure ? 'hidden' : ''}>
           <label>Username <input data-lg="user" autocomplete="username"></label>
           <label>Password <input data-lg="pass" type="password" autocomplete="current-password"></label>
           <label data-lg="codewrap">Authenticator code <input data-lg="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></label>
@@ -228,11 +235,38 @@ function showLogin() {
         </div>
       </div>`;
     document.body.appendChild(ov);
+    const done = (ok) => { ov.remove(); loginPromise = null; resolve(ok); };
+
+    // Over plain HTTP: figure out whether HTTPS is available and guide the user
+    // to the secure URL (or to enabling HTTPS) instead of accepting a password.
+    if (insecure) {
+      const acts = $('[data-lg=gateactions]', ov);
+      const msg = $('[data-lg=gatemsg]', ov);
+      api('/tls/status').then((st) => {
+        if (st.enabled && st.listening) {
+          const url = `https://${location.hostname}:${st.port}/`;
+          acts.innerHTML = `<a class="action-btn wz-primary" href="${url}" style="text-decoration:none">Go to secure address →</a><button class="action-btn set-btn-cancel" data-lg="cancel2">Cancel</button>`;
+          msg.remove?.();
+          $('[data-lg=cancel2]', ov).onclick = () => done(false);
+        } else {
+          // HTTPS not enabled yet — this requires admin, which requires login,
+          // which requires HTTPS: a deadlock only resolvable from a trusted path.
+          acts.innerHTML = `<button class="action-btn set-btn-cancel" data-lg="cancel2">Close</button>`;
+          msg.outerHTML = '<p class="wz-hint">HTTPS isn\'t enabled yet. Enable it from a secure/local session (or run the deploy step), then sign in over HTTPS. A password is never accepted over plain HTTP.</p>';
+          $('[data-lg=cancel2]', ov).onclick = () => done(false);
+        }
+      }).catch(() => {
+        acts.innerHTML = `<button class="action-btn set-btn-cancel" data-lg="cancel2">Close</button>`;
+        $('[data-lg=cancel2]', ov).onclick = () => done(false);
+      });
+      ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(false); });
+      return;
+    }
+
     // MFA is per-admin choice: hide the code field when it's disabled.
     api('/auth/me').then((me) => {
       if (me.mfaEnabled === false) $('[data-lg=codewrap]', ov).hidden = true;
     }).catch(() => {});
-    const done = (ok) => { ov.remove(); loginPromise = null; resolve(ok); };
     $('[data-lg=cancel]', ov).onclick = () => done(false);
     const submit = async () => {
       const stat = $('[data-lg=status]', ov);
