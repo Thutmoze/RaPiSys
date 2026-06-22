@@ -300,9 +300,9 @@ export async function initOverviewLayout() {
 
   if (rendered) return;
   savedLayout = await fetchLayout();
-  // Render the selected dashboard. 'default' with no saved layout → native
-  // defaults; any other (or an explicitly-saved) dashboard → its grid (which may
-  // legitimately be empty for a freshly-created dashboard).
+  // Built-in 'default' with no saved layout → native defaults; any other
+  // dashboard with no layout → empty (a freshly-created dashboard).
+  if (savedLayout == null && currentDash !== 'default') savedLayout = [];
   if (savedLayout || currentDash !== 'default') {
     grid = buildGrid({ editable: false });
     maybeShowEmptyHint();
@@ -320,6 +320,9 @@ async function switchDashboard(id) {
   if (grid) { teardownGrid(); grid = null; }
   removeEmptyHint();
   savedLayout = await fetchLayout();
+  // A non-default dashboard with no stored layout starts EMPTY (treat null as an
+  // empty layout, not the all-widgets default which is only for built-in default).
+  if (savedLayout == null && currentDash !== 'default') savedLayout = [];
   if (savedLayout || currentDash !== 'default') {
     grid = buildGrid({ editable: false });
     maybeShowEmptyHint();
@@ -540,7 +543,7 @@ function refreshToolbarPalette() {
   const present = new Set(grid.engine.nodes.map((n) => n.el.getAttribute('gs-id')));
   const missing = OVERVIEW_WIDGETS.filter((w) => !present.has(w.id) && findNode(w));
   pal.innerHTML = missing.length
-    ? `<span class="layout-palette-label">Hidden:</span>` + missing.map((w) =>
+    ? `<span class="layout-palette-label">Add cards:</span>` + missing.map((w) =>
         `<button class="layout-chip" data-add="${w.id}">+ ${w.title}</button>`).join('')
     : '';
   pal.querySelectorAll('[data-add]').forEach((b) => b.onclick = () => addWidget(b.dataset.add));

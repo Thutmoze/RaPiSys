@@ -7,7 +7,9 @@ import express from 'express';
 
 // Widget id must be a simple slug; placement values are bounded integers.
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/i;
-const PAGE_RE = /^[a-z0-9][a-z0-9_-]{0,40}$/i;
+// A page key is a slug, optionally with a single ':<id>' suffix for per-dashboard
+// overview layouts (e.g. 'overview:d1abc'). Bounded length, no other punctuation.
+const PAGE_RE = /^[a-z0-9][a-z0-9_-]{0,40}(:[a-z0-9][a-z0-9_-]{0,40})?$/i;
 const NAME_RE = /^[a-z0-9][a-z0-9 _-]{0,40}$/i;
 
 function sanitizeLayout(input) {

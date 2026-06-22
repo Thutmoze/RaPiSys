@@ -5376,23 +5376,21 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
   background: transparent; border: none; box-shadow: none; margin: 0;
 }
 
-/* --- Overview dashboard tabs --- */
-.dash-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  padding: 0 0 12px; margin-bottom: 4px; }
-.dash-tab { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  background: var(--bg-card, rgba(17,17,17,0.8)); border: 1px solid var(--border-color);
-  color: var(--text-secondary); font-size: 13px; font-weight: 600; font-family: inherit;
-  padding: 7px 14px; border-radius: 10px; transition: var(--transition); }
-.dash-tab:hover { color: var(--text-primary); border-color: var(--text-muted); }
-.dash-tab-active { color: var(--accent-cyan); border-color: rgba(0,212,255,0.45);
-  background: rgba(0,212,255,0.08); }
-.dash-tab-edit, .dash-tab-del { font-size: 12px; opacity: 0.7; padding: 0 2px; border-radius: 4px; }
+/* --- Overview dashboard tabs (match the section page-tab underline style) --- */
+.dash-tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color); padding: 0; margin-bottom: 16px; }
+.dash-tab { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--text-muted); font-size: 14px; font-weight: 600; font-family: inherit;
+  padding: 10px 16px; transition: var(--transition); }
+.dash-tab:hover { color: var(--text-secondary); }
+.dash-tab-active { color: var(--accent-cyan); border-bottom-color: var(--accent-cyan); }
+.dash-tab-edit, .dash-tab-del { font-size: 12px; opacity: 0.65; padding: 0 2px; border-radius: 4px; }
 .dash-tab-edit:hover { opacity: 1; color: var(--accent-cyan); }
 .dash-tab-del:hover { opacity: 1; color: #ef4444; }
-.dash-tab-add { cursor: pointer; background: none; border: 1px dashed var(--border-color);
-  color: var(--text-muted); font-size: 16px; line-height: 1; width: 34px; height: 34px;
-  border-radius: 10px; transition: var(--transition); }
-.dash-tab-add:hover { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+.dash-tab-add { cursor: pointer; background: none; border: none; color: var(--text-muted);
+  font-size: 18px; line-height: 1; padding: 8px 12px; margin-bottom: -1px; transition: var(--transition); }
+.dash-tab-add:hover { color: var(--accent-cyan); }
 .dash-empty-hint { text-align: center; color: var(--text-muted); font-size: 14px; padding: 48px 16px; }
 
 /* --- edit-mode chrome (only while body.layout-editing) --- */
