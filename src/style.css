@@ -5141,6 +5141,9 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-cascade-h.up-cascade-sel { color: var(--accent-cyan); }
 .up-cascade-h.up-cascade-extra { color: #f59e0b; }
 .up-cascade-h.up-cascade-rem { color: #ef4444; }
+.up-cascade-list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; margin-top: 2px; }
+.up-cascade-pkg { display: block; font-size: 13px; font-weight: 700; color: #ffffff;
+  font-family: ui-monospace, monospace; line-height: 1.5; }
 /* stub-changelog explanatory note */
 .up-cl-stubnote { font-size: 12px; color: var(--text-secondary); line-height: 1.55;
   background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3);

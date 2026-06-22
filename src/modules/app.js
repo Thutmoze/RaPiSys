@@ -3581,10 +3581,19 @@ pageRenderers.updates = (() => {
     // Run apt's dry-run first so we can show the FULL set of packages that will
     // actually change — including extras pulled in (e.g. selecting one Docker
     // package pulls in the others), not just what the user ticked.
-    toast('info', 'Updates', 'Analyzing what will change…');
+    // Show a progress modal while the (potentially slow) simulation runs.
+    const analyzing = el('div', 'wizard-overlay up-install-overlay');
+    analyzing.innerHTML = `
+      <div class="up-install-card" role="dialog" aria-modal="true">
+        <div class="up-install-head"><div class="up-install-title"><span class="up-spinner"></span><b>Analyzing ${esc(label)}</b></div></div>
+        <div class="up-install-bar"><div class="up-install-bar-fill" style="width:40%;animation:recIndeterminate 1.25s ease-in-out infinite"></div></div>
+        <div class="up-install-status">Asking apt what will change — selected packages plus any dependencies…</div>
+      </div>`;
+    document.body.appendChild(analyzing);
     let plan = null;
     try { const r = await api('/updates/simulate', { method: 'POST', body: { packages } }); plan = r.plan || ''; }
     catch (e) { plan = null; toast('error', 'Updates', `Could not analyze dependencies: ${e.message}`); }
+    analyzing.remove();
 
     let extras = [], removed = [];
     if (plan) {
@@ -3593,9 +3602,14 @@ pageRenderers.updates = (() => {
       extras = [...new Set([...parsed.install, ...parsed.upgrade])].filter((p) => !selectedSet.has(p));
     }
 
-    const block = (title, arr, cls) => arr.length
-      ? `<div class="up-cascade-grp"><span class="up-cascade-h ${cls || ''}">${title} (${arr.length})</span><span class="up-confirm-list">${arr.slice(0, 30).map(esc).join(', ')}${arr.length > 30 ? `, +${arr.length - 30} more` : ''}</span></div>`
-      : '';
+    // Each package on its own line, bold white (via .up-cascade-pkg).
+    const block = (title, arr, cls) => {
+      if (!arr.length) return '';
+      const shown = arr.slice(0, 60);
+      const rows = shown.map((p) => `<span class="up-cascade-pkg">${esc(p)}</span>`).join('');
+      const more = arr.length > 60 ? `<span class="inv-dim">+${arr.length - 60} more</span>` : '';
+      return `<div class="up-cascade-grp"><span class="up-cascade-h ${cls || ''}">${title} (${arr.length})</span><div class="up-cascade-list">${rows}${more}</div></div>`;
+    };
     let msg = `Update <b>${packages.length}</b> selected package(s) — ${esc(label)}?`;
     if (plan) {
       msg += `<br><br>${block('You selected', packages, 'up-cascade-sel')}`;
@@ -3604,7 +3618,7 @@ pageRenderers.updates = (() => {
       const total = new Set([...packages, ...extras]).size;
       msg += `<br><span class="inv-dim">${total} package(s) will change in total${removed.length ? `, ${removed.length} removed` : ''}.</span>`;
     } else {
-      msg += `<br><br><span class="up-confirm-list">${packages.slice(0, 20).map(esc).join(', ')}</span><br><br>apt will also pull in any required dependencies.`;
+      msg += `<br><br><div class="up-cascade-list">${packages.slice(0, 30).map((p) => `<span class="up-cascade-pkg">${esc(p)}</span>`).join('')}</div><br>apt will also pull in any required dependencies.`;
     }
     if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true })) return;
     startUpgrade(host, { packages, label });
