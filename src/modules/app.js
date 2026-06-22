@@ -10,6 +10,7 @@
  */
 
 import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs } from './layout.js';
+import { eyeLogoSvg } from './brand.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -403,10 +404,10 @@ export const ICONS = {
   // system: stacked server/units with status dots — distinct from the chip-style
   // 'hardware' glyph; reads as "the machine / the stack".
   system: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><line x1="7" y1="7.5" x2="7" y2="7.5"/><circle cx="7" cy="7.5" r="0.6"/><circle cx="7" cy="16.5" r="0.6"/><line x1="11" y1="7.5" x2="17" y2="7.5"/><line x1="11" y1="16.5" x2="17" y2="16.5"/>',
-  // performance: speedometer gauge with a needle — "how fast / how loaded".
-  performance: '<path d="M4 17a8 8 0 1 1 16 0"/><line x1="12" y1="17" x2="16.5" y2="11.5"/><circle cx="12" cy="17" r="1.3"/><line x1="12" y1="6.5" x2="12" y2="5"/><line x1="5.4" y1="11.6" x2="4" y2="11"/><line x1="18.6" y1="11.6" x2="20" y2="11"/>',
-  // health: a heartbeat pulse inside a protective shield — vitals + protection.
-  health: '<path d="M12 3 5 6v5c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/><path d="M8 11.5h2l1.2-2.2 1.6 4 1.2-1.8H17"/>',
+  // performance: circular speedometer with needle + tick marks.
+  performance: '<circle cx="12" cy="12" r="9"/><path d="M12 12l4.5-4.5"/><circle cx="12" cy="12" r="1.4"/><line x1="12" y1="3.5" x2="12" y2="5.2"/><line x1="20.5" y1="12" x2="18.8" y2="12"/><line x1="3.5" y1="12" x2="5.2" y2="12"/><line x1="5.3" y1="5.3" x2="6.5" y2="6.5"/><line x1="18.7" y1="5.3" x2="17.5" y2="6.5"/>',
+  // health: a heart with a heartbeat line running through it — vitals.
+  health: '<path d="M20.8 8.6c0-2.3-1.9-4.1-4.2-4.1-1.6 0-3 .9-3.7 2.2-.7-1.3-2.1-2.2-3.7-2.2C6.9 4.5 5 6.3 5 8.6c0 4.6 7.8 9.4 7.8 9.4S20.8 13.2 20.8 8.6z"/><path d="M6.8 11.2h2.4l1.3-2.4 1.7 4.3 1.2-1.9H17.4"/>',
   // overview: a refined dashboard — a framed panel with a header bar and tiles.
   overview2: '<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="13" x2="8" y2="17"/><line x1="12" y1="12" x2="12" y2="17"/><line x1="16" y1="14" x2="16" y2="17"/>',
 };
@@ -461,6 +462,16 @@ let activeRenderer = null;
 function buildNav() {
   const rail = el('nav', 'nav-rail');
   rail.setAttribute('aria-label', 'RaPiSys pages');
+
+  // Brand: Eye-of-Horus logo + wordmark at the top of the rail. When the rail is
+  // collapsed, the .nav-label (title) hides and only the logo tile remains —
+  // same mechanism the nav items use.
+  const brand = el('a', 'nav-brand', `
+    <span class="nav-brand-logo logo-icon">${eyeLogoSvg()}</span>
+    <span class="nav-label nav-brand-name"><span class="wz-cyan">Ra</span><span class="brand-pi">Pi</span><span class="wz-cyan">Sys</span></span>`);
+  brand.href = '#/overview';
+  brand.title = 'RaPiSys';
+  rail.appendChild(brand);
 
   // Collapse toggle (state persisted in localStorage; this is the Pi-served app).
   const collapsed = localStorage.getItem('rapisys.navCollapsed') === '1';
