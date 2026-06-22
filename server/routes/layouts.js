@@ -38,20 +38,39 @@ export function layoutsRouter({ layoutsRepo, requireControl, events }) {
 
   // ---- Overview dashboards (admin-only: list/add/rename/delete/select) ------
   // Registered before /:page so 'dashboards' isn't captured as a page param.
+  // Glyph is a key into the frontend's icon library — restrict to a slug so no
+  // arbitrary markup is ever stored or echoed.
+  const GLYPH_RE = /^[a-z][a-z0-9_-]{0,24}$/i;
   r.get('/dashboards', requireControl, (req, res) => {
     res.json(layoutsRepo.listDashboards());
   });
   r.post('/dashboards', requireControl, (req, res) => {
     const name = String(req.body?.name || 'New dashboard');
     if (!NAME_RE.test(name)) return res.status(400).json({ error: 'invalid name' });
-    const d = layoutsRepo.addDashboard(name);
+    const glyph = req.body?.glyph;
+    if (glyph != null && !GLYPH_RE.test(String(glyph))) return res.status(400).json({ error: 'invalid glyph' });
+    const d = layoutsRepo.addDashboard(name, glyph || null);
     events?.add('dashboard.added', 'info', { id: d.id });
     res.json({ ok: true, dashboard: d });
+  });
+  r.put('/dashboards/reorder', requireControl, (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids must be an array' });
+    if (ids.length > 50 || ids.some((x) => !PAGE_RE.test(String(x)))) return res.status(400).json({ error: 'invalid ids' });
+    layoutsRepo.reorderDashboards(ids);
+    res.json({ ok: true });
   });
   r.put('/dashboards/:id', requireControl, (req, res) => {
     const name = String(req.body?.name || '');
     if (!NAME_RE.test(name)) return res.status(400).json({ error: 'invalid name' });
-    layoutsRepo.renameDashboard(req.params.id, name);
+    const glyph = req.body?.glyph;
+    if (glyph != null && glyph !== '' && !GLYPH_RE.test(String(glyph))) return res.status(400).json({ error: 'invalid glyph' });
+    // pass glyph through (including '' → cleared) only when the field is present
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'glyph')) {
+      layoutsRepo.renameDashboard(req.params.id, name, glyph || null);
+    } else {
+      layoutsRepo.renameDashboard(req.params.id, name);
+    }
     res.json({ ok: true });
   });
   r.delete('/dashboards/:id', requireControl, (req, res) => {

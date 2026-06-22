@@ -5391,7 +5391,20 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .dash-tab-add { cursor: pointer; background: none; border: none; color: var(--text-muted);
   font-size: 18px; line-height: 1; padding: 8px 12px; margin-bottom: -1px; transition: var(--transition); }
 .dash-tab-add:hover { color: var(--accent-cyan); }
+.dash-tab-glyph { flex-shrink: 0; opacity: 0.9; }
+.dash-tab[draggable="true"] { user-select: none; }
+.dash-tab-dragging { opacity: 0.4; }
 .dash-empty-hint { text-align: center; color: var(--text-muted); font-size: 14px; padding: 48px 16px; }
+/* dashboard create/edit dialog */
+.dash-dialog { max-width: 460px; }
+.dash-dlg-glyphlabel { font-size: 12px; color: var(--text-muted); margin: 4px 0 6px; font-weight: 600; }
+.dash-glyph-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.dash-glyph-opt { display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; height: 42px; border-radius: 10px; cursor: pointer; font-size: 18px;
+  background: var(--bg-secondary, rgba(255,255,255,0.03)); border: 1px solid var(--border-color);
+  color: var(--text-secondary); transition: var(--transition); }
+.dash-glyph-opt:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.dash-glyph-opt.sel { color: var(--accent-cyan); border-color: var(--accent-cyan); background: rgba(0,212,255,0.1); }
 
 /* --- edit-mode chrome (only while body.layout-editing) --- */
 body.layout-editing .rapisys-grid .grid-stack-item-content {

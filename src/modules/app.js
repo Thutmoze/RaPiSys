@@ -9,7 +9,7 @@
  * Everything reuses the existing design tokens (.card, --accent-*, glass).
  */
 
-import { initOverviewLayout, setToast as setLayoutToast } from './layout.js';
+import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs } from './layout.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -389,7 +389,7 @@ function drawSeries(canvas, points, { color = '#00d4ff', unit = '' } = {}) {
 // Router + navigation rail
 // ---------------------------------------------------------------------------
 
-const ICONS = {
+export const ICONS = {
   overview: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
   hardware: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/>',
   sessions: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
@@ -4475,6 +4475,7 @@ async function maybeShowWizard() {
 window.addEventListener('DOMContentLoaded', () => {
   buildNav();
   setLayoutToast(toast);
+  setLayoutGlyphs(ICONS);
   window.addEventListener('hashchange', route);
   route();
   maybeShowWizard();

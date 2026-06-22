@@ -43,6 +43,15 @@ let editing = false;
 let toast = (t, h, m) => console.log(t, h, m);
 export function setToast(fn) { if (typeof fn === 'function') toast = fn; }
 
+// Glyph library is injected from app.js (avoids a circular import). Keys map to
+// inline-SVG path strings; the dashboard tabs and glyph picker use these.
+let GLYPHS = {};
+export function setGlyphs(obj) { if (obj && typeof obj === 'object') GLYPHS = obj; }
+function glyphSvg(key, size = 15) {
+  const p = GLYPHS[key]; if (!p) return '';
+  return `<svg class="dash-tab-glyph" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+}
+
 function findNode(w) {
   // node may be in its home container, inside a grid item, or parked
   return document.querySelector(`[data-rapisys-widget="${w.id}"]`)
@@ -361,9 +370,9 @@ function renderDashTabs() {
     dashboard.parentNode.insertBefore(bar, dashboard);
   }
   bar.innerHTML = dashboards.map((d) => `
-    <button class="dash-tab ${d.id === currentDash ? 'dash-tab-active' : ''}" data-dash="${d.id}">
-      <span class="dash-tab-name">${escHtml(d.name)}</span>
-      ${d.id === currentDash ? `<span class="dash-tab-edit" data-dash-edit="${d.id}" title="Rename">✎</span>${d.id !== 'default' ? `<span class="dash-tab-del" data-dash-del="${d.id}" title="Delete">✕</span>` : ''}` : ''}
+    <button class="dash-tab ${d.id === currentDash ? 'dash-tab-active' : ''}" data-dash="${d.id}" draggable="true">
+      ${glyphSvg(d.glyph)}<span class="dash-tab-name">${escHtml(d.name)}</span>
+      ${d.id === currentDash ? `<span class="dash-tab-edit" data-dash-edit="${d.id}" title="Rename / change icon">✎</span>${d.id !== 'default' ? `<span class="dash-tab-del" data-dash-del="${d.id}" title="Delete">✕</span>` : ''}` : ''}
     </button>`).join('')
     + `<button class="dash-tab-add" data-dash-add title="New dashboard">+</button>`;
 
@@ -372,39 +381,117 @@ function renderDashTabs() {
     switchDashboard(b.dataset.dash);
   });
   bar.querySelector('[data-dash-add]').onclick = addDashboard;
-  bar.querySelectorAll('[data-dash-edit]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); renameDashboard(b.dataset.dashEdit); });
+  bar.querySelectorAll('[data-dash-edit]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); editDashboard(b.dataset.dashEdit); });
   bar.querySelectorAll('[data-dash-del]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); deleteDashboard(b.dataset.dashDel); });
+  wireDashDrag(bar);
+}
+
+// Drag-to-reorder the tabs. On drop, persist the new order to the server.
+let dragId = null;
+function wireDashDrag(bar) {
+  bar.querySelectorAll('[data-dash]').forEach((tab) => {
+    tab.addEventListener('dragstart', (e) => { dragId = tab.dataset.dash; tab.classList.add('dash-tab-dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    tab.addEventListener('dragend', () => { tab.classList.remove('dash-tab-dragging'); dragId = null; });
+    tab.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    tab.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const targetId = tab.dataset.dash;
+      if (!dragId || dragId === targetId) return;
+      const order = dashboards.map((d) => d.id);
+      const from = order.indexOf(dragId), to = order.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      order.splice(to, 0, order.splice(from, 1)[0]);
+      dashboards.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      renderDashTabs();
+      persistOrder(order);
+    });
+  });
+}
+async function persistOrder(ids) {
+  try {
+    await fetch('/api/layouts/dashboards/reorder', {
+      method: 'PUT', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+    });
+  } catch { /* order is best-effort; UI already updated */ }
 }
 
 function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+// Modal dialog for creating/editing a dashboard: name field + glyph picker.
+// Returns { name, glyph } on save, or null on cancel.
+function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save' }) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'wizard-overlay dash-dialog-overlay';
+    const keys = Object.keys(GLYPHS);
+    const chips = keys.map((k) => `
+      <button type="button" class="dash-glyph-opt ${k === glyph ? 'sel' : ''}" data-glyph="${k}" title="${k}">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${GLYPHS[k]}</svg>
+      </button>`).join('');
+    ov.innerHTML = `
+      <div class="wizard card dash-dialog">
+        <h2>${escHtml(title)}</h2>
+        <div class="wz-form">
+          <label>Name <input class="dash-dlg-name" maxlength="40" value="${escHtml(name)}"></label>
+          <div class="dash-dlg-glyphlabel">Icon</div>
+          <div class="dash-glyph-grid">
+            <button type="button" class="dash-glyph-opt ${!glyph ? 'sel' : ''}" data-glyph="" title="none">∅</button>
+            ${chips}
+          </div>
+          <div class="wz-row">
+            <button class="action-btn wz-primary" data-dlg="ok">${escHtml(confirmLabel)}</button>
+            <button class="action-btn set-btn-cancel" data-dlg="cancel">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    let sel = glyph || '';
+    const nameInput = ov.querySelector('.dash-dlg-name');
+    ov.querySelectorAll('[data-glyph]').forEach((b) => b.onclick = () => {
+      sel = b.dataset.glyph;
+      ov.querySelectorAll('[data-glyph]').forEach((x) => x.classList.toggle('sel', x === b));
+    });
+    const done = (val) => { ov.remove(); resolve(val); };
+    ov.querySelector('[data-dlg=cancel]').onclick = () => done(null);
+    ov.querySelector('[data-dlg=ok]').onclick = () => {
+      const n = nameInput.value.trim();
+      if (!n) { nameInput.focus(); return; }
+      done({ name: n, glyph: sel || null });
+    };
+    ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target === nameInput) ov.querySelector('[data-dlg=ok]').click(); });
+    setTimeout(() => nameInput.focus(), 50);
+  });
+}
+
 async function addDashboard() {
-  const name = (window.prompt('Name for the new dashboard:', 'New dashboard') || '').trim();
-  if (!name) return;
+  const out = await dashboardDialog({ title: 'New dashboard', name: 'New dashboard', confirmLabel: 'Create' });
+  if (!out) return;
   try {
     const res = await fetch('/api/layouts/dashboards', {
       method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out),
     });
     if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not create'); return; }
     const { dashboard } = await res.json();
-    dashboards.push({ id: dashboard.id, name });
-    toast('success', 'Dashboard', `“${name}” created — it starts empty; use Edit to add cards.`);
+    dashboards.push({ id: dashboard.id, name: out.name, glyph: out.glyph });
+    toast('success', 'Dashboard', `“${out.name}” created — it starts empty; use Edit to add cards.`);
     switchDashboard(dashboard.id);
   } catch (err) { toast('error', 'Dashboard', err.message); }
 }
 
-async function renameDashboard(id) {
+async function editDashboard(id) {
   const cur = dashboards.find((d) => d.id === id);
-  const name = (window.prompt('Rename dashboard:', cur ? cur.name : '') || '').trim();
-  if (!name || (cur && name === cur.name)) return;
+  if (!cur) return;
+  const out = await dashboardDialog({ title: 'Edit dashboard', name: cur.name, glyph: cur.glyph || null });
+  if (!out) return;
   try {
     const res = await fetch(`/api/layouts/dashboards/${id}`, {
       method: 'PUT', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(out),
     });
-    if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not rename'); return; }
-    if (cur) cur.name = name;
+    if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not save'); return; }
+    cur.name = out.name; cur.glyph = out.glyph;
     renderDashTabs();
   } catch (err) { toast('error', 'Dashboard', err.message); }
 }

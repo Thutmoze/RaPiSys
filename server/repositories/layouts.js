@@ -91,26 +91,29 @@ export function createLayoutsRepo(db) {
     id TEXT PRIMARY KEY, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, created_at INTEGER
   )`);
   db.exec(`CREATE TABLE IF NOT EXISTS dashboard_meta (k TEXT PRIMARY KEY, v TEXT)`);
+  // add glyph column if upgrading from an older schema
+  try { db.exec(`ALTER TABLE dashboards ADD COLUMN glyph TEXT`); } catch { /* already exists */ }
+  // Ensure the built-in default always exists (maps to the legacy overview page).
+  db.prepare(`INSERT OR IGNORE INTO dashboards (id, name, glyph, sort, created_at) VALUES ('default','Overview','overview',0,?)`).run(Date.now());
 
   function listDashboards() {
-    let rows = db.prepare(`SELECT id, name FROM dashboards ORDER BY sort, created_at`).all();
-    if (!rows.length) {
-      // seed the built-in default mapping to the legacy overview layout
-      db.prepare(`INSERT OR IGNORE INTO dashboards (id, name, sort, created_at) VALUES ('default','Overview',0,?)`).run(Date.now());
-      rows = db.prepare(`SELECT id, name FROM dashboards ORDER BY sort, created_at`).all();
-    }
+    const rows = db.prepare(`SELECT id, name, glyph FROM dashboards ORDER BY sort, created_at`).all();
     const active = db.prepare(`SELECT v FROM dashboard_meta WHERE k='active'`).get()?.v || rows[0].id;
     return { dashboards: rows, active };
   }
-  function addDashboard(name) {
+  function addDashboard(name, glyph) {
     const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const maxSort = db.prepare(`SELECT COALESCE(MAX(sort),0)+1 AS s FROM dashboards`).get().s;
-    db.prepare(`INSERT INTO dashboards (id, name, sort, created_at) VALUES (?,?,?,?)`)
-      .run(id, String(name || 'New dashboard').slice(0, 40), maxSort, Date.now());
-    return { id, name };
+    db.prepare(`INSERT INTO dashboards (id, name, glyph, sort, created_at) VALUES (?,?,?,?,?)`)
+      .run(id, String(name || 'New dashboard').slice(0, 40), glyph || null, maxSort, Date.now());
+    return { id, name, glyph: glyph || null };
   }
-  function renameDashboard(id, name) {
-    db.prepare(`UPDATE dashboards SET name=? WHERE id=?`).run(String(name || '').slice(0, 40), id);
+  function renameDashboard(id, name, glyph) {
+    if (glyph !== undefined) {
+      db.prepare(`UPDATE dashboards SET name=?, glyph=? WHERE id=?`).run(String(name || '').slice(0, 40), glyph || null, id);
+    } else {
+      db.prepare(`UPDATE dashboards SET name=? WHERE id=?`).run(String(name || '').slice(0, 40), id);
+    }
   }
   function deleteDashboard(id) {
     if (id === 'default') return false;   // built-in cannot be deleted
@@ -119,6 +122,14 @@ export function createLayoutsRepo(db) {
     const cur = db.prepare(`SELECT v FROM dashboard_meta WHERE k='active'`).get()?.v;
     if (cur === id) db.prepare(`INSERT INTO dashboard_meta (k,v) VALUES ('active','default') ON CONFLICT(k) DO UPDATE SET v='default'`).run();
     return true;
+  }
+  // Reorder: given an array of ids in the desired order, rewrite sort indices.
+  // Any existing dashboard not in the list keeps its relative order after these.
+  function reorderDashboards(ids) {
+    if (!Array.isArray(ids)) return;
+    const upd = db.prepare(`UPDATE dashboards SET sort=? WHERE id=?`);
+    const tx = db.transaction((list) => { list.forEach((id, i) => upd.run(i, id)); });
+    tx(ids.filter((x) => typeof x === 'string'));
   }
   function setActiveDashboard(id) {
     db.prepare(`INSERT INTO dashboard_meta (k,v) VALUES ('active',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(id);
@@ -129,6 +140,6 @@ export function createLayoutsRepo(db) {
   return {
     getActive, saveActive, resetActive,
     getPreset, savePreset, deletePreset, listPresets, getPageBundle,
-    listDashboards, addDashboard, renameDashboard, deleteDashboard, setActiveDashboard, pageForDashboard,
+    listDashboards, addDashboard, renameDashboard, deleteDashboard, reorderDashboards, setActiveDashboard, pageForDashboard,
   };
 }
