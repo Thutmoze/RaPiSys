@@ -82,8 +82,53 @@ export function createLayoutsRepo(db) {
     return out;
   }
 
+  // ---- Overview dashboards registry ----------------------------------------
+  // A user can keep several named Overview dashboards, each with its own layout
+  // stored under page='overview:<id>'. This table tracks the list + order + the
+  // currently-selected one. The built-in 'default' dashboard maps to the legacy
+  // page='overview' layout so existing single-dashboard setups are preserved.
+  db.exec(`CREATE TABLE IF NOT EXISTS dashboards (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, created_at INTEGER
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS dashboard_meta (k TEXT PRIMARY KEY, v TEXT)`);
+
+  function listDashboards() {
+    let rows = db.prepare(`SELECT id, name FROM dashboards ORDER BY sort, created_at`).all();
+    if (!rows.length) {
+      // seed the built-in default mapping to the legacy overview layout
+      db.prepare(`INSERT OR IGNORE INTO dashboards (id, name, sort, created_at) VALUES ('default','Overview',0,?)`).run(Date.now());
+      rows = db.prepare(`SELECT id, name FROM dashboards ORDER BY sort, created_at`).all();
+    }
+    const active = db.prepare(`SELECT v FROM dashboard_meta WHERE k='active'`).get()?.v || rows[0].id;
+    return { dashboards: rows, active };
+  }
+  function addDashboard(name) {
+    const id = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const maxSort = db.prepare(`SELECT COALESCE(MAX(sort),0)+1 AS s FROM dashboards`).get().s;
+    db.prepare(`INSERT INTO dashboards (id, name, sort, created_at) VALUES (?,?,?,?)`)
+      .run(id, String(name || 'New dashboard').slice(0, 40), maxSort, Date.now());
+    return { id, name };
+  }
+  function renameDashboard(id, name) {
+    db.prepare(`UPDATE dashboards SET name=? WHERE id=?`).run(String(name || '').slice(0, 40), id);
+  }
+  function deleteDashboard(id) {
+    if (id === 'default') return false;   // built-in cannot be deleted
+    db.prepare(`DELETE FROM dashboards WHERE id=?`).run(id);
+    db.prepare(`DELETE FROM layouts WHERE page=?`).run(`overview:${id}`);
+    const cur = db.prepare(`SELECT v FROM dashboard_meta WHERE k='active'`).get()?.v;
+    if (cur === id) db.prepare(`INSERT INTO dashboard_meta (k,v) VALUES ('active','default') ON CONFLICT(k) DO UPDATE SET v='default'`).run();
+    return true;
+  }
+  function setActiveDashboard(id) {
+    db.prepare(`INSERT INTO dashboard_meta (k,v) VALUES ('active',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`).run(id);
+  }
+  // Map a dashboard id to its layouts-table page key ('default' → legacy 'overview').
+  function pageForDashboard(id) { return id === 'default' ? 'overview' : `overview:${id}`; }
+
   return {
     getActive, saveActive, resetActive,
     getPreset, savePreset, deletePreset, listPresets, getPageBundle,
+    listDashboards, addDashboard, renameDashboard, deleteDashboard, setActiveDashboard, pageForDashboard,
   };
 }

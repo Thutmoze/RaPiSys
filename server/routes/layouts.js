@@ -34,6 +34,35 @@ function sanitizeLayout(input) {
 export function layoutsRouter({ layoutsRepo, requireControl, events }) {
   const r = express.Router();
 
+  // ---- Overview dashboards (admin-only: list/add/rename/delete/select) ------
+  // Registered before /:page so 'dashboards' isn't captured as a page param.
+  r.get('/dashboards', requireControl, (req, res) => {
+    res.json(layoutsRepo.listDashboards());
+  });
+  r.post('/dashboards', requireControl, (req, res) => {
+    const name = String(req.body?.name || 'New dashboard');
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'invalid name' });
+    const d = layoutsRepo.addDashboard(name);
+    events?.add('dashboard.added', 'info', { id: d.id });
+    res.json({ ok: true, dashboard: d });
+  });
+  r.put('/dashboards/:id', requireControl, (req, res) => {
+    const name = String(req.body?.name || '');
+    if (!NAME_RE.test(name)) return res.status(400).json({ error: 'invalid name' });
+    layoutsRepo.renameDashboard(req.params.id, name);
+    res.json({ ok: true });
+  });
+  r.delete('/dashboards/:id', requireControl, (req, res) => {
+    const ok = layoutsRepo.deleteDashboard(req.params.id);
+    if (!ok) return res.status(400).json({ error: 'cannot delete the built-in dashboard' });
+    events?.add('dashboard.deleted', 'info', { id: req.params.id });
+    res.json({ ok: true });
+  });
+  r.post('/dashboards/:id/select', requireControl, (req, res) => {
+    layoutsRepo.setActiveDashboard(req.params.id);
+    res.json({ ok: true });
+  });
+
   // Active layout for a page (null → upstream default positions).
   r.get('/:page', (req, res) => {
     if (!PAGE_RE.test(req.params.page)) return res.status(400).json({ error: 'bad page' });
