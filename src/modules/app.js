@@ -3374,6 +3374,17 @@ pageRenderers.updates = (() => {
     ev.addEventListener('error', () => { ev.close(); logCache[pkg] = { plain: 'Download failed.' }; if (expandedLog === pkg) render(host); });
   }
 
+  // Best-effort link to upstream release notes for packages with stub changelogs.
+  // Conservative: only emits a link for known vendor families we can map safely.
+  function upstreamReleaseLink(pkg) {
+    const p = String(pkg || '');
+    // Docker's distributed plugins/components → moby/docker GitHub releases.
+    if (/^docker-/.test(p) || p === 'docker-ce' || p === 'containerd.io') {
+      return `Upstream release notes: <a href="https://github.com/docker/docker/releases" target="_blank" rel="noopener" class="up-cl-extlink">Docker releases ↗</a>`;
+    }
+    return 'Check the project\'s own release page for what changed.';
+  }
+
   // Parse a changelog into version sections (header + body), newest first.
   function parseSections(body) {
     const lines = String(body || '').split('\n');
@@ -3415,6 +3426,23 @@ pageRenderers.updates = (() => {
       const instE = parseVerEpoch(installed);
       const de = candE != null ? candE : (instE != null ? instE : 0);
       const sections = parseSections(data.changelog).filter((s) => s.version !== '(header)');
+      // Detect a "stub" changelog: entries that carry no real notes — just a
+      // version header and maybe a bare "Version: x" line (common in vendor-built
+      // packages like Docker's, which don't ship hand-written Debian changelogs).
+      const isStub = (() => {
+        if (!sections.length) return false;
+        const meaningful = sections.some((s) => s.lines.slice(1).some((ln) => {
+          const t = ln.trim();
+          if (!t || t.startsWith('--')) return false;          // blank / maintainer trailer
+          const bullet = t.replace(/^[*-]\s*/, '');
+          if (/^version:\s*\S+$/i.test(bullet)) return false;  // bare "Version: vX"
+          return bullet.length > 0;                            // any other content = real note
+        }));
+        return !meaningful;
+      })();
+      const stubNote = isStub
+        ? `<p class="up-cl-stubnote">This package ships only a minimal changelog — its build doesn't include detailed release notes${/docker/i.test(pkg) ? ` (Docker's packages are built without hand-written Debian changelogs)` : ''}. ${upstreamReleaseLink(pkg)}</p>`
+        : '';
       // newest = first section; expand it by default on first render
       if (activeIdx === null && sections.length) { activeIdx = 0; expanded.add(0); }
       const nav = sections.map((s, i) => {
@@ -3436,7 +3464,7 @@ pageRenderers.updates = (() => {
             ${open ? `<pre class="up-cl-pre ${isNewest ? 'up-cl-pre-cyan' : ''}">${hlSec(restLines)}</pre>` : ''}
           </div>`;
       }).join('');
-      return `<div class="up-cl-layout">
+      return `${stubNote}<div class="up-cl-layout">
           <div class="up-cl-nav">${nav || '<span class="up-cl-empty">No versions</span>'}</div>
           <div class="up-cl-content" data-cl="content">${bodyHtml}</div>
         </div>`;
@@ -3549,13 +3577,51 @@ pageRenderers.updates = (() => {
 
   async function confirmUpgrade(host, { packages, label }) {
     if (!packages || !packages.length) { toast('info', 'Updates', 'Nothing selected'); return; }
-    // Show the list and let apt's simulation reveal any extra deps pulled in.
-    const preview = packages.slice(0, 20).map(esc).join(', ') + (packages.length > 20 ? `, +${packages.length - 20} more` : '');
-    const msg = `Update <b>${packages.length}</b> package(s) — ${esc(label)}?`
-      + `<br><br><span class="up-confirm-list">${preview}</span>`
-      + `<br><br>apt will also pull in any required dependencies. Output streams live below.`;
+    const selectedSet = new Set(packages);
+    // Run apt's dry-run first so we can show the FULL set of packages that will
+    // actually change — including extras pulled in (e.g. selecting one Docker
+    // package pulls in the others), not just what the user ticked.
+    toast('info', 'Updates', 'Analyzing what will change…');
+    let plan = null;
+    try { const r = await api('/updates/simulate', { method: 'POST', body: { packages } }); plan = r.plan || ''; }
+    catch (e) { plan = null; toast('error', 'Updates', `Could not analyze dependencies: ${e.message}`); }
+
+    let extras = [], removed = [];
+    if (plan) {
+      const parsed = parseAptPlan(plan);
+      removed = parsed.remove;
+      extras = [...new Set([...parsed.install, ...parsed.upgrade])].filter((p) => !selectedSet.has(p));
+    }
+
+    const block = (title, arr, cls) => arr.length
+      ? `<div class="up-cascade-grp"><span class="up-cascade-h ${cls || ''}">${title} (${arr.length})</span><span class="up-confirm-list">${arr.slice(0, 30).map(esc).join(', ')}${arr.length > 30 ? `, +${arr.length - 30} more` : ''}</span></div>`
+      : '';
+    let msg = `Update <b>${packages.length}</b> selected package(s) — ${esc(label)}?`;
+    if (plan) {
+      msg += `<br><br>${block('You selected', packages, 'up-cascade-sel')}`;
+      if (extras.length) msg += block('Also installed/upgraded as dependencies', extras, 'up-cascade-extra');
+      if (removed.length) msg += block('Removed', removed, 'up-cascade-rem');
+      const total = new Set([...packages, ...extras]).size;
+      msg += `<br><span class="inv-dim">${total} package(s) will change in total${removed.length ? `, ${removed.length} removed` : ''}.</span>`;
+    } else {
+      msg += `<br><br><span class="up-confirm-list">${packages.slice(0, 20).map(esc).join(', ')}</span><br><br>apt will also pull in any required dependencies.`;
+    }
     if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true })) return;
     startUpgrade(host, { packages, label });
+  }
+
+  // Parse `apt-get -s` plan text into the packages it would install/upgrade/remove.
+  function parseAptPlan(plan) {
+    const out = { install: [], upgrade: [], remove: [] };
+    for (const line of String(plan || '').split('\n')) {
+      let m;
+      if ((m = line.match(/^Inst\s+(\S+)/))) {
+        out[/\[/.test(line) ? 'upgrade' : 'install'].push(m[1]);
+      } else if ((m = line.match(/^Remv\s+(\S+)/))) {
+        out.remove.push(m[1]);
+      }
+    }
+    return out;
   }
 
   function startUpgrade(host, { packages = null, full = false, label }) {

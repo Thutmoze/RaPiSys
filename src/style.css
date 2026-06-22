@@ -5135,6 +5135,17 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .up-chip.up-filter.up-filter-active.up-chip-kern { background: #a855f7; color: #120420; border-color: #a855f7; }
 .up-confirm-list { display: inline-block; font-size: 12px; color: var(--text-secondary);
   line-height: 1.6; word-break: break-word; max-height: 120px; overflow-y: auto; }
+/* update cascade preview groups in the confirm dialog */
+.up-cascade-grp { display: block; margin: 8px 0; }
+.up-cascade-h { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; color: var(--text-muted); }
+.up-cascade-h.up-cascade-sel { color: var(--accent-cyan); }
+.up-cascade-h.up-cascade-extra { color: #f59e0b; }
+.up-cascade-h.up-cascade-rem { color: #ef4444; }
+/* stub-changelog explanatory note */
+.up-cl-stubnote { font-size: 12px; color: var(--text-secondary); line-height: 1.55;
+  background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 12px; }
+.up-cl-extlink, .up-cl-stubnote a { color: var(--accent-cyan); }
 
 /* Updates: inline changelog row */
 .up-log-row td { padding: 0 !important; background: var(--bg-primary); }
