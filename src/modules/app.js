@@ -3586,14 +3586,19 @@ pageRenderers.updates = (() => {
     analyzing.innerHTML = `
       <div class="up-install-card" role="dialog" aria-modal="true">
         <div class="up-install-head"><div class="up-install-title"><span class="up-spinner"></span><b>Analyzing ${esc(label)}</b></div></div>
-        <div class="up-install-bar"><div class="up-install-bar-fill" style="width:40%;animation:recIndeterminate 1.25s ease-in-out infinite"></div></div>
+        <div class="up-install-bar"><div class="up-install-bar-fill" data-an="bar" style="width:8%;transition:width 0.3s ease"></div></div>
         <div class="up-install-status">Asking apt what will change — selected packages plus any dependencies…</div>
       </div>`;
     document.body.appendChild(analyzing);
+    // Forward-only creep toward ~90% (never reverses); jumps to 100% on finish.
+    const anBar = analyzing.querySelector('[data-an=bar]');
+    let anPct = 8;
+    const anTick = setInterval(() => { anPct = Math.min(90, anPct + 6); if (anBar) anBar.style.width = anPct + '%'; }, 300);
+    const stopAnalyzing = () => { clearInterval(anTick); if (anBar) anBar.style.width = '100%'; setTimeout(() => analyzing.remove(), 150); };
     let plan = null;
     try { const r = await api('/updates/simulate', { method: 'POST', body: { packages } }); plan = r.plan || ''; }
     catch (e) { plan = null; toast('error', 'Updates', `Could not analyze dependencies: ${e.message}`); }
-    analyzing.remove();
+    stopAnalyzing();
 
     let extras = [], removed = [];
     if (plan) {
