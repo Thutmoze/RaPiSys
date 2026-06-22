@@ -3464,9 +3464,9 @@ pageRenderers.updates = (() => {
             ${open ? `<pre class="up-cl-pre ${isNewest ? 'up-cl-pre-cyan' : ''}">${hlSec(restLines)}</pre>` : ''}
           </div>`;
       }).join('');
-      return `${stubNote}<div class="up-cl-layout">
+      return `<div class="up-cl-layout">
           <div class="up-cl-nav">${nav || '<span class="up-cl-empty">No versions</span>'}</div>
-          <div class="up-cl-content" data-cl="content">${bodyHtml}</div>
+          <div class="up-cl-content" data-cl="content">${bodyHtml}${stubNote}</div>
         </div>`;
     };
     const instTitle = installed ? ` <span class="up-cl-inst">(installed: ${esc(installed)})</span>` : '';
