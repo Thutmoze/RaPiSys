@@ -10,7 +10,7 @@
  */
 
 import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs } from './layout.js';
-import { eyeLogoSvg } from './brand.js';
+import { eyeLogoImg } from './brand.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -463,14 +463,20 @@ function buildNav() {
   const rail = el('nav', 'nav-rail');
   rail.setAttribute('aria-label', 'RaPiSys pages');
 
-  // Brand: Eye-of-Horus logo + wordmark at the top of the rail. When the rail is
-  // collapsed, the .nav-label (title) hides and only the logo tile remains —
-  // same mechanism the nav items use.
-  const brand = el('a', 'nav-brand', `
-    <span class="nav-brand-logo logo-icon">${eyeLogoSvg()}</span>
+  // Brand: Eye-of-Horus logo + wordmark + system name and Live indicator, all at
+  // the top of the rail. When the rail is collapsed, every .nav-label hides and only
+  // the logo tile remains — same mechanism the nav items use.
+  const brand = el('div', 'nav-brand');
+  const brandLink = el('a', 'nav-brand-link', `
+    <span class="nav-brand-logo">${eyeLogoImg()}</span>
     <span class="nav-label nav-brand-name"><span class="wz-cyan">Ra</span><span class="brand-pi">Pi</span><span class="wz-cyan">Sys</span></span>`);
-  brand.href = '#/overview';
-  brand.title = 'RaPiSys';
+  brandLink.href = '#/overview';
+  brandLink.title = 'RaPiSys';
+  brand.appendChild(brandLink);
+  const brandMeta = el('div', 'nav-label nav-brand-meta', `
+    <span class="hostname" id="hostname">Loading...</span>
+    <span class="status-indicator"><span class="pulse"></span><span class="status-text">Live</span></span>`);
+  brand.appendChild(brandMeta);
   rail.appendChild(brand);
 
   // Collapse toggle (state persisted in localStorage; this is the Pi-served app).

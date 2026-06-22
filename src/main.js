@@ -300,6 +300,7 @@ const MAX_ERRORS_BEFORE_DISCONNECT = 3;
 // Update connection status UI
 function setConnectionStatus(connected) {
   const statusIndicator = document.querySelector('.status-indicator');
+  if (!statusIndicator) { isConnected = connected; return; }
   const statusText = statusIndicator.querySelector('.status-text');
   const pulse = statusIndicator.querySelector('.pulse');
 
@@ -835,8 +836,9 @@ async function updateDashboard() {
     const response = await fetch(`${API_URL}/stats`);
     const stats = await response.json();
 
-    // Update hostname
-    elements.hostname.textContent = stats.os.hostname;
+    // Update hostname (the element lives in the nav brand, built dynamically)
+    const hostnameEl = elements.hostname || document.getElementById('hostname');
+    if (hostnameEl) hostnameEl.textContent = stats.os.hostname;
 
     // Update CPU
     animateValue(elements.cpuValue, prevValues.cpu, stats.cpu.usage);
@@ -1725,17 +1727,17 @@ function togglePause() {
   pauseBtn.classList.toggle('paused', isPaused);
 
   const statusIndicator = document.querySelector('.status-indicator');
-  const statusText = statusIndicator.querySelector('.status-text');
+  const statusText = statusIndicator ? statusIndicator.querySelector('.status-text') : null;
 
   if (isPaused) {
     clearInterval(updateIntervalId);
-    statusIndicator.classList.add('paused');
-    statusText.textContent = 'Paused';
+    if (statusIndicator) statusIndicator.classList.add('paused');
+    if (statusText) statusText.textContent = 'Paused';
     showToast('info', 'Paused', 'Auto-refresh paused. Press P to resume.');
   } else {
     updateIntervalId = setInterval(updateDashboard, UPDATE_INTERVAL);
-    statusIndicator.classList.remove('paused');
-    statusText.textContent = 'Live';
+    if (statusIndicator) statusIndicator.classList.remove('paused');
+    if (statusText) statusText.textContent = 'Live';
     updateDashboard(); // Immediate refresh when resuming
     showToast('success', 'Resumed', 'Auto-refresh resumed');
   }

@@ -4464,15 +4464,27 @@ body.ultra .wireguard-section {
 .nav-label { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
 /* Brand block at the top of the rail: logo tile + wordmark */
 .nav-brand {
-  display: flex; flex-direction: row; align-items: center; gap: 12px;
-  text-decoration: none; padding: 4px 10px 14px; margin-bottom: 6px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+  padding: 4px 10px 14px; margin-bottom: 6px;
   border-bottom: 1px solid var(--border-color); overflow: hidden; white-space: nowrap;
 }
-.nav-brand-logo { width: 40px; height: 40px; flex-shrink: 0; }
-.nav-brand-logo svg { width: 100%; height: 100%; display: block; }
+.nav-brand-link {
+  display: flex; flex-direction: row; align-items: center; gap: 12px;
+  text-decoration: none;
+}
+.nav-brand-logo { width: 40px; height: 40px; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+  border-radius: 11px; box-shadow: var(--glow-cyan);
+  display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.nav-brand-logo svg, .nav-brand-logo img { width: 100%; height: 100%; display: block; }
 .nav-brand-name { font-size: 20px; font-weight: 800; letter-spacing: 0.01em; }
 .brand-pi { color: #e11d63; }
-.logo-eye { width: 100%; height: 100%; display: block; }
+.logo-eye { width: 100%; height: 100%; display: block; object-fit: contain; }
+/* relocated system name + Live indicator, sitting under the wordmark in the rail */
+.nav-brand-meta { display: flex; flex-direction: row; align-items: center; gap: 8px;
+  padding-left: 2px; font-size: 12px; min-width: 0; }
+.nav-brand-meta .hostname { color: var(--text-secondary); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 .nav-item:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
 .nav-item.active {
   color: var(--accent-cyan);
@@ -4492,7 +4504,8 @@ body .container { margin-left: 212px; width: auto; transition: margin-left 0.18s
 body.nav-collapsed .nav-rail { width: 64px; padding-left: 8px; padding-right: 8px; align-items: center; }
 body.nav-collapsed .nav-item { width: 48px; justify-content: center; padding: 0; gap: 0; }
 body.nav-collapsed .nav-label { display: none; }
-body.nav-collapsed .nav-brand { justify-content: center; padding: 4px 0 12px; gap: 0; }
+body.nav-collapsed .nav-brand { align-items: center; padding: 4px 0 12px; gap: 0; }
+body.nav-collapsed .nav-brand-link { justify-content: center; gap: 0; }
 body.nav-collapsed .container { margin-left: 64px; }
 
 .rapisys-grid {
