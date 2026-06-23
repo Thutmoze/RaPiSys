@@ -137,7 +137,18 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   let remoteAccessRef = null;   // set once remote-access is constructed (below)
   const sessions = createSessionsCollector({ bridgeSessions: () => (remoteAccessRef ? remoteAccessRef.liveSessions() : []) });
-  const network = createNetworkCollector();
+
+  // Pi-hole config is read synchronously by the collector, so keep a live cache
+  // that is refreshed at init and whenever the config route saves a change.
+  let piholeConfigCache = settings.rapisys?.pihole || null;
+  const refreshPiholeConfig = async () => {
+    piholeConfigCache = (await loadSettings()).rapisys?.pihole || null;
+    return piholeConfigCache;
+  };
+  const network = createNetworkCollector({
+    getPiholeConfig: () => piholeConfigCache,
+    getPiholePassword: () => { try { return secretsFacade.get('pihole.password'); } catch { return null; } },
+  });
   const reportsFacade = new Proxy({}, { get: (_, m) => (...a) => reportsRepo[m](...a) });
   const reports = createReports({
     metricsRepo: metricsFacade, eventsRepo: eventsFacade, reportsRepo: reportsFacade,
@@ -249,7 +260,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/hardware', rc, hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
   app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
-  app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl }));
+  app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,
+    loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig }));
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));

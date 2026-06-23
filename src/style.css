@@ -4970,6 +4970,40 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-bar-empty { background: var(--bg-secondary) !important; opacity: 0.25; min-height: 2px; }
 .net-dns-note { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 4px 0 0; }
 
+/* Pi-hole DNS analytics panel */
+.net-dns-cog { margin-left: auto; padding: 2px 8px; font-size: 14px; line-height: 1; }
+.net-pihole-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.net-pihole-badge { font-size: 11px; font-weight: 700; color: var(--accent-cyan);
+  background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.3); border-radius: 6px; padding: 2px 8px; }
+.net-pihole-block { font-size: 12px; font-weight: 600; }
+.net-pihole-block.on { color: var(--accent-green); }
+.net-pihole-block.off { color: var(--accent-red); }
+.net-pihole-head .net-toggle { margin-left: auto; padding: 4px 10px; font-size: 12px; }
+.net-pihole-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.net-pi-stat { display: flex; flex-direction: column; gap: 2px; padding: 10px; background: var(--bg-secondary); border-radius: 10px; }
+.net-pi-n { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+.net-pi-n.net-pi-red { color: #e11d63; }
+.net-pi-l { font-size: 11px; color: var(--text-muted); }
+.net-pihole-cats { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.net-cat-row { display: grid; grid-template-columns: 90px 1fr 44px; align-items: center; gap: 10px; font-size: 12px; }
+.net-cat-l { color: var(--text-secondary); }
+.net-cat-permitted span { background: var(--accent-green) !important; }
+.net-cat-blocked span { background: #e11d63 !important; }
+.net-cat-cached span { background: var(--accent-cyan) !important; }
+.net-cat-forwarded span { background: var(--accent-purple) !important; }
+.net-pihole-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.net-pihole-col .net-proto-summary { font-weight: 600; color: var(--text-secondary); }
+.net-bar-ok span { background: var(--accent-green) !important; }
+.net-bar-block span { background: #e11d63 !important; }
+.net-pi-form { display: flex; flex-direction: column; gap: 10px; }
+.net-pi-form .set-kv input, .net-pi-form .set-kv select { background: var(--bg-secondary);
+  border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);
+  padding: 6px 10px; font-size: 13px; min-width: 160px; }
+.net-pi-testresult { font-size: 12px; }
+.net-pi-testresult.ok { color: var(--accent-green); }
+.net-pi-testresult.bad { color: var(--accent-red); }
+@media (max-width: 640px) { .net-pihole-stats { grid-template-columns: repeat(2, 1fr); } .net-pihole-cols { grid-template-columns: 1fr; } }
+
 /* Network v2: clickable colored interfaces, period filter, protocol drill-down */
 .net-hint { font-size: 11px; color: var(--text-muted); margin: 8px 0 4px; }
 .net-iface { display: grid; grid-template-columns: auto auto auto 1fr auto; gap: 10px;

@@ -2,7 +2,7 @@
 
 import express from 'express';
 
-export function networkRouter({ network, metricsRepo, requireControl }) {
+export function networkRouter({ network, metricsRepo, requireControl, loadSettings, saveSettings, withFileLock, secrets, refreshPiholeConfig }) {
   const r = express.Router();
 
   // Live snapshot (everything in one call for the page's first paint).
@@ -55,6 +55,73 @@ export function networkRouter({ network, metricsRepo, requireControl }) {
   // Opt-in DNS logging forwarder in front of MagicDNS (installs dnsmasq).
   r.post('/dns/forwarder', requireControl, async (req, res) => {
     try { res.json(await network.dnsForwarder(!!req.body?.enable)); }
+    catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
+  // ---- Pi-hole DNS analytics ---------------------------------------------
+
+  // Current Pi-hole config (password is never returned — write-only).
+  r.get('/dns/pihole/config', async (req, res) => {
+    try {
+      const c = (await loadSettings()).rapisys?.pihole || {};
+      res.json({
+        enabled: !!c.enabled,
+        host: c.host || '127.0.0.1',
+        port: c.port || 80,
+        scheme: c.scheme || 'http',
+        version: c.version || 'auto',
+        hasPassword: secrets.has('pihole.password'),
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Live Pi-hole snapshot (domains, blocked, categories, totals, blocking state).
+  r.get('/dns/pihole/status', async (req, res) => {
+    try {
+      const snap = await network.piholeSnapshot(Number(req.query.limit) || 12);
+      if (!snap) return res.json({ configured: false });
+      res.json({ configured: true, ...snap });
+    } catch (err) { res.status(502).json({ configured: true, available: false, error: err.message }); }
+  });
+
+  // Save Pi-hole config (host/port/scheme/version/enabled + optional password).
+  r.post('/dns/pihole/config', requireControl, async (req, res) => {
+    const b = req.body || {};
+    const host = String(b.host || '127.0.0.1').trim().replace(/[^a-zA-Z0-9.\-:]/g, '').slice(0, 100);
+    const port = Math.min(Math.max(parseInt(b.port, 10) || 80, 1), 65535);
+    const scheme = b.scheme === 'https' ? 'https' : 'http';
+    const version = ['5', '6', 'auto'].includes(String(b.version)) ? String(b.version) : 'auto';
+    const enabled = !!b.enabled;
+    try {
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        s.rapisys.pihole = { enabled, host, port, scheme, version };
+        await saveSettings(s);
+      });
+      // Password: write-only. Empty string clears it; undefined leaves it intact.
+      if (typeof b.password === 'string') {
+        if (b.password === '') secrets.remove('pihole.password');
+        else if (secrets.encryptionAvailable()) secrets.set('pihole.password', b.password);
+        else return res.status(400).json({ error: 'SECRET_KEY not set — cannot store the Pi-hole password securely' });
+      }
+      await refreshPiholeConfig();
+      network.piholeResetSession();
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Test the Pi-hole connection with the stored config.
+  r.post('/dns/pihole/test', requireControl, async (req, res) => {
+    try { await refreshPiholeConfig(); network.piholeResetSession(); res.json(await network.piholeTest()); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
+  // Enable / temporarily disable Pi-hole blocking.
+  r.post('/dns/pihole/blocking', requireControl, async (req, res) => {
+    const enabled = !!req.body?.enabled;
+    const seconds = req.body?.seconds != null ? Math.max(0, parseInt(req.body.seconds, 10) || 0) : null;
+    try { res.json(await network.piholeSetBlocking(enabled, seconds)); }
     catch (err) { res.status(502).json({ error: err.message }); }
   });
 

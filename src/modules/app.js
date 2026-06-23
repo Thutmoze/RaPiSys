@@ -2267,13 +2267,54 @@ pageRenderers.network = (() => {
     nethogsTimer = setInterval(() => refreshProcsLive(host), 4000);
   }
 
-  // ---- DNS: the Pi's own queries ----
+  // ---- DNS: Pi-hole analytics, dnsmasq logs, or the Pi's own queries ----
   async function refreshDns(host) {
     let snap;
     try { snap = await api('/network'); } catch { return; }
-    const d = snap.dns;
+    const d = snap.dns || {};
     let html;
-    if (d.domains?.length) {
+
+    if (d.source === 'pihole' && d.available !== false) {
+      // Rich Pi-hole view: totals ring, categories, top permitted + blocked.
+      const t = d.totals || {};
+      const pctBlocked = t.percentBlocked != null ? Math.round(t.percentBlocked * 10) / 10 : null;
+      const blockingOn = d.blocking === true || d.blocking === 'enabled';
+      const cats = (d.categories || []).filter((c) => c.count > 0);
+      const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString());
+      const renderDomains = (list, cls) => {
+        if (!list?.length) return '<p class="net-dns-note">No data yet.</p>';
+        const max = Math.max(1, ...list.map((x) => x.count));
+        return list.map((x) => `<div class="net-proto-row net-proto-static">
+            <span class="net-domain">${esc(x.domain)}</span>
+            <span class="net-proto-bar ${cls}"><span style="width:${(x.count / max) * 100}%"></span></span>
+            <span class="net-proto-n">${fmtN(x.count)}</span>
+          </div>`).join('');
+      };
+      html = `<div class="net-pihole-head">
+          <span class="net-pihole-badge">Pi-hole v${d.apiVersion || '6'}</span>
+          <span class="net-pihole-block ${blockingOn ? 'on' : 'off'}">${blockingOn ? 'Blocking on' : 'Blocking paused'}</span>
+          <button class="net-toggle" data-net="${blockingOn ? 'piblockoff' : 'piblockon'}">${blockingOn ? 'Disable 5 min' : 'Enable blocking'}</button>
+        </div>
+        <div class="net-pihole-stats">
+          <div class="net-pi-stat"><span class="net-pi-n">${fmtN(t.total)}</span><span class="net-pi-l">Queries</span></div>
+          <div class="net-pi-stat"><span class="net-pi-n net-pi-red">${fmtN(t.blocked)}</span><span class="net-pi-l">Blocked</span></div>
+          <div class="net-pi-stat"><span class="net-pi-n">${pctBlocked != null ? pctBlocked + '%' : '—'}</span><span class="net-pi-l">% Blocked</span></div>
+          <div class="net-pi-stat"><span class="net-pi-n">${fmtN(t.uniqueDomains)}</span><span class="net-pi-l">Domains</span></div>
+        </div>`;
+      if (cats.length) {
+        html += `<div class="net-pihole-cats">${cats.map((c) => `
+          <div class="net-cat-row"><span class="net-cat-l">${esc(c.label)}</span>
+            <span class="net-proto-bar net-cat-${c.key}"><span style="width:${c.percent}%"></span></span>
+            <span class="net-proto-n">${c.percent}%</span></div>`).join('')}</div>`;
+      }
+      html += `<div class="net-pihole-cols">
+          <div class="net-pihole-col"><div class="net-proto-summary">Top permitted</div>${renderDomains(d.topPermitted, 'net-bar-ok')}</div>
+          <div class="net-pihole-col"><div class="net-proto-summary">Top blocked</div>${renderDomains(d.topBlocked, 'net-bar-block')}</div>
+        </div>`;
+    } else if (d.source === 'pihole' && d.available === false) {
+      html = `<p class="net-dns-note">Pi-hole is configured but unreachable${d.error ? ': ' + esc(d.error) : ''}.</p>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="picfg2">Check Pi-hole settings</button></div>`;
+    } else if (d.domains?.length) {
       const max = Math.max(1, ...d.domains.map((x) => x.queries));
       const label = d.ownQueries ? `Queries initiated by this Pi (${d.source})` : `${(d.totalQueries || 0).toLocaleString()} queries logged`;
       html = `<div class="net-proto-summary">${label}</div>`
@@ -2282,19 +2323,22 @@ pageRenderers.network = (() => {
             <span class="net-proto-bar"><span style="width:${(x.queries / max) * 100}%"></span></span>
             <span class="net-proto-n">${x.queries}</span>
           </div>`).join('');
-      if (d.source === 'dnsmasq') html += `<div class="net-dns-cta"><button class="net-toggle" data-net="dnsoff">disable logging</button></div>`;
+      if (d.source === 'dnsmasq') html += `<div class="net-dns-cta"><button class="net-toggle" data-net="dnsoff">disable logging</button> <button class="net-toggle" data-net="picfg2">Use Pi-hole instead</button></div>`;
     } else if (d.source === 'resolved') {
       html = `<div class="set-kv"><span>Total queries</span><b>${(d.total ?? 0).toLocaleString()}</b></div>
         <div class="set-kv"><span>Cache hits</span><b>${(d.cacheHits ?? 0).toLocaleString()}</b></div>
-        <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>`;
+        <div class="set-kv"><span>Cache misses</span><b>${(d.cacheMisses ?? 0).toLocaleString()}</b></div>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="picfg2">Connect a Pi-hole</button></div>`;
     } else if (d.resolver) {
       html = `<div class="set-kv"><span>Active resolver</span><b>${esc(d.resolver)}</b></div>
-        <p class="net-dns-note">This Pi resolves DNS through ${esc(d.resolver)}. Per-domain query history isn\u2019t exposed by this resolver. You can insert a local logging forwarder to capture queries (reversible).</p>
-        <div class="net-dns-cta"><button class="net-toggle" data-net="fwdon">Enable query logging (local forwarder)</button></div>`;
+        <p class="net-dns-note">This Pi resolves DNS through ${esc(d.resolver)}. Per-domain query history isn\u2019t exposed by this resolver. Insert a local logging forwarder, or connect a Pi-hole for network-wide analytics.</p>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="fwdon">Enable query logging (forwarder)</button> <button class="net-toggle" data-net="picfg2">Connect a Pi-hole</button></div>`;
     } else {
-      html = '<p class="sess-empty">No DNS data available from this Pi\u2019s resolver.</p>';
+      html = `<p class="sess-empty">No DNS data available.</p>
+        <div class="net-dns-cta"><button class="net-toggle" data-net="picfg2">Connect a Pi-hole</button></div>`;
     }
     $('[data-net=dns]', host).innerHTML = html;
+
     const off = $('[data-net=dnsoff]', host);
     if (off) off.onclick = async () => { try { await api('/network/dns/logging', { method: 'POST', body: { enabled: false } }); setTimeout(() => refreshDns(host), 1200); } catch (e) { toast('error', 'DNS', e.message); } };
     const fwdOn = $('[data-net=fwdon]', host);
@@ -2304,11 +2348,72 @@ pageRenderers.network = (() => {
       try { await api('/network/dns/forwarder', { method: 'POST', body: { enable: true } }); toast('success', 'DNS', 'Logging forwarder active'); setTimeout(() => refreshDns(host), 2500); }
       catch (e) {
         toast('error', 'DNS', 'Could not enable query logging');
-        const cta = fwdOn.parentElement;
-        fwdOn.remove();
+        const cta = fwdOn.parentElement; fwdOn.remove();
         const note = el('p', 'net-dns-note'); note.textContent = e.message; cta.appendChild(note);
       }
     };
+    // Pi-hole blocking controls
+    const bOn = $('[data-net=piblockon]', host);
+    if (bOn) bOn.onclick = async () => { try { await api('/network/dns/pihole/blocking', { method: 'POST', body: { enabled: true } }); toast('success', 'Pi-hole', 'Blocking enabled'); setTimeout(() => refreshDns(host), 1000); } catch (e) { toast('error', 'Pi-hole', e.message); } };
+    const bOff = $('[data-net=piblockoff]', host);
+    if (bOff) bOff.onclick = async () => { try { await api('/network/dns/pihole/blocking', { method: 'POST', body: { enabled: false, seconds: 300 } }); toast('info', 'Pi-hole', 'Blocking paused for 5 minutes'); setTimeout(() => refreshDns(host), 1000); } catch (e) { toast('error', 'Pi-hole', e.message); } };
+    // Open the config panel
+    const openCfg = (b) => b && (b.onclick = () => togglePiholeConfig(host, true));
+    openCfg($('[data-net=picfg2]', host));
+  }
+
+  // ---- Pi-hole config panel ----
+  let piCfgOpen = false;
+  async function togglePiholeConfig(host, forceOpen) {
+    const body = $('[data-net=picfgbody]', host);
+    const dnsBody = $('[data-net=dns]', host);
+    if (!body) return;
+    piCfgOpen = forceOpen != null ? forceOpen : !piCfgOpen;
+    if (!piCfgOpen) { body.style.display = 'none'; dnsBody.style.display = ''; return; }
+    body.style.display = ''; dnsBody.style.display = 'none';
+    body.innerHTML = '<p class="net-dns-note">Loading…</p>';
+    let cfg = {};
+    try { cfg = await api('/network/dns/pihole/config'); } catch { /* defaults */ }
+    body.innerHTML = `
+      <div class="net-pi-form">
+        <label class="set-toggle"><input type="checkbox" data-pi="enabled" ${cfg.enabled ? 'checked' : ''}> <span>Enable Pi-hole analytics</span></label>
+        <div class="set-kv"><span>Host</span><input type="text" data-pi="host" value="${esc(cfg.host || '127.0.0.1')}" placeholder="127.0.0.1"></div>
+        <div class="set-kv"><span>Port</span><input type="number" data-pi="port" value="${cfg.port || 80}" min="1" max="65535"></div>
+        <div class="set-kv"><span>Scheme</span><select data-pi="scheme"><option value="http"${cfg.scheme !== 'https' ? ' selected' : ''}>http</option><option value="https"${cfg.scheme === 'https' ? ' selected' : ''}>https</option></select></div>
+        <div class="set-kv"><span>API version</span><select data-pi="version">
+          <option value="auto"${(cfg.version || 'auto') === 'auto' ? ' selected' : ''}>Auto-detect</option>
+          <option value="6"${cfg.version === '6' ? ' selected' : ''}>v6</option>
+          <option value="5"${cfg.version === '5' ? ' selected' : ''}>v5</option></select></div>
+        <div class="set-kv"><span>Password${cfg.hasPassword ? ' (set)' : ''}</span><input type="password" data-pi="password" placeholder="${cfg.hasPassword ? '•••••• (unchanged)' : 'app-password / API token'}"></div>
+        <p class="net-dns-note">For a local Pi-hole, the default host works. A password is only needed if the Pi-hole web UI is password-protected (v6: an app-password from Settings → Web interface/API; v5: the API token).</p>
+        <div class="net-dns-cta">
+          <button class="net-toggle" data-pi="save">Save</button>
+          <button class="net-toggle" data-pi="test">Test connection</button>
+          <button class="net-toggle" data-pi="close">Close</button>
+          <span class="net-pi-testresult" data-pi="result"></span>
+        </div>
+      </div>`;
+    enhanceSelects(body);
+    const val = (k) => { const e = $(`[data-pi=${k}]`, body); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
+    const collectCfg = () => {
+      const o = { enabled: val('enabled'), host: val('host'), port: Number(val('port')), scheme: val('scheme'), version: val('version') };
+      const pw = val('password'); if (pw) o.password = pw;
+      return o;
+    };
+    $('[data-pi=save]', body).onclick = async () => {
+      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
+        toast('success', 'Pi-hole', 'Settings saved'); togglePiholeConfig(host, false); setTimeout(() => refreshDns(host), 800); }
+      catch (e) { toast('error', 'Pi-hole', e.message); }
+    };
+    $('[data-pi=test]', body).onclick = async () => {
+      const res = $('[data-pi=result]', body); res.textContent = 'Testing…'; res.className = 'net-pi-testresult';
+      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
+        const r = await api('/network/dns/pihole/test', { method: 'POST' });
+        if (r.ok) { res.textContent = `✓ Connected (v${r.apiVersion}${r.totalQueries != null ? ', ' + r.totalQueries.toLocaleString() + ' queries' : ''})`; res.classList.add('ok'); }
+        else { res.textContent = '✗ ' + (r.error || 'Failed'); res.classList.add('bad'); }
+      } catch (e) { res.textContent = '✗ ' + e.message; res.classList.add('bad'); }
+    };
+    $('[data-pi=close]', body).onclick = () => togglePiholeConfig(host, false);
   }
 
   function initChart(host) {
@@ -2354,14 +2459,17 @@ pageRenderers.network = (() => {
           <div class="card-body" data-net="procs"></div>
         </div>
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="8"/><path d="M4 10h5M15 10h5M12 2a12 12 0 0 0 0 16M12 2a12 12 0 0 1 0 16"/><rect x="8" y="7" width="8" height="6" rx="1" fill="var(--bg-card)"/><path d="M12 18v3M8 21h8" /></svg></div><span class="card-title">DNS — Pi Queries</span></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="8"/><path d="M4 10h5M15 10h5M12 2a12 12 0 0 0 0 16M12 2a12 12 0 0 1 0 16"/><rect x="8" y="7" width="8" height="6" rx="1" fill="var(--bg-card)"/><path d="M12 18v3M8 21h8" /></svg></div><span class="card-title">DNS — Domains &amp; Categories</span><button class="net-toggle net-dns-cog" data-net="picfg" title="Pi-hole settings">⚙</button></div>
           <div class="card-body" data-net="dns"></div>
+          <div class="card-body net-pihole-cfg" data-net="picfgbody" style="display:none"></div>
         </div>
       </div>`;
       initChart(host);
       $('[data-net=period]', host).addEventListener('change', (e) => { histPeriod = e.target.value; refreshHistory(host); });
       enhanceSelects(host);
       refreshLive(host); refreshHistory(host); refreshProtocols(host); refreshDns(host);
+      const cog = $('[data-net=picfg]', host);
+      if (cog) cog.onclick = () => togglePiholeConfig(host);
       startProcs(host);
       liveTimer = setInterval(() => refreshLive(host), 1000);
       slowTimer = setInterval(() => { refreshProtocols(host); refreshHistory(host); refreshDns(host); }, 15000);

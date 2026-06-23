@@ -16,6 +16,7 @@ import dns from 'dns';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { agentCall, agentConfigured } from '../core/agent-client.js';
+import { createPiholeClient } from './pihole.js';
 
 const execFileAsync = promisify(execFile);
 const reverse = promisify(dns.reverse);
@@ -68,9 +69,12 @@ function readProcNetDev() {
   return out;
 }
 
-export function createNetworkCollector() {
+export function createNetworkCollector({ getPiholeConfig = () => null, getPiholePassword = () => null } = {}) {
   let prev = null;
   let prevAt = 0;
+
+  // Pi-hole DNS analytics client (optional, configured via settings + secrets).
+  const pihole = createPiholeClient({ getConfig: getPiholeConfig, getPassword: getPiholePassword });
 
   /** Live per-interface throughput (bytes/sec) from counter deltas. */
   function throughput() {
@@ -218,6 +222,18 @@ export function createNetworkCollector() {
 
   /** DNS resolver stats (systemd-resolved), best-effort. */
   async function dns() {
+    // Prefer a configured Pi-hole — richest source (top domains, blocked,
+    // categories, totals, blocking state).
+    const piCfg = getPiholeConfig();
+    if (piCfg && piCfg.enabled) {
+      try {
+        const snap = await pihole.snapshot(12);
+        if (snap) return snap;
+      } catch (e) {
+        // Surface a configured-but-unreachable Pi-hole so the UI can show it.
+        return { available: false, source: 'pihole', loggingEnabled: false, error: e.message };
+      }
+    }
     // Prefer dnsmasq query-log analytics (top domains) when enabled.
     if (agentConfigured()) {
       try {
@@ -266,6 +282,12 @@ export function createNetworkCollector() {
     return agentCall('dns.forwarder', { enable }, null, 140000);
   }
 
+  // ---- Pi-hole DNS analytics + control -----------------------------------
+  async function piholeSnapshot(limit = 12) { return pihole.snapshot(limit); }
+  async function piholeTest() { return pihole.test(); }
+  async function piholeSetBlocking(enabled, seconds) { return pihole.setBlocking(enabled, seconds); }
+  function piholeResetSession() { pihole.resetSession(); }
+
   async function nethogsSample(seconds = 5) {
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('nethogs.sample', { seconds }, null, (Number(seconds) + 130) * 1000);
@@ -276,7 +298,8 @@ export function createNetworkCollector() {
     return { throughput: throughput(), vnstat: vn, protocols: proto, processes: procs, dns: dnsStats, ts: Date.now() };
   }
 
-  return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot };
+  return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot,
+    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession };
 }
 
 const WELL_KNOWN = {
