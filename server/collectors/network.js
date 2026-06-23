@@ -288,6 +288,18 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
   async function piholeSetBlocking(enabled, seconds) { return pihole.setBlocking(enabled, seconds); }
   function piholeResetSession() { pihole.resetSession(); }
 
+  // Detect an existing Pi-hole (host or docker) via the agent.
+  async function piholeDetect() {
+    if (!agentConfigured()) return { installed: false, agent: false };
+    try { return { agent: true, ...(await agentCall('pihole.detect', {}, null, 20000)) }; }
+    catch (e) { return { installed: false, agent: true, error: e.message }; }
+  }
+  // One-click install (host or docker). Streams progress lines via onLine.
+  async function piholeInstall(params, onLine) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('pihole.install', params, onLine, 900000);   // up to 15 min
+  }
+
   async function nethogsSample(seconds = 5) {
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('nethogs.sample', { seconds }, null, (Number(seconds) + 130) * 1000);
@@ -299,7 +311,7 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
   }
 
   return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot,
-    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession };
+    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession, piholeDetect, piholeInstall };
 }
 
 const WELL_KNOWN = {

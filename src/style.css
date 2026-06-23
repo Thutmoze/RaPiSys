@@ -5004,6 +5004,18 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-pi-testresult.bad { color: var(--accent-red); }
 @media (max-width: 640px) { .net-pihole-stats { grid-template-columns: repeat(2, 1fr); } .net-pihole-cols { grid-template-columns: 1fr; } }
 
+/* Pi-hole install panel (Settings → DNS) */
+.set-pi-install { margin: 16px 0; padding: 16px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border-color); }
+.set-pi-methods { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.set-pi-method { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--text-secondary); cursor: pointer; line-height: 1.5; }
+.set-pi-method input { margin-top: 3px; flex-shrink: 0; }
+.set-pi-method b { color: var(--text-primary); }
+.set-pi-opts { margin: 12px 0; }
+.set-pi-log { background: #0a0a0a; border: 1px solid var(--border-color); border-radius: 8px;
+  padding: 10px; font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-secondary);
+  max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin-top: 12px; }
+.set-pi-manual { margin-top: 12px; }
+
 /* Network v2: clickable colored interfaces, period filter, protocol drill-down */
 .net-hint { font-size: 11px; color: var(--text-muted); margin: 8px 0 4px; }
 .net-iface { display: grid; grid-template-columns: auto auto auto 1fr auto; gap: 10px;

@@ -87,6 +87,9 @@ const ALLOWED_NFS_OPTS = new Set(['ro', 'rw', 'vers=3', 'vers=4', 'vers=4.1', 'v
 
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
 
+/** Shell-quote a single argument for use inside `sh -c` strings. */
+function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
+
 /** systemd unit name for a mountpoint: /mnt/rapisys/nas1 -> mnt-rapisys-nas1.mount */
 function unitNameFor(mountpoint) {
   return mountpoint.replace(/^\//, '').replace(/-/g, '\\x2d').replace(/\//g, '-');
@@ -522,6 +525,131 @@ const OPS = {
       .sort((a, b) => b.queries - a.queries)
       .slice(0, Math.min(Number(limit) || 15, 50));
     return { enabled: true, domains, totalQueries: Object.values(counts).reduce((a, b) => a + b, 0) };
+  },
+
+  // ---- Pi-hole: detect + one-click install (host or docker) ---------------
+  // Detect an existing Pi-hole on the host: native install (pihole-FTL) or a
+  // Docker container. Reports version and the web/API port so the dashboard can
+  // connect without the user hunting for it.
+  async 'pihole.detect'() {
+    const out = { installed: false, method: null, version: null, port: null, container: null };
+    // Native: the `pihole` CLI / pihole-FTL service.
+    const cli = await run('sh', ['-c', 'command -v pihole || command -v pihole-FTL'], 4000);
+    if (cli.code === 0 && cli.stdout.trim()) {
+      out.installed = true; out.method = 'host';
+      const v = await run('pihole', ['-v'], 8000).catch(() => ({ stdout: '' }));
+      const m = (v.stdout || '').match(/Core\s+version\s+is\s+v?([\d.]+)/i) || (v.stdout || '').match(/v?([\d.]+)/);
+      out.version = m ? m[1] : null;
+      // v6 embedded webserver port (pihole.toml webserver.port); default 80.
+      const portRead = await run('sh', ['-c', "pihole-FTL --config webserver.port 2>/dev/null | head -1"], 5000).catch(() => ({ stdout: '' }));
+      const pm = (portRead.stdout || '').match(/(\d{2,5})/);
+      out.port = pm ? Number(pm[1]) : 80;
+      return out;
+    }
+    // Docker: a running container from the pihole/pihole image.
+    const dk = await run('sh', ['-c', "command -v docker >/dev/null && docker ps --filter ancestor=pihole/pihole --format '{{.Names}};{{.Ports}}' 2>/dev/null | head -1"], 6000);
+    if (dk.code === 0 && dk.stdout.trim()) {
+      const [name, ports] = dk.stdout.trim().split(';');
+      out.installed = true; out.method = 'docker'; out.container = name || 'pihole';
+      const pm = (ports || '').match(/:(\d+)->(?:80|8080)\/tcp/);
+      out.port = pm ? Number(pm[1]) : 80;
+      const v = await run('sh', ['-c', `docker exec ${shq(name || 'pihole')} pihole -v 2>/dev/null`], 10000).catch(() => ({ stdout: '' }));
+      const m = (v.stdout || '').match(/Core\s+version\s+is\s+v?([\d.]+)/i);
+      out.version = m ? m[1] : null;
+      return out;
+    }
+    return out;
+  },
+
+  // One-click install. method: 'host' (official unattended installer) or
+  // 'docker' (official pihole/pihole image). Streams progress. Fixed, validated
+  // parameters only — never arbitrary shell. Admin-token gated at the route.
+  async 'pihole.install'({ method = 'host', upstream = '1.1.1.1', upstream2 = '1.0.0.1', webPassword = '', webPort = 80 } = {}, send) {
+    // Validate inputs strictly.
+    assert(method === 'host' || method === 'docker', 'method must be host or docker');
+    const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+    assert(IP_RE.test(upstream), 'invalid upstream DNS IP');
+    if (upstream2) assert(IP_RE.test(upstream2), 'invalid secondary upstream DNS IP');
+    const port = Math.min(Math.max(parseInt(webPort, 10) || 80, 1), 65535);
+    assert(/^[\x20-\x7e]{0,128}$/.test(String(webPassword)), 'invalid web password');
+
+    if (method === 'host') {
+      send('Preparing unattended Pi-hole install…');
+      // The --unattended flag needs a pre-seeded setupVars.conf, else the
+      // installer falls back to interactive dialogs and fails (Pi-hole #6380).
+      fs.mkdirSync('/etc/pihole', { recursive: true });
+      // Pick the primary LAN interface for PIHOLE_INTERFACE.
+      const iface = await run('sh', ['-c', "ip route get 1.1.1.1 2>/dev/null | grep -oP 'dev \\K\\S+' | head -1"], 5000)
+        .then((r) => (r.stdout || '').trim() || 'eth0').catch(() => 'eth0');
+      const setupVars = [
+        `PIHOLE_INTERFACE=${iface}`,
+        `PIHOLE_DNS_1=${upstream}`,
+        `PIHOLE_DNS_2=${upstream2 || ''}`,
+        'QUERY_LOGGING=true',
+        'INSTALL_WEB_SERVER=true',
+        'INSTALL_WEB_INTERFACE=true',
+        'LIGHTTPD_ENABLED=false',
+        'CACHE_SIZE=10000',
+        'DNS_FQDN_REQUIRED=true',
+        'DNS_BOGUS_PRIV=true',
+        'DNSMASQ_LISTENING=local',
+        'BLOCKING_ENABLED=true',
+      ].join('\n') + '\n';
+      fs.writeFileSync('/etc/pihole/setupVars.conf', setupVars, { mode: 0o644 });
+      send(`Interface ${iface}, upstream ${upstream}${upstream2 ? ' / ' + upstream2 : ''}. Downloading the official installer…`);
+      // Fetch the official installer to a file, then run it unattended. (We pin
+      // the canonical URL; piping to bash is the project's own supported method.)
+      const dl = await run('sh', ['-c', 'curl -fsSL https://install.pi-hole.net -o /tmp/pihole-install.sh && echo OK'], 60000);
+      assert(/OK/.test(dl.stdout), `could not download installer: ${dl.stderr || dl.stdout}`);
+      send('Running installer (this can take several minutes)…');
+      const r = await runStreaming('bash', ['/tmp/pihole-install.sh', '--unattended'], { PIHOLE_SKIP_OS_CHECK: 'true' }, send);
+      try { fs.unlinkSync('/tmp/pihole-install.sh'); } catch {}
+      assert(r.code === 0, `installer exited with code ${r.code}`);
+      // Set the web/API password if one was provided (v6 uses an app-password).
+      let appPassword = webPassword || '';
+      if (webPassword) {
+        await run('pihole', ['setpassword', webPassword], 15000).catch(async () => {
+          await run('pihole', ['-a', '-p', webPassword, webPassword], 15000).catch(() => {});
+        });
+      }
+      send('Pi-hole installed. Detecting connection details…');
+      const det = await OPS['pihole.detect']();
+      return { ok: true, method: 'host', version: det.version, port: det.port || 80, hasPassword: !!appPassword };
+    }
+
+    // Docker method: official image, host networking so it can own :53.
+    send('Installing Pi-hole as a Docker container (official image)…');
+    const have = await run('sh', ['-c', 'command -v docker'], 4000);
+    assert(have.code === 0, 'Docker is not installed on the host');
+    // Free port 53 if systemd-resolved holds it (reversible: disable stub listener).
+    send('Checking port 53 (systemd-resolved stub)…');
+    await run('sh', ['-c', "ss -lntu 2>/dev/null | grep -q ':53 ' && (mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\\nDNSStubListener=no\\n' > /etc/systemd/resolved.conf.d/rapisys-pihole.conf && systemctl restart systemd-resolved) || true"], 20000);
+    const dir = '/opt/pihole-docker';
+    fs.mkdirSync(dir, { recursive: true });
+    const compose = [
+      'services:',
+      '  pihole:',
+      '    container_name: pihole',
+      '    image: pihole/pihole:latest',
+      '    network_mode: host',
+      '    environment:',
+      '      TZ: "Etc/UTC"',
+      `      FTLCONF_webserver_api_password: "${webPassword.replace(/"/g, '')}"`,
+      `      FTLCONF_dns_upstreams: "${upstream}${upstream2 ? ';' + upstream2 : ''}"`,
+      `      FTLCONF_webserver_port: "${port}"`,
+      '    volumes:',
+      '      - "./etc-pihole:/etc/pihole"',
+      '    cap_add:',
+      '      - NET_ADMIN',
+      '    restart: unless-stopped',
+    ].join('\n') + '\n';
+    fs.writeFileSync(path.join(dir, 'docker-compose.yml'), compose, { mode: 0o644 });
+    send('Pulling image and starting container…');
+    const up = await runStreaming('sh', ['-c', `cd ${shq(dir)} && (docker compose up -d || docker-compose up -d)`], {}, send);
+    assert(up.code === 0, `docker compose failed (code ${up.code})`);
+    send('Container started. Detecting connection details…');
+    const det = await OPS['pihole.detect']();
+    return { ok: true, method: 'docker', version: det.version, port: det.port || port, hasPassword: !!webPassword };
   },
 
   // ---- per-process bandwidth via nethogs (opt-in, installs on first use) ---

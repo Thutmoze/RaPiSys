@@ -125,6 +125,50 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
     catch (err) { res.status(502).json({ error: err.message }); }
   });
 
+  // Detect an existing Pi-hole (host or docker) for the install/connect flow.
+  r.get('/dns/pihole/detect', async (req, res) => {
+    try { res.json(await network.piholeDetect()); }
+    catch (err) { res.status(500).json({ installed: false, error: err.message }); }
+  });
+
+  // One-click install, streamed (SSE). method=host|docker, upstream IPs, optional
+  // web password + port. Admin-token gated (requireControl). Uses the 'failed'
+  // event name (never 'error') to avoid the EventSource native-error collision.
+  r.get('/dns/pihole/install/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const method = req.query.method === 'docker' ? 'docker' : 'host';
+    const params = {
+      method,
+      upstream: String(req.query.upstream || '1.1.1.1'),
+      upstream2: String(req.query.upstream2 || ''),
+      webPassword: String(req.query.webPassword || ''),
+      webPort: Number(req.query.webPort) || 80,
+    };
+    send('start', { method });
+    try {
+      const result = await network.piholeInstall(params, (line) => send('line', { line }));
+      // Persist the connection config so the dashboard connects immediately.
+      try {
+        await withFileLock(async () => {
+          const s = await loadSettings();
+          s.rapisys = s.rapisys || {};
+          s.rapisys.pihole = { enabled: true, host: '127.0.0.1', port: result.port || 80, scheme: 'http', version: 'auto' };
+          await saveSettings(s);
+        });
+        if (params.webPassword && secrets.encryptionAvailable()) secrets.set('pihole.password', params.webPassword);
+        await refreshPiholeConfig();
+        network.piholeResetSession();
+      } catch (e) { send('line', { line: 'Note: installed, but saving the connection config failed: ' + e.message }); }
+      send('done', result);
+    } catch (err) {
+      send('failed', { message: err.message });
+    }
+    res.end();
+  });
+
   // Opt-in per-process bandwidth sample via nethogs (installs on first use).
   r.post('/nethogs', requireControl, async (req, res) => {
     try { res.json(await network.nethogsSample(Number(req.body?.seconds) || 5)); }

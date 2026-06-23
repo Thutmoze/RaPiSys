@@ -1832,6 +1832,142 @@ pageRenderers.settings = (() => {
     });
   }
 
+  // ---- Pi-hole DNS settings pane ----
+  const PI_UPSTREAMS = [
+    { id: 'cloudflare', label: 'Cloudflare (1.1.1.1)', dns1: '1.1.1.1', dns2: '1.0.0.1' },
+    { id: 'quad9', label: 'Quad9 (9.9.9.9)', dns1: '9.9.9.9', dns2: '149.112.112.112' },
+    { id: 'google', label: 'Google (8.8.8.8)', dns1: '8.8.8.8', dns2: '8.8.4.4' },
+    { id: 'opendns', label: 'OpenDNS (208.67.222.222)', dns1: '208.67.222.222', dns2: '208.67.220.220' },
+  ];
+  async function loadPihole(host) {
+    const box = $('[data-set=pihole]', host);
+    if (!box) return;
+    box.innerHTML = '<p class="net-dns-note">Loading…</p>';
+    let cfg = {}, detect = {};
+    try { cfg = await api('/network/dns/pihole/config'); } catch { /* defaults */ }
+    try { detect = await api('/network/dns/pihole/detect'); } catch { /* agent maybe absent */ }
+
+    const statusLine = detect.installed
+      ? `<b class="set-ok">● Installed</b> (${esc(detect.method || '')}${detect.version ? ' · v' + esc(detect.version) : ''}${detect.port ? ' · port ' + detect.port : ''})`
+      : (detect.agent === false ? '<b class="set-err">○ Host agent unavailable</b>' : '<b class="set-err">○ Not detected on this Pi</b>');
+
+    box.innerHTML = `
+      <div class="set-summary">
+        <div class="set-kv"><span>Status</span>${statusLine}</div>
+        <div class="set-kv"><span>Connection</span><b>${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}</b></div>
+      </div>
+      ${!detect.installed && detect.agent !== false ? `
+      <div class="set-pi-install">
+        <h4 class="sess-h">Install Pi-hole</h4>
+        <p class="net-dns-note">Pi-hole isn\u2019t installed on this Pi. Choose how to install it — all run on the host through the RaPiSys agent.</p>
+        <div class="set-pi-methods">
+          <label class="set-pi-method"><input type="radio" name="pimethod" value="host" checked> <span><b>Host install</b> — official installer (curl | bash, unattended). Standard Pi-hole, latest version.</span></label>
+          <label class="set-pi-method"><input type="radio" name="pimethod" value="docker"> <span><b>Docker container</b> — official image, isolated &amp; easily removable. Uses host networking for port 53.</span></label>
+          <label class="set-pi-method"><input type="radio" name="pimethod" value="manual"> <span><b>Manual</b> — show me the command to run myself.</span></label>
+        </div>
+        <div class="wz-form set-pi-opts">
+          <label>Upstream DNS <select data-pi="upstream">${PI_UPSTREAMS.map((u) => `<option value="${u.id}">${u.label}</option>`).join('')}</select></label>
+          <label>Web/API password (optional) <input data-pi="webpw" type="password" placeholder="leave blank for none"></label>
+        </div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-pi="install">${SAVE_ICON}<span>Install Pi-hole</span></button><span data-pi="instmsg"></span></div>
+        <pre class="set-pi-log" data-pi="log" style="display:none"></pre>
+        <div class="set-pi-manual" data-pi="manual" style="display:none"></div>
+      </div>` : ''}
+      <h4 class="sess-h" style="margin-top:24px">Connection</h4>
+      <div class="net-pi-form">
+        <label class="set-toggle"><input type="checkbox" data-pi="enabled" ${cfg.enabled ? 'checked' : ''}> <span>Enable Pi-hole analytics on the Network page</span></label>
+        <div class="set-kv"><span>Host</span><input type="text" data-pi="host" value="${esc(cfg.host || '127.0.0.1')}" placeholder="127.0.0.1"></div>
+        <div class="set-kv"><span>Port</span><input type="number" data-pi="port" value="${cfg.port || 80}" min="1" max="65535"></div>
+        <div class="set-kv"><span>Scheme</span><select data-pi="scheme"><option value="http"${cfg.scheme !== 'https' ? ' selected' : ''}>http</option><option value="https"${cfg.scheme === 'https' ? ' selected' : ''}>https</option></select></div>
+        <div class="set-kv"><span>API version</span><select data-pi="version">
+          <option value="auto"${(cfg.version || 'auto') === 'auto' ? ' selected' : ''}>Auto-detect</option>
+          <option value="6"${cfg.version === '6' ? ' selected' : ''}>v6</option>
+          <option value="5"${cfg.version === '5' ? ' selected' : ''}>v5</option></select></div>
+        <div class="set-kv"><span>Password${cfg.hasPassword ? ' (set)' : ''}</span><input type="password" data-pi="password" placeholder="${cfg.hasPassword ? '•••••• (unchanged)' : 'app-password / API token'}"></div>
+        <p class="net-dns-note">A password is only needed if the Pi-hole web UI is password-protected (v6: an app-password from Settings → Web interface/API; v5: the API token).</p>
+        <div class="set-actions">
+          <button class="set-btn set-btn-primary" data-pi="save">${SAVE_ICON}<span>Save</span></button>
+          <button class="set-btn set-btn-edit" data-pi="test">${TEST_ICON}<span>Test connection</span></button>
+          <span class="net-pi-testresult" data-pi="result"></span>
+        </div>
+      </div>`;
+    enhanceSelects(box);
+
+    const val = (k) => { const e = $(`[data-pi=${k}]`, box); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
+    const collectCfg = () => {
+      const o = { enabled: val('enabled'), host: val('host'), port: Number(val('port')), scheme: val('scheme'), version: val('version') };
+      const pw = val('password'); if (pw) o.password = pw;
+      return o;
+    };
+    const saveBtn = $('[data-pi=save]', box);
+    if (saveBtn) saveBtn.onclick = async () => {
+      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() }); toast('success', 'Pi-hole', 'Settings saved'); }
+      catch (e) { toast('error', 'Pi-hole', e.message); }
+    };
+    const testBtn = $('[data-pi=test]', box);
+    if (testBtn) testBtn.onclick = async () => {
+      const r0 = $('[data-pi=result]', box); r0.textContent = 'Testing…'; r0.className = 'net-pi-testresult';
+      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
+        const r = await api('/network/dns/pihole/test', { method: 'POST' });
+        if (r.ok) { r0.textContent = `✓ Connected (v${r.apiVersion}${r.totalQueries != null ? ', ' + r.totalQueries.toLocaleString() + ' queries' : ''})`; r0.classList.add('ok'); }
+        else { r0.textContent = '✗ ' + (r.error || 'Failed'); r0.classList.add('bad'); }
+      } catch (e) { r0.textContent = '✗ ' + e.message; r0.classList.add('bad'); }
+    };
+
+    // Install flow
+    const installBtn = $('[data-pi=install]', box);
+    if (installBtn) {
+      const optsBox = $('.set-pi-opts', box);
+      const manualBox = $('[data-pi=manual]', box);
+      const methodOf = () => (box.querySelector('input[name=pimethod]:checked') || {}).value || 'host';
+      box.querySelectorAll('input[name=pimethod]').forEach((rb) => rb.addEventListener('change', () => {
+        const m = methodOf();
+        if (optsBox) optsBox.style.display = m === 'manual' ? 'none' : '';
+        installBtn.querySelector('span').textContent = m === 'manual' ? 'Show command' : 'Install Pi-hole';
+      }));
+      installBtn.onclick = async () => {
+        const method = methodOf();
+        const up = PI_UPSTREAMS.find((u) => u.id === val('upstream')) || PI_UPSTREAMS[0];
+        if (method === 'manual') {
+          manualBox.style.display = '';
+          manualBox.innerHTML = `<p class="net-dns-note">Run this on the Pi, then click “Re-detect”:</p>
+            <pre class="set-pi-log">curl -sSL https://install.pi-hole.net | sudo bash</pre>
+            <div class="set-actions"><button class="set-btn set-btn-edit" data-pi="redetect">Re-detect</button></div>`;
+          const rd = $('[data-pi=redetect]', manualBox); if (rd) rd.onclick = () => loadPihole(host);
+          return;
+        }
+        const confirmed = await rapisysConfirm(
+          method === 'docker'
+            ? 'Install Pi-hole as a Docker container (official image)? This pulls pihole/pihole, uses host networking to own port 53 (disabling the systemd-resolved stub listener if needed, reversibly), and sets upstream DNS to ' + esc(up.label) + '.'
+            : 'Install Pi-hole on the host using the official installer? This runs Pi-hole\u2019s official unattended installer as root, takes over DNS (port 53) and the web port, and sets upstream DNS to ' + esc(up.label) + '. It can take several minutes.',
+          { confirmLabel: 'Install Pi-hole' });
+        if (!confirmed) return;
+        const logEl = $('[data-pi=log]', box); logEl.style.display = ''; logEl.textContent = '';
+        installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Installing…';
+        const params = new URLSearchParams({ method, upstream: up.dns1, upstream2: up.dns2, webPassword: val('webpw') || '', webPort: '80' });
+        let finished = false;
+        const es = new EventSource('/api/network/dns/pihole/install/stream?' + params.toString());
+        const appendLog = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+        es.addEventListener('start', () => appendLog('Starting ' + method + ' install…'));
+        es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
+        es.addEventListener('done', (ev) => {
+          finished = true; es.close();
+          let r = {}; try { r = JSON.parse(ev.data); } catch {}
+          appendLog(`✓ Done — Pi-hole ${r.version ? 'v' + r.version + ' ' : ''}on port ${r.port || 80}.`);
+          toast('success', 'Pi-hole', 'Installed and connected');
+          setTimeout(() => loadPihole(host), 1500);
+        });
+        es.addEventListener('failed', (ev) => {
+          finished = true; es.close();
+          let m = 'Install failed'; try { m = JSON.parse(ev.data).message || m; } catch {}
+          appendLog('✗ ' + m); toast('error', 'Pi-hole', m);
+          installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pi-hole';
+        });
+        es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pi-hole'; };
+      };
+    }
+  }
+
   // ---- Remote Access settings pane ----
   let editRemote = false;
   async function loadRemote(host) {
@@ -2035,7 +2171,7 @@ pageRenderers.settings = (() => {
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'email', label: 'Notifications' }, { id: 'remote', label: 'Remote Access' }, { id: 'account', label: 'Account' }])}
+          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'dns', label: 'DNS' }, { id: 'email', label: 'Notifications' }, { id: 'remote', label: 'Remote Access' }, { id: 'account', label: 'Account' }])}
           <div class="card-body" data-pane="health">
             <div data-set="health"></div>
           </div>
@@ -2044,6 +2180,10 @@ pageRenderers.settings = (() => {
             <div data-set="nas"></div><div data-set="nasform"></div>
             <h4 class="sess-h" style="margin-top:24px">Database Storage</h4>
             <div data-set="storage"></div>
+          </div>
+          <div class="card-body" data-pane="dns" style="display:none">
+            <h4 class="sess-h">Pi-hole DNS</h4>
+            <div data-set="pihole"></div>
           </div>
           <div class="card-body" data-pane="email" style="display:none">
             <h4 class="sess-h">Email (SMTP)</h4>
@@ -2065,8 +2205,14 @@ pageRenderers.settings = (() => {
           </div>
         </div>
       </div>`;
-      wirePageTabs(host, (tab) => { if (tab === 'remote') { loadTls(host); loadRemote(host); } });
+      wirePageTabs(host, (tab) => {
+        if (tab === 'remote') { loadTls(host); loadRemote(host); }
+        if (tab === 'dns') loadPihole(host);
+      });
       load(host);
+      // Deep-link: #/settings?tab=dns opens a specific tab.
+      const tabMatch = (window.location.hash.split('?')[1] || '').match(/(?:^|&)tab=([a-z]+)/);
+      if (tabMatch) { const b = host.querySelector(`[data-tab=${tabMatch[1]}]`); if (b) b.click(); }
     },
     unmount() {},
   };
@@ -2357,64 +2503,13 @@ pageRenderers.network = (() => {
     if (bOn) bOn.onclick = async () => { try { await api('/network/dns/pihole/blocking', { method: 'POST', body: { enabled: true } }); toast('success', 'Pi-hole', 'Blocking enabled'); setTimeout(() => refreshDns(host), 1000); } catch (e) { toast('error', 'Pi-hole', e.message); } };
     const bOff = $('[data-net=piblockoff]', host);
     if (bOff) bOff.onclick = async () => { try { await api('/network/dns/pihole/blocking', { method: 'POST', body: { enabled: false, seconds: 300 } }); toast('info', 'Pi-hole', 'Blocking paused for 5 minutes'); setTimeout(() => refreshDns(host), 1000); } catch (e) { toast('error', 'Pi-hole', e.message); } };
-    // Open the config panel
-    const openCfg = (b) => b && (b.onclick = () => togglePiholeConfig(host, true));
+    // Open Pi-hole settings (now in Settings → DNS)
+    const openCfg = (b) => b && (b.onclick = () => goToPiholeSettings());
     openCfg($('[data-net=picfg2]', host));
   }
 
-  // ---- Pi-hole config panel ----
-  let piCfgOpen = false;
-  async function togglePiholeConfig(host, forceOpen) {
-    const body = $('[data-net=picfgbody]', host);
-    const dnsBody = $('[data-net=dns]', host);
-    if (!body) return;
-    piCfgOpen = forceOpen != null ? forceOpen : !piCfgOpen;
-    if (!piCfgOpen) { body.style.display = 'none'; dnsBody.style.display = ''; return; }
-    body.style.display = ''; dnsBody.style.display = 'none';
-    body.innerHTML = '<p class="net-dns-note">Loading…</p>';
-    let cfg = {};
-    try { cfg = await api('/network/dns/pihole/config'); } catch { /* defaults */ }
-    body.innerHTML = `
-      <div class="net-pi-form">
-        <label class="set-toggle"><input type="checkbox" data-pi="enabled" ${cfg.enabled ? 'checked' : ''}> <span>Enable Pi-hole analytics</span></label>
-        <div class="set-kv"><span>Host</span><input type="text" data-pi="host" value="${esc(cfg.host || '127.0.0.1')}" placeholder="127.0.0.1"></div>
-        <div class="set-kv"><span>Port</span><input type="number" data-pi="port" value="${cfg.port || 80}" min="1" max="65535"></div>
-        <div class="set-kv"><span>Scheme</span><select data-pi="scheme"><option value="http"${cfg.scheme !== 'https' ? ' selected' : ''}>http</option><option value="https"${cfg.scheme === 'https' ? ' selected' : ''}>https</option></select></div>
-        <div class="set-kv"><span>API version</span><select data-pi="version">
-          <option value="auto"${(cfg.version || 'auto') === 'auto' ? ' selected' : ''}>Auto-detect</option>
-          <option value="6"${cfg.version === '6' ? ' selected' : ''}>v6</option>
-          <option value="5"${cfg.version === '5' ? ' selected' : ''}>v5</option></select></div>
-        <div class="set-kv"><span>Password${cfg.hasPassword ? ' (set)' : ''}</span><input type="password" data-pi="password" placeholder="${cfg.hasPassword ? '•••••• (unchanged)' : 'app-password / API token'}"></div>
-        <p class="net-dns-note">For a local Pi-hole, the default host works. A password is only needed if the Pi-hole web UI is password-protected (v6: an app-password from Settings → Web interface/API; v5: the API token).</p>
-        <div class="net-dns-cta">
-          <button class="net-toggle" data-pi="save">Save</button>
-          <button class="net-toggle" data-pi="test">Test connection</button>
-          <button class="net-toggle" data-pi="close">Close</button>
-          <span class="net-pi-testresult" data-pi="result"></span>
-        </div>
-      </div>`;
-    enhanceSelects(body);
-    const val = (k) => { const e = $(`[data-pi=${k}]`, body); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
-    const collectCfg = () => {
-      const o = { enabled: val('enabled'), host: val('host'), port: Number(val('port')), scheme: val('scheme'), version: val('version') };
-      const pw = val('password'); if (pw) o.password = pw;
-      return o;
-    };
-    $('[data-pi=save]', body).onclick = async () => {
-      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
-        toast('success', 'Pi-hole', 'Settings saved'); togglePiholeConfig(host, false); setTimeout(() => refreshDns(host), 800); }
-      catch (e) { toast('error', 'Pi-hole', e.message); }
-    };
-    $('[data-pi=test]', body).onclick = async () => {
-      const res = $('[data-pi=result]', body); res.textContent = 'Testing…'; res.className = 'net-pi-testresult';
-      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
-        const r = await api('/network/dns/pihole/test', { method: 'POST' });
-        if (r.ok) { res.textContent = `✓ Connected (v${r.apiVersion}${r.totalQueries != null ? ', ' + r.totalQueries.toLocaleString() + ' queries' : ''})`; res.classList.add('ok'); }
-        else { res.textContent = '✗ ' + (r.error || 'Failed'); res.classList.add('bad'); }
-      } catch (e) { res.textContent = '✗ ' + e.message; res.classList.add('bad'); }
-    };
-    $('[data-pi=close]', body).onclick = () => togglePiholeConfig(host, false);
-  }
+  // Deep-link to the DNS tab in Settings.
+  function goToPiholeSettings() { window.location.hash = '#/settings?tab=dns'; }
 
   function initChart(host) {
     const canvas = $('[data-net=chart]', host);
@@ -2459,9 +2554,8 @@ pageRenderers.network = (() => {
           <div class="card-body" data-net="procs"></div>
         </div>
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="8"/><path d="M4 10h5M15 10h5M12 2a12 12 0 0 0 0 16M12 2a12 12 0 0 1 0 16"/><rect x="8" y="7" width="8" height="6" rx="1" fill="var(--bg-card)"/><path d="M12 18v3M8 21h8" /></svg></div><span class="card-title">DNS — Domains &amp; Categories</span><button class="net-toggle net-dns-cog" data-net="picfg" title="Pi-hole settings">⚙</button></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="8"/><path d="M4 10h5M15 10h5M12 2a12 12 0 0 0 0 16M12 2a12 12 0 0 1 0 16"/><rect x="8" y="7" width="8" height="6" rx="1" fill="var(--bg-card)"/><path d="M12 18v3M8 21h8" /></svg></div><span class="card-title">DNS — Domains &amp; Categories</span><button class="net-toggle net-dns-cog" data-net="picfg" title="Pi-hole settings (Settings → DNS)">⚙</button></div>
           <div class="card-body" data-net="dns"></div>
-          <div class="card-body net-pihole-cfg" data-net="picfgbody" style="display:none"></div>
         </div>
       </div>`;
       initChart(host);
@@ -2469,7 +2563,7 @@ pageRenderers.network = (() => {
       enhanceSelects(host);
       refreshLive(host); refreshHistory(host); refreshProtocols(host); refreshDns(host);
       const cog = $('[data-net=picfg]', host);
-      if (cog) cog.onclick = () => togglePiholeConfig(host);
+      if (cog) cog.onclick = () => goToPiholeSettings();
       startProcs(host);
       liveTimer = setInterval(() => refreshLive(host), 1000);
       slowTimer = setInterval(() => { refreshProtocols(host); refreshHistory(host); refreshDns(host); }, 15000);
