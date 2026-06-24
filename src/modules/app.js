@@ -1375,9 +1375,25 @@ pageRenderers.settings = (() => {
     // ---- storage card ----
     const s = st.storage || {};
     const dbDirVal = nas?.mountpoint || (s.path && s.path.startsWith('/mnt/rapisys/') ? s.path.replace(/\/rapisys\.db$/, '') : '');
+    const fmtBytes = (b) => {
+      if (b == null) return '—';
+      if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
+      if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+      if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+      return b + ' B';
+    };
+    // NAS free space (from the agent's df), shown when a NAS is mounted.
+    const nasDf = nasStatus?.df;
+    const nasLine = nas?.mountpoint
+      ? (nasStatus?.mounted
+          ? (nasDf ? `${fmtBytes(nasDf.avail)} free of ${fmtBytes(nasDf.size)}` : 'mounted')
+          : 'not mounted')
+      : null;
     $('[data-set=storage]', host).innerHTML = `
       <div class="set-kv"><span>Database</span><b>${esc(s.path || s.dbPath || '—')}</b></div>
+      <div class="set-kv"><span>Database size</span><b>${fmtBytes(s.sizeBytes)}</b></div>
       <div class="set-kv"><span>Filesystem</span><b>${esc(s.fsType || '—')} · ${esc(s.journalMode || '—')} journal</b></div>
+      ${nasLine ? `<div class="set-kv"><span>NAS space</span><b>${esc(nasLine)}</b></div>` : ''}
       <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ Degraded (local fallback)' : '● Healthy'}</b></div>
       ${!editDb ? `
         <div class="set-actions"><button class="set-btn set-btn-edit" data-set="dbedit">${EDIT_ICON}<span>Edit location</span></button></div>` : `
@@ -1420,7 +1436,7 @@ pageRenderers.settings = (() => {
         <div class="set-health-item">
           <span class="set-health-label">NAS mount</span>
           <b class="${nasStatus?.mounted ? 'set-ok' : ''}">${nasStatus?.mounted ? '● Mounted' : '○ None'}</b>
-          <small>${esc(nas?.label || 'No share configured')}</small>
+          <small>${nasStatus?.mounted && nasStatus?.df ? `${fmtDbSize(nasStatus.df.avail)} free of ${fmtDbSize(nasStatus.df.size)}` : esc(nas?.label || 'No share configured')}</small>
         </div>
         <div class="set-health-item">
           <span class="set-health-label">Operating mode</span>
@@ -2404,7 +2420,14 @@ pageRenderers.settings = (() => {
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
         <div class="card sess-span">
-          ${pageTabs([{ id: 'health', label: 'Services Health' }, { id: 'storage', label: 'Storage' }, { id: 'dns', label: 'DNS' }, { id: 'email', label: 'Notifications' }, { id: 'remote', label: 'Remote Access' }, { id: 'account', label: 'Account' }])}
+          ${pageTabs([
+            { id: 'health', label: 'Services Health', icon: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
+            { id: 'storage', label: 'Storage', icon: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>' },
+            { id: 'dns', label: 'DNS', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>' },
+            { id: 'email', label: 'Notifications', icon: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
+            { id: 'remote', label: 'Remote Access', icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>' },
+            { id: 'account', label: 'Account', icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>' },
+          ])}
           <div class="card-body" data-pane="health">
             <div data-set="health"></div>
           </div>
