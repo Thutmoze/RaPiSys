@@ -2564,44 +2564,74 @@ pageRenderers.network = (() => {
     let html;
 
     if (d.source === 'pihole' && d.available !== false) {
-      // Rich Pi-hole view: totals ring, categories, top permitted + blocked.
+      // Rich Pi-hole view, organized into clear sections.
       const t = d.totals || {};
       const pctBlocked = t.percentBlocked != null ? Math.round(t.percentBlocked * 10) / 10 : null;
       const blockingOn = d.blocking === true || d.blocking === 'enabled';
-      const cats = (d.categories || []).filter((c) => c.count > 0);
       const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString());
       const renderDomains = (list, cls) => {
-        if (!list?.length) return '<p class="net-dns-note">No data yet.</p>';
+        if (!list?.length) return '<p class="net-dns-empty">No data yet.</p>';
         const max = Math.max(1, ...list.map((x) => x.count));
-        return list.map((x) => `<div class="net-proto-row net-proto-static">
-            <span class="net-domain">${esc(x.domain)}</span>
-            <span class="net-proto-bar ${cls}"><span style="width:${(x.count / max) * 100}%"></span></span>
-            <span class="net-proto-n">${fmtN(x.count)}</span>
+        return list.slice(0, 6).map((x) => `<div class="net-dom-row">
+            <span class="net-dom-name" title="${esc(x.domain)}">${esc(x.domain)}</span>
+            <span class="net-dom-bar ${cls}"><span style="width:${Math.max(3, (x.count / max) * 100)}%"></span></span>
+            <span class="net-dom-n">${fmtN(x.count)}</span>
+          </div>`).join('');
+      };
+      const renderCats = (list, total) => {
+        if (!list?.length) return '';
+        const max = Math.max(1, ...list.map((c) => c.count));
+        return list.slice(0, 6).map((c) => `<div class="net-catrow">
+            <span class="net-catrow-l">${esc(c.label || c.key)}</span>
+            <span class="net-catrow-bar"><span style="width:${Math.max(3, (c.count / max) * 100)}%"></span></span>
+            <span class="net-catrow-n">${(c.percent != null ? c.percent + '%' : fmtN(c.count))}</span>
           </div>`).join('');
       };
       const consoleHost = (location.hostname && location.hostname !== '127.0.0.1') ? location.hostname : '127.0.0.1';
       const consoleUrl = `http://${consoleHost}:${d.webPort || 80}/admin`;
-      html = `<div class="net-pihole-head">
-          <span class="net-pihole-badge">Pi-hole v${d.apiVersion || '6'}</span>
-          <span class="net-pihole-block ${blockingOn ? 'on' : 'off'}">${blockingOn ? 'Blocking on' : 'Blocking paused'}</span>
-          <a class="net-toggle" href="${consoleUrl}" target="_blank" rel="noopener" title="Open the native Pi-hole admin console">Console ↗</a>
-          <button class="net-toggle" data-net="${blockingOn ? 'piblockoff' : 'piblockon'}">${blockingOn ? 'Disable 5 min' : 'Enable blocking'}</button>
-        </div>
-        <div class="net-pihole-stats">
-          <div class="net-pi-stat"><span class="net-pi-n">${fmtN(t.total)}</span><span class="net-pi-l">Queries</span></div>
-          <div class="net-pi-stat"><span class="net-pi-n net-pi-red">${fmtN(t.blocked)}</span><span class="net-pi-l">Blocked</span></div>
-          <div class="net-pi-stat"><span class="net-pi-n">${pctBlocked != null ? pctBlocked + '%' : '—'}</span><span class="net-pi-l">% Blocked</span></div>
-          <div class="net-pi-stat"><span class="net-pi-n">${fmtN(t.uniqueDomains)}</span><span class="net-pi-l">Domains</span></div>
+
+      // Header: status pill + version on the left, actions on the right.
+      html = `<div class="net-ph-header">
+          <div class="net-ph-id">
+            <span class="net-ph-dot ${blockingOn ? 'on' : 'off'}"></span>
+            <span class="net-ph-title">${blockingOn ? 'Blocking active' : 'Blocking paused'}</span>
+            <span class="net-ph-ver">Pi-hole v${d.apiVersion || '6'}</span>
+          </div>
+          <div class="net-ph-actions">
+            <a class="set-btn set-btn-edit" href="${consoleUrl}" target="_blank" rel="noopener" title="Open the native Pi-hole admin console">Console ↗</a>
+            <button class="set-btn ${blockingOn ? 'set-btn-danger' : 'set-btn-primary'}" data-net="${blockingOn ? 'piblockoff' : 'piblockon'}">${blockingOn ? 'Disable 5 min' : 'Enable blocking'}</button>
+          </div>
         </div>`;
-      if (cats.length) {
-        html += `<div class="net-pihole-cats">${cats.map((c) => `
-          <div class="net-cat-row"><span class="net-cat-l">${esc(c.label)}</span>
-            <span class="net-proto-bar net-cat-${c.key}"><span style="width:${c.percent}%"></span></span>
-            <span class="net-proto-n">${c.percent}%</span></div>`).join('')}</div>`;
+
+      // Stat tiles.
+      html += `<div class="net-ph-stats">
+          <div class="net-ph-stat"><span class="net-ph-statn">${fmtN(t.total)}</span><span class="net-ph-statl">Total queries</span></div>
+          <div class="net-ph-stat danger"><span class="net-ph-statn">${fmtN(t.blocked)}</span><span class="net-ph-statl">Blocked</span></div>
+          <div class="net-ph-stat"><span class="net-ph-statn">${pctBlocked != null ? pctBlocked + '%' : '—'}</span><span class="net-ph-statl">% Blocked</span></div>
+          <div class="net-ph-stat"><span class="net-ph-statn">${fmtN(t.uniqueDomains)}</span><span class="net-ph-statl">Unique domains</span></div>
+        </div>`;
+
+      // Categories: prefer the real FTL status breakdown, then query types.
+      const status = (d.statusBreakdown || []).filter((c) => c.count > 0);
+      const types = (d.queryTypes || []).filter((c) => c.count > 0);
+      const fallbackCats = (d.categories || []).filter((c) => c.count > 0);
+      if (status.length || types.length || fallbackCats.length) {
+        html += `<div class="net-ph-cats">`;
+        if (status.length) {
+          html += `<div class="net-ph-catcol"><div class="net-ph-h">Query categories</div>${renderCats(status)}</div>`;
+        } else if (fallbackCats.length) {
+          html += `<div class="net-ph-catcol"><div class="net-ph-h">Categories</div>${renderCats(fallbackCats)}</div>`;
+        }
+        if (types.length) {
+          html += `<div class="net-ph-catcol"><div class="net-ph-h">Record types</div>${renderCats(types)}</div>`;
+        }
+        html += `</div>`;
       }
-      html += `<div class="net-pihole-cols">
-          <div class="net-pihole-col"><div class="net-proto-summary">Top permitted</div>${renderDomains(d.topPermitted, 'net-bar-ok')}</div>
-          <div class="net-pihole-col"><div class="net-proto-summary">Top blocked</div>${renderDomains(d.topBlocked, 'net-bar-block')}</div>
+
+      // Top domains (permitted vs blocked).
+      html += `<div class="net-ph-doms">
+          <div class="net-ph-domcol"><div class="net-ph-h">Top permitted domains</div>${renderDomains(d.topPermitted, 'ok')}</div>
+          <div class="net-ph-domcol"><div class="net-ph-h">Top blocked domains</div>${renderDomains(d.topBlocked, 'block')}</div>
         </div>`;
     } else if (d.source === 'pihole' && d.available === false) {
       html = `<p class="net-dns-note">Pi-hole is configured but unreachable${d.error ? ': ' + esc(d.error) : ''}.</p>
@@ -2700,7 +2730,7 @@ pageRenderers.network = (() => {
           <div class="card-body" data-net="procs"></div>
         </div>
         <div class="card sess-span">
-          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="8"/><path d="M4 10h5M15 10h5M12 2a12 12 0 0 0 0 16M12 2a12 12 0 0 1 0 16"/><rect x="8" y="7" width="8" height="6" rx="1" fill="var(--bg-card)"/><path d="M12 18v3M8 21h8" /></svg></div><span class="card-title">DNS — Domains &amp; Categories</span><button class="net-toggle net-dns-cog" data-net="picfg" title="Pi-hole settings (Settings → DNS)">⚙</button></div>
+          <div class="card-header"><div class="card-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M4 11h14M11 4a11 11 0 0 1 0 14M11 4a11 11 0 0 0 0 14"/><path d="m20 20-3.5-3.5"/></svg></div><span class="card-title">DNS Analysis</span><button class="net-toggle net-dns-cog" data-net="picfg" title="Pi-hole settings (Settings → DNS)">⚙</button></div>
           <div class="card-body" data-net="dns"></div>
         </div>
       </div>`;

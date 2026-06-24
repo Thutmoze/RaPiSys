@@ -141,6 +141,10 @@ export function createPiholeClient({ getConfig, getPassword }) {
       },
       // "categories": Pi-hole's status breakdown is the meaningful grouping.
       categories: buildCategories(q),
+      // Real DNS record-type distribution (A, AAAA, HTTPS, PTR, …) and the
+      // query-status breakdown (forwarded/cached/blocked/…) straight from FTL.
+      queryTypes: normalizeMap(q.types),
+      statusBreakdown: normalizeStatus(q.status, q.total),
       gravityDomains: summary?.gravity?.domains_being_blocked ?? null,
       clients: { active: summary?.clients?.active ?? null, total: summary?.clients?.total ?? null },
       topPermitted: norm(perm),
@@ -233,6 +237,34 @@ export function createPiholeClient({ getConfig, getPassword }) {
       { key: 'cached', label: 'Cached', count: cached, percent: pct(cached) },
       { key: 'forwarded', label: 'Forwarded', count: forwarded, percent: pct(forwarded) },
     ];
+  }
+
+  // Turn a { KEY: count } map (e.g. query types A/AAAA/HTTPS) into a sorted,
+  // percentaged list of the most common entries.
+  function normalizeMap(obj) {
+    if (!obj || typeof obj !== 'object') return [];
+    const entries = Object.entries(obj).map(([k, v]) => ({ key: k, count: Number(v) || 0 }))
+      .filter((e) => e.count > 0);
+    const total = entries.reduce((a, e) => a + e.count, 0) || 1;
+    return entries.sort((a, b) => b.count - a.count)
+      .map((e) => ({ ...e, percent: Math.round((e.count / total) * 1000) / 10 }));
+  }
+
+  // FTL's status breakdown (GRAVITY, FORWARDED, CACHE, REGEX, DENYLIST, …) folded
+  // into friendly, percentaged groups.
+  function normalizeStatus(status, total) {
+    if (!status || typeof status !== 'object') return [];
+    const t = Number(total) || Object.values(status).reduce((a, v) => a + (Number(v) || 0), 0) || 1;
+    const friendly = {
+      FORWARDED: 'Forwarded', CACHE: 'Cached', GRAVITY: 'Blocked (gravity)',
+      REGEX: 'Blocked (regex)', DENYLIST: 'Blocked (denylist)', UNKNOWN: 'Unknown',
+      EXTERNAL_BLOCKED_IP: 'Blocked (external)', EXTERNAL_BLOCKED_NULL: 'Blocked (external)',
+      EXTERNAL_BLOCKED_NXRA: 'Blocked (external)', SPECIAL_DOMAIN: 'Special', CACHE_STALE: 'Cached (stale)',
+    };
+    return Object.entries(status).map(([k, v]) => ({ key: k, label: friendly[k] || k, count: Number(v) || 0 }))
+      .filter((e) => e.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .map((e) => ({ ...e, percent: Math.round((e.count / t) * 1000) / 10 }));
   }
 
   /** Probe which API version answers, caching the result. */

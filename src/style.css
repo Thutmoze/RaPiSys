@@ -4973,29 +4973,59 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 
 /* Pi-hole DNS analytics panel */
 .net-dns-cog { margin-left: auto; padding: 2px 8px; font-size: 14px; line-height: 1; }
-.net-pihole-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-.net-pihole-badge { font-size: 11px; font-weight: 700; color: var(--accent-cyan);
-  background: rgba(0,212,255,0.1); border: 1px solid rgba(0,212,255,0.3); border-radius: 6px; padding: 2px 8px; }
-.net-pihole-block { font-size: 12px; font-weight: 600; }
-.net-pihole-block.on { color: var(--accent-green); }
-.net-pihole-block.off { color: var(--accent-red); }
-.net-pihole-head .net-toggle { margin-left: auto; padding: 4px 10px; font-size: 12px; }
-.net-pihole-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
-.net-pi-stat { display: flex; flex-direction: column; gap: 2px; padding: 10px; background: var(--bg-secondary); border-radius: 10px; }
-.net-pi-n { font-size: 20px; font-weight: 700; color: var(--text-primary); }
-.net-pi-n.net-pi-red { color: #e11d63; }
-.net-pi-l { font-size: 11px; color: var(--text-muted); }
-.net-pihole-cats { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-.net-cat-row { display: grid; grid-template-columns: 90px 1fr 44px; align-items: center; gap: 10px; font-size: 12px; }
-.net-cat-l { color: var(--text-secondary); }
-.net-cat-permitted span { background: var(--accent-green) !important; }
-.net-cat-blocked span { background: #e11d63 !important; }
-.net-cat-cached span { background: var(--accent-cyan) !important; }
-.net-cat-forwarded span { background: var(--accent-purple) !important; }
-.net-pihole-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.net-pihole-col .net-proto-summary { font-weight: 600; color: var(--text-secondary); }
-.net-bar-ok span { background: var(--accent-green) !important; }
-.net-bar-block span { background: #e11d63 !important; }
+
+/* Header: status identity left, actions right */
+.net-ph-header { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; padding-bottom: 14px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border-color); }
+.net-ph-id { display: flex; align-items: center; gap: 8px; }
+.net-ph-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.net-ph-dot.on { background: var(--accent-green); box-shadow: 0 0 8px rgba(34,197,94,0.6); }
+.net-ph-dot.off { background: var(--accent-red); }
+.net-ph-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.net-ph-ver { font-size: 10px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+  color: var(--accent-cyan); background: rgba(0,212,255,0.1);
+  border: 1px solid rgba(0,212,255,0.25); border-radius: 5px; padding: 2px 7px; }
+.net-ph-actions { display: flex; align-items: center; gap: 8px; }
+.net-ph-actions .set-btn { padding: 6px 12px; font-size: 12px; }
+
+/* Stat tiles */
+.net-ph-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+.net-ph-stat { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px;
+  background: var(--bg-secondary); border-radius: 12px; border: 1px solid transparent; }
+.net-ph-stat.danger { border-color: rgba(225,29,99,0.2); }
+.net-ph-statn { font-size: 22px; font-weight: 700; color: var(--text-primary); line-height: 1.1; }
+.net-ph-stat.danger .net-ph-statn { color: #e11d63; }
+.net-ph-statl { font-size: 11px; color: var(--text-muted); }
+
+/* Section headers shared by categories + domains */
+.net-ph-h { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 10px; }
+
+/* Categories: two columns of labeled bars */
+.net-ph-cats { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; margin-bottom: 18px; }
+.net-catrow { display: grid; grid-template-columns: 1fr 90px auto; align-items: center;
+  gap: 10px; margin-bottom: 8px; }
+.net-catrow-l { font-size: 12px; color: var(--text-secondary); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.net-catrow-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
+.net-catrow-bar span { display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); }
+.net-catrow-n { font-size: 11px; color: var(--text-muted); min-width: 38px; text-align: right; }
+
+/* Top domains: two columns */
+.net-ph-doms { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; }
+.net-dom-row { display: grid; grid-template-columns: 1fr 70px auto; align-items: center;
+  gap: 10px; margin-bottom: 8px; }
+.net-dom-name { font-size: 12px; color: var(--text-secondary); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.net-dom-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
+.net-dom-bar span { display: block; height: 100%; border-radius: 3px; }
+.net-dom-bar.ok span { background: var(--accent-green); }
+.net-dom-bar.block span { background: #e11d63; }
+.net-dom-n { font-size: 11px; color: var(--text-muted); min-width: 44px; text-align: right; }
+.net-dns-empty { font-size: 12px; color: var(--text-muted); padding: 4px 0; }
+
 .net-pi-form { display: flex; flex-direction: column; gap: 10px; }
 .net-pi-form .set-kv input, .net-pi-form .set-kv select { background: var(--bg-secondary);
   border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary);
@@ -5003,7 +5033,10 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-pi-testresult { font-size: 12px; }
 .net-pi-testresult.ok { color: var(--accent-green); }
 .net-pi-testresult.bad { color: var(--accent-red); }
-@media (max-width: 640px) { .net-pihole-stats { grid-template-columns: repeat(2, 1fr); } .net-pihole-cols { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .net-ph-stats { grid-template-columns: repeat(2, 1fr); }
+  .net-ph-cats, .net-ph-doms { grid-template-columns: 1fr; }
+}
 
 /* Pi-hole install panel (Settings → DNS) */
 .set-pi-install { margin: 16px 0; padding: 16px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border-color); }

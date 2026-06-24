@@ -18,7 +18,8 @@ function startMockPihole(mode) {
       }
       if (url.pathname === '/api/auth' && req.method === 'GET') return send(200, { session: { valid: false } });
       if (url.pathname === '/api/stats/summary') {
-        return send(200, { queries: { total: 1000, blocked: 250, percent_blocked: 25, unique_domains: 120, forwarded: 600, cached: 150 },
+        return send(200, { queries: { total: 1000, blocked: 250, percent_blocked: 25, unique_domains: 120, forwarded: 600, cached: 150,
+          types: { A: 700, AAAA: 250, HTTPS: 50 }, status: { FORWARDED: 600, CACHE: 150, GRAVITY: 250 } },
           clients: { active: 4, total: 6 }, gravity: { domains_being_blocked: 450000 }, blocking: state.blocking });
       }
       if (url.pathname === '/api/stats/top_domains') {
@@ -80,6 +81,9 @@ describe('pihole client — v6', () => {
     expect(s.topPermitted[0].domain).toBe('github.com');
     expect(s.topBlocked[0].domain).toBe('ads.example.com');
     expect(s.webPort).toBe(mock.port);
+    // Real query types + status breakdown are surfaced and sorted by count.
+    expect(s.queryTypes[0]).toMatchObject({ key: 'A', count: 700 });
+    expect(s.statusBreakdown.find((c) => c.key === 'GRAVITY')).toMatchObject({ label: 'Blocked (gravity)', count: 250 });
     const blockedCat = s.categories.find((c) => c.key === 'blocked');
     expect(blockedCat.count).toBe(250);
     expect(blockedCat.percent).toBe(25);
