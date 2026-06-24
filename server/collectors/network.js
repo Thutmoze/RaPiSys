@@ -320,6 +320,16 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
     try { return { agent: true, ...(await agentCall('pihole.systemResolverStatus', {}, null, 10000)) }; }
     catch (e) { return { enabled: false, agent: true, error: e.message }; }
   }
+  // Back up the Pi-hole DB to the NAS (streamed), and list existing backups.
+  async function piholeBackupToNas(params, onLine) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('pihole.backupToNas', params, onLine, 600000);
+  }
+  async function piholeBackupStatus(mountpoint) {
+    if (!agentConfigured()) return { backups: [], agent: false };
+    try { return { agent: true, ...(await agentCall('pihole.backupStatus', { mountpoint }, null, 15000)) }; }
+    catch (e) { return { backups: [], agent: true, error: e.message }; }
+  }
 
   async function nethogsSample(seconds = 5) {
     if (!agentConfigured()) throw new Error('host agent required');
@@ -333,7 +343,7 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
 
   return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot,
     piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession, piholeDetect, piholeInstall, piholeCheckUpdate, piholeUpdate,
-    piholeSetSystemResolver, piholeSystemResolverStatus };
+    piholeSetSystemResolver, piholeSystemResolverStatus, piholeBackupToNas, piholeBackupStatus };
 }
 
 const WELL_KNOWN = {

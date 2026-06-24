@@ -2009,6 +2009,56 @@ pageRenderers.settings = (() => {
       } catch (e) { r0.textContent = '✗ ' + e.message; r0.classList.add('bad'); }
     };
 
+    // ---- Back up Pi-hole logs to NAS ----
+    if (detect.installed) {
+      const bwrap = el('div', 'net-pi-backup');
+      bwrap.innerHTML = `<h4 class="sess-h" style="margin-top:24px">Back up logs to NAS</h4><div data-pi="backupbody"><p class="net-dns-note">Loading…</p></div>`;
+      box.appendChild(bwrap);
+      const bbody = $('[data-pi=backupbody]', bwrap);
+      let bk = {};
+      try { bk = await api('/network/dns/pihole/backup'); } catch { /* */ }
+      const fmtMB = (n) => (n == null ? '—' : (n / 1048576).toFixed(1) + ' MB');
+      if (!bk.nasConfigured) {
+        bbody.innerHTML = `<p class="net-dns-note">No NAS is configured yet. Set one up in <a class="net-link" href="#/settings?tab=storage">Settings → Storage</a>, then come back to schedule Pi-hole log backups here.</p>`;
+      } else {
+        const c = bk.config || {};
+        const list = (bk.backups || []).slice(0, 5);
+        bbody.innerHTML = `
+          <p class="net-dns-note">The live Pi-hole database stays on the Pi (running it directly from a NAS isn\u2019t safe). RaPiSys copies a consistent, compressed snapshot to <b>${esc(bk.nas?.mountpoint || '')}/pihole-backups</b> on a schedule.</p>
+          <div class="set-kv set-kv-toggle"><span>Scheduled backups to ${esc(bk.nas?.label || 'NAS')}</span>
+            <label class="set-switch"><input type="checkbox" data-pi="bkenabled" ${c.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+          <div class="set-kv"><span>Frequency</span><select data-pi="bkfreq"><option value="daily"${c.frequency !== 'weekly' ? ' selected' : ''}>Daily</option><option value="weekly"${c.frequency === 'weekly' ? ' selected' : ''}>Weekly</option></select></div>
+          <div class="set-kv"><span>Keep last</span><input type="number" data-pi="bkretain" value="${c.retain || 14}" min="1" max="365" style="max-width:90px"> <span class="net-dns-note" style="display:inline">backups</span></div>
+          <div class="set-actions">
+            <button class="set-btn set-btn-primary" data-pi="bksave">${SAVE_ICON}<span>Save</span></button>
+            <button class="set-btn set-btn-edit" data-pi="bknow">Backup Now</button>
+            <span class="net-pi-testresult" data-pi="bkresult"></span>
+          </div>
+          <pre class="set-pi-log" data-pi="bklog" style="display:none"></pre>
+          ${list.length ? `<div class="net-bk-list"><div class="net-ph-h">Recent backups on NAS</div>${list.map((f) => `<div class="net-bk-row"><span class="net-bk-name">${esc(f.name)}</span><span class="net-bk-size">${fmtMB(f.size)}</span><span class="net-bk-date">${new Date(f.mtime).toLocaleString()}</span></div>`).join('')}</div>` : '<p class="net-dns-note">No backups yet.</p>'}`;
+        enhanceSelects(bbody);
+        const bval = (k) => { const e = $(`[data-pi=${k}]`, bbody); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
+        $('[data-pi=bksave]', bbody).onclick = async () => {
+          try { await api('/network/dns/pihole/backup/config', { method: 'POST', body: { enabled: bval('bkenabled'), frequency: bval('bkfreq'), retain: Number(bval('bkretain')) } });
+            toast('success', 'Pi-hole', 'Backup schedule saved'); }
+          catch (e) { toast('error', 'Pi-hole', e.message); }
+        };
+        $('[data-pi=bknow]', bbody).onclick = async () => {
+          const btn = $('[data-pi=bknow]', bbody); const logEl = $('[data-pi=bklog]', bbody);
+          logEl.style.display = ''; logEl.textContent = ''; btn.disabled = true; btn.textContent = 'Backing up…';
+          const appendLog = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+          let finished = false;
+          const es = new EventSource('/api/network/dns/pihole/backup/run/stream');
+          es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
+          es.addEventListener('done', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+            appendLog(`✓ Backup complete (${(r.size / 1048576).toFixed(1)} MB).`); toast('success', 'Pi-hole', 'Backed up to NAS'); setTimeout(() => loadPihole(host), 1500); });
+          es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Backup failed'; try { m = JSON.parse(ev.data).message || m; } catch {}
+            appendLog('✗ ' + m); toast('error', 'Pi-hole', m); btn.disabled = false; btn.textContent = 'Backup Now'; });
+          es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); btn.disabled = false; btn.textContent = 'Backup Now'; };
+        };
+      }
+    }
+
     // Install flow
     const installBtn = $('[data-pi=install]', box);
     if (installBtn) {

@@ -259,6 +259,27 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     if (Date.now() - last < 23 * 3600e3) return;     // ~daily
     try { await piholeUpdateCheckJob(); } catch { /* */ }
   }, { runNow: true });
+
+  // Scheduled Pi-hole DB backup to the NAS (safe sqlite .backup + gzip). Live DB
+  // stays on the Pi; this just archives a consistent copy on the configured NAS.
+  globalThis.__rapisysPiholeBackup = globalThis.__rapisysPiholeBackup || { lastRunAt: 0, lastOk: null, lastError: null };
+  scheduler.register('pihole-nas-backup', 3600e3, async () => {
+    let s; try { s = await loadSettings(); } catch { return; }
+    const cfg = s.rapisys?.piholeBackup;
+    const nas = s.rapisys?.nas;
+    if (!cfg?.enabled || !nas?.mountpoint) return;
+    const intervalMs = cfg.frequency === 'weekly' ? 7 * 24 * 3600e3 : 24 * 3600e3;
+    const last = globalThis.__rapisysPiholeBackup.lastRunAt || 0;
+    if (Date.now() - last < intervalMs - 3600e3) return;   // honor frequency (with slack)
+    try {
+      const res = await network.piholeBackupToNas({ mountpoint: nas.mountpoint, retain: cfg.retain || 14 });
+      globalThis.__rapisysPiholeBackup = { lastRunAt: Date.now(), lastOk: { file: res.file, size: res.size }, lastError: null };
+      eventsFacade.add('pihole.backup.ok', 'info', { file: res.file, size: res.size });
+    } catch (e) {
+      globalThis.__rapisysPiholeBackup = { ...globalThis.__rapisysPiholeBackup, lastRunAt: Date.now(), lastError: e.message };
+      eventsFacade.add('pihole.backup.failed', 'warning', { error: e.message });
+    }
+  }, { runNow: false });
   scheduler.register('inventory-sync', 30 * 60e3, async () => {
     try {
       const items = await inventory.collectAll();

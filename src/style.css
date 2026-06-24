@@ -5033,6 +5033,14 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-pi-testresult { font-size: 12px; }
 .net-pi-testresult.ok { color: var(--accent-green); }
 .net-pi-testresult.bad { color: var(--accent-red); }
+.net-bk-list { margin-top: 14px; }
+.net-bk-row { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center;
+  padding: 6px 0; border-top: 1px solid var(--border-color); font-size: 12px; }
+.net-bk-name { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, monospace; }
+.net-bk-size { color: var(--text-primary); font-weight: 600; }
+.net-bk-date { color: var(--text-muted); }
+.net-link { color: var(--accent-cyan); text-decoration: none; }
+.net-link:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   .net-ph-stats { grid-template-columns: repeat(2, 1fr); }
   .net-ph-cats, .net-ph-doms { grid-template-columns: 1fr; }

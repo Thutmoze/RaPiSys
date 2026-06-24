@@ -848,6 +848,87 @@ const OPS = {
     return { ok: true, method: 'docker', version: after.version };
   },
 
+  // ---- Pi-hole long-term DB backup to the NAS -----------------------------
+  // The live FTL SQLite DB stays on the Pi (SQLite over CIFS/NFS is unsafe). We
+  // take a CONSISTENT copy with sqlite3 .backup (safe while FTL is writing),
+  // gzip it, and drop it on the NAS mount. Old backups are pruned to `retain`.
+  async 'pihole.backupToNas'({ mountpoint, retain = 14 } = {}, send) {
+    assert(typeof mountpoint === 'string' && mountpoint.startsWith(MOUNT_BASE + '/'),
+      `mountpoint must be under ${MOUNT_BASE}`);
+    const r = Math.min(Math.max(parseInt(retain, 10) || 14, 1), 365);
+    // NAS must be mounted.
+    const st = await OPS['nas.status']({ mountpoint });
+    assert(st.mounted, 'NAS is not mounted at ' + mountpoint);
+
+    // Locate the live DB (host native vs docker container).
+    const det = await OPS['pihole.detect']();
+    assert(det.installed, 'Pi-hole is not installed');
+    send?.('Locating Pi-hole database…');
+
+    const destDir = path.join(mountpoint, 'pihole-backups');
+    fs.mkdirSync(destDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    const destFile = path.join(destDir, `pihole-FTL-${stamp}.db.gz`);
+
+    // Ensure sqlite3 is available for a safe .backup.
+    const haveSqlite = await run('sh', ['-c', 'command -v sqlite3'], 4000);
+
+    if (det.method === 'docker') {
+      const name = det.container || 'pihole';
+      send?.('Creating a consistent copy inside the container…');
+      // sqlite3 ships in the pihole image; .backup to a tmp file, then stream out.
+      const tmp = `/tmp/pihole-FTL-${stamp}.db`;
+      const bk = await run('sh', ['-c',
+        `docker exec ${shq(name)} sh -c ${shq(`sqlite3 /etc/pihole/pihole-FTL.db ".backup '${tmp}'"`)}`], 180000);
+      assert(bk.code === 0, 'sqlite3 .backup failed inside the container: ' + (bk.stderr || ''));
+      send?.('Compressing and copying to the NAS…');
+      // Stream the tmp DB out of the container, gzip on the host, write to NAS.
+      const out = await run('sh', ['-c',
+        `docker exec ${shq(name)} cat ${shq(tmp)} | gzip -c > ${shq(destFile)}`], 300000);
+      assert(out.code === 0, 'copy to NAS failed: ' + (out.stderr || ''));
+      await run('sh', ['-c', `docker exec ${shq(name)} rm -f ${shq(tmp)}`], 15000).catch(() => {});
+    } else {
+      const db = '/etc/pihole/pihole-FTL.db';
+      assert(fs.existsSync(db), 'Pi-hole DB not found at ' + db);
+      const tmp = `/tmp/pihole-FTL-${stamp}.db`;
+      send?.('Creating a consistent copy…');
+      if (haveSqlite.code === 0) {
+        const bk = await run('sqlite3', [db, `.backup '${tmp}'`], 180000);
+        assert(bk.code === 0, 'sqlite3 .backup failed: ' + (bk.stderr || ''));
+      } else {
+        // Fallback: cp is less safe but acceptable; FTL uses WAL so a plain copy
+        // is usually consistent enough. Prefer sqlite3 when present.
+        await run('cp', [db, tmp], 60000);
+      }
+      send?.('Compressing and copying to the NAS…');
+      const out = await run('sh', ['-c', `gzip -c ${shq(tmp)} > ${shq(destFile)}`], 300000);
+      assert(out.code === 0, 'copy to NAS failed');
+      fs.unlinkSync(tmp);
+    }
+
+    // Prune old backups beyond `retain` (keep newest r).
+    send?.('Pruning old backups…');
+    const files = fs.readdirSync(destDir).filter((f) => /^pihole-FTL-.*\.db\.gz$/.test(f)).sort();
+    const remove = files.slice(0, Math.max(0, files.length - r));
+    for (const f of remove) { try { fs.unlinkSync(path.join(destDir, f)); } catch {} }
+
+    const size = fs.statSync(destFile).size;
+    send?.(`Done — ${(size / 1048576).toFixed(1)} MB written.`);
+    return { ok: true, file: destFile, size, pruned: remove.length, kept: Math.min(files.length, r) };
+  },
+
+  // List existing Pi-hole backups on the NAS.
+  async 'pihole.backupStatus'({ mountpoint } = {}) {
+    assert(typeof mountpoint === 'string' && mountpoint.startsWith(MOUNT_BASE + '/'),
+      `mountpoint must be under ${MOUNT_BASE}`);
+    const dir = path.join(mountpoint, 'pihole-backups');
+    if (!fs.existsSync(dir)) return { backups: [] };
+    const backups = fs.readdirSync(dir).filter((f) => /^pihole-FTL-.*\.db\.gz$/.test(f))
+      .map((f) => { const s = fs.statSync(path.join(dir, f)); return { name: f, size: s.size, mtime: s.mtimeMs }; })
+      .sort((a, b) => b.mtime - a.mtime);
+    return { backups };
+  },
+
   // ---- per-process bandwidth via nethogs (opt-in, installs on first use) ---
   async 'nethogs.sample'({ seconds = 5 }) {
     // Ensure nethogs is present (tiny package).

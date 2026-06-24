@@ -192,6 +192,58 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
     res.json(globalThis.__rapisysPiholeUpdate || { checkedAt: 0, updateAvailable: false });
   });
 
+  // ---- Pi-hole DB backup to NAS ------------------------------------------
+
+  // Backup config + status: the configured NAS mount, schedule, and existing files.
+  r.get('/dns/pihole/backup', async (req, res) => {
+    try {
+      const s = await loadSettings();
+      const nas = s.rapisys?.nas || null;
+      const cfg = s.rapisys?.piholeBackup || { enabled: false, frequency: 'daily', retain: 14 };
+      let backups = [];
+      if (nas?.mountpoint) {
+        const st = await network.piholeBackupStatus(nas.mountpoint);
+        backups = st.backups || [];
+      }
+      res.json({ nasConfigured: !!nas?.mountpoint, nas: nas ? { label: nas.label, mountpoint: nas.mountpoint } : null,
+        config: cfg, backups });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Save backup config (enabled, frequency, retain).
+  r.post('/dns/pihole/backup/config', requireControl, async (req, res) => {
+    const b = req.body || {};
+    const frequency = ['daily', 'weekly'].includes(b.frequency) ? b.frequency : 'daily';
+    const retain = Math.min(Math.max(parseInt(b.retain, 10) || 14, 1), 365);
+    try {
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        s.rapisys.piholeBackup = { enabled: !!b.enabled, frequency, retain };
+        await saveSettings(s);
+      });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Run a backup now, streamed (SSE). Admin-token gated. 'failed' event name.
+  r.get('/dns/pihole/backup/run/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    send('start', {});
+    try {
+      const s = await loadSettings();
+      const nas = s.rapisys?.nas;
+      if (!nas?.mountpoint) throw new Error('No NAS is configured — set one up in Settings → Storage first');
+      const retain = s.rapisys?.piholeBackup?.retain || 14;
+      const result = await network.piholeBackupToNas({ mountpoint: nas.mountpoint, retain }, (line) => send('line', { line }));
+      send('done', result);
+    } catch (err) { send('failed', { message: err.message }); }
+    res.end();
+  });
+
   // Whether this Pi's own resolver currently points at Pi-hole.
   r.get('/dns/pihole/system-resolver', async (req, res) => {
     try { res.json(await network.piholeSystemResolverStatus()); }
