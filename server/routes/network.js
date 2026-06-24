@@ -169,6 +169,32 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
     res.end();
   });
 
+  // Cached Pi-hole update status (from the daily job) — cheap, for the chip.
+  r.get('/dns/pihole/update-status', (req, res) => {
+    res.json(globalThis.__rapisysPiholeUpdate || { checkedAt: 0, updateAvailable: false });
+  });
+
+  // Check whether a Pi-hole update is available (method-aware).
+  r.get('/dns/pihole/update-check', async (req, res) => {
+    try { res.json(await network.piholeCheckUpdate()); }
+    catch (err) { res.status(500).json({ updateAvailable: false, error: err.message }); }
+  });
+
+  // Apply a Pi-hole update, streamed (SSE). Admin-token gated. 'failed' event name.
+  r.get('/dns/pihole/update/stream', requireControl, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    send('start', {});
+    try {
+      const result = await network.piholeUpdate((line) => send('line', { line }));
+      network.piholeResetSession();
+      send('done', result);
+    } catch (err) { send('failed', { message: err.message }); }
+    res.end();
+  });
+
   // Opt-in per-process bandwidth sample via nethogs (installs on first use).
   r.post('/nethogs', requireControl, async (req, res) => {
     try { res.json(await network.nethogsSample(Number(req.body?.seconds) || 5)); }

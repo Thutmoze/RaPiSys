@@ -125,3 +125,34 @@ describe('pihole client — v5 fallback', () => {
     expect(await off.snapshot()).toBe(null);
   });
 });
+
+// Pure logic checks mirroring the agent's pihole.checkUpdate decision-making.
+// (The agent op itself shells out to docker/pihole; here we lock in the rules.)
+describe('pihole update-availability logic', () => {
+  // docker: compare local RepoDigest against the registry's latest digest.
+  function dockerUpdateAvailable(localRepoDigest, remoteSha) {
+    if (localRepoDigest && remoteSha) return !localRepoDigest.includes(remoteSha);
+    return false;
+  }
+  it('flags an update when digests differ', () => {
+    expect(dockerUpdateAvailable('pihole/pihole@sha256:aaa', 'sha256:bbb')).toBe(true);
+  });
+  it('reports up-to-date when digests match', () => {
+    expect(dockerUpdateAvailable('pihole/pihole@sha256:aaa', 'sha256:aaa')).toBe(false);
+  });
+  it('is conservative (no false positive) when data is missing', () => {
+    expect(dockerUpdateAvailable('', 'sha256:bbb')).toBe(false);
+    expect(dockerUpdateAvailable('pihole/pihole@sha256:aaa', '')).toBe(false);
+  });
+
+  // host: compare per-component current vs latest from /etc/pihole/versions.
+  function hostUpdateAvailable(cur, lat) {
+    return Object.keys(lat).some((k) => lat[k] && cur[k] && lat[k] !== cur[k]);
+  }
+  it('flags a host update when any component differs', () => {
+    expect(hostUpdateAvailable({ CORE: '6.0', FTL: '6.0' }, { CORE: '6.1', FTL: '6.0' })).toBe(true);
+  });
+  it('reports up-to-date when all components match', () => {
+    expect(hostUpdateAvailable({ CORE: '6.1', FTL: '6.0' }, { CORE: '6.1', FTL: '6.0' })).toBe(false);
+  });
+});

@@ -299,6 +299,17 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('pihole.install', params, onLine, 900000);   // up to 15 min
   }
+  // Check for a Pi-hole update (method-aware).
+  async function piholeCheckUpdate() {
+    if (!agentConfigured()) return { installed: false, updateAvailable: false, agent: false };
+    try { return { agent: true, ...(await agentCall('pihole.checkUpdate', {}, null, 180000)) }; }
+    catch (e) { return { installed: false, updateAvailable: false, agent: true, error: e.message }; }
+  }
+  // Apply a Pi-hole update (streamed).
+  async function piholeUpdate(onLine) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('pihole.update', {}, onLine, 900000);
+  }
 
   async function nethogsSample(seconds = 5) {
     if (!agentConfigured()) throw new Error('host agent required');
@@ -311,7 +322,7 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
   }
 
   return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot,
-    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession, piholeDetect, piholeInstall };
+    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession, piholeDetect, piholeInstall, piholeCheckUpdate, piholeUpdate };
 }
 
 const WELL_KNOWN = {

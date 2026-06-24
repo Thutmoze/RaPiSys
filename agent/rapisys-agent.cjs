@@ -652,6 +652,90 @@ const OPS = {
     return { ok: true, method: 'docker', version: det.version, port: det.port || port, hasPassword: !!webPassword };
   },
 
+  // Check whether a Pi-hole update is available, method-aware.
+  //  host   -> `pihole updatechecker` + parse /etc/pihole/versions (or `pihole -v`)
+  //  docker -> compare the running image's digest against the registry's latest
+  async 'pihole.checkUpdate'() {
+    const det = await OPS['pihole.detect']();
+    if (!det.installed) return { installed: false, updateAvailable: false };
+    if (det.method === 'host') {
+      // Refresh Pi-hole's own version cache, then read it.
+      await run('pihole', ['updatechecker'], 60000).catch(() => {});
+      const ver = await run('sh', ['-c', 'cat /etc/pihole/versions 2>/dev/null'], 5000).catch(() => ({ stdout: '' }));
+      const txt = ver.stdout || '';
+      const cur = {}, lat = {};
+      for (const comp of ['CORE', 'WEB', 'FTL']) {
+        const c = txt.match(new RegExp(`${comp}_VERSION=v?([\\w.]+)`));
+        const l = txt.match(new RegExp(`GITHUB_${comp}_VERSION=v?([\\w.]+)`));
+        if (c) cur[comp] = c[1];
+        if (l) lat[comp] = l[1];
+      }
+      // Fall back to `pihole -v` text if the versions file wasn't parseable.
+      let updateAvailable = Object.keys(lat).some((k) => lat[k] && cur[k] && lat[k] !== cur[k]);
+      if (!Object.keys(lat).length) {
+        const v = await run('pihole', ['-v'], 15000).catch(() => ({ stdout: '' }));
+        updateAvailable = /update available/i.test(v.stdout || '');
+      }
+      return { installed: true, method: 'host', updateAvailable,
+        currentVersion: cur.CORE || det.version || null, latestVersion: lat.CORE || null, components: { current: cur, latest: lat } };
+    }
+    // docker: compare local image digest vs registry latest (no full pull).
+    const name = det.container || 'pihole';
+    const localDigest = await run('sh', ['-c', `docker inspect --format '{{index .RepoDigests 0}}' ${shq(name)} 2>/dev/null`], 8000).catch(() => ({ stdout: '' }));
+    const local = (localDigest.stdout || '').trim();
+    // `docker manifest inspect` needs experimental on older docker; try it, then
+    // fall back to a `docker pull` dry comparison.
+    const remote = await run('sh', ['-c', "docker manifest inspect pihole/pihole:latest 2>/dev/null | grep -m1 -oE '\"digest\": ?\"sha256:[a-f0-9]+\"' | head -1"], 20000).catch(() => ({ stdout: '' }));
+    let updateAvailable = false;
+    if (local && remote.stdout) {
+      const remoteSha = (remote.stdout.match(/sha256:[a-f0-9]+/) || [])[0];
+      updateAvailable = remoteSha ? !local.includes(remoteSha) : false;
+    } else {
+      // Fallback: pull and see if anything new was downloaded.
+      const pull = await run('sh', ['-c', 'docker pull pihole/pihole:latest 2>&1'], 120000).catch(() => ({ stdout: '' }));
+      updateAvailable = !/Image is up to date/i.test(pull.stdout || '');
+    }
+    return { installed: true, method: 'docker', updateAvailable,
+      currentVersion: det.version || null, latestVersion: null, container: name };
+  },
+
+  // Apply a Pi-hole update, method-aware, streamed.
+  async 'pihole.update'(_, send) {
+    const det = await OPS['pihole.detect']();
+    assert(det.installed, 'Pi-hole is not installed');
+    if (det.method === 'host') {
+      send('Running pihole -up…');
+      const r = await runStreaming('pihole', ['-up'], {}, send);
+      assert(r.code === 0, `pihole -up exited with code ${r.code}`);
+      const after = await OPS['pihole.detect']();
+      return { ok: true, method: 'host', version: after.version };
+    }
+    // docker: pull + recreate from the compose dir, preserving the volume config.
+    const dir = '/opt/pihole-docker';
+    const hasCompose = fs.existsSync(path.join(dir, 'docker-compose.yml'));
+    if (hasCompose) {
+      send('Pulling latest image…');
+      const pull = await runStreaming('sh', ['-c', `cd ${shq(dir)} && (docker compose pull || docker-compose pull)`], {}, send);
+      assert(pull.code === 0, 'docker compose pull failed');
+      send('Recreating container…');
+      const up = await runStreaming('sh', ['-c', `cd ${shq(dir)} && (docker compose up -d || docker-compose up -d)`], {}, send);
+      assert(up.code === 0, 'docker compose up failed');
+    } else {
+      // Container not created by us (no compose file): pull + recreate by name.
+      const name = det.container || 'pihole';
+      send('Pulling latest image…');
+      const pull = await runStreaming('sh', ['-c', 'docker pull pihole/pihole:latest'], {}, send);
+      assert(pull.code === 0, 'docker pull failed');
+      send('Restarting container with the new image…');
+      // Safest generic recreate: restart picks up the new image only if recreated;
+      // since we lack the original run args, we restart and report guidance.
+      await run('sh', ['-c', `docker restart ${shq(name)}`], 30000).catch(() => {});
+      send('Note: container restarted. If it did not pick up the new image, recreate it from your compose/run definition.');
+    }
+    const after = await OPS['pihole.detect']();
+    return { ok: true, method: 'docker', version: after.version };
+  },
+
   // ---- per-process bandwidth via nethogs (opt-in, installs on first use) ---
   async 'nethogs.sample'({ seconds = 5 }) {
     // Ensure nethogs is present (tiny package).

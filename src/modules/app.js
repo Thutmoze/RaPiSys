@@ -1843,19 +1843,32 @@ pageRenderers.settings = (() => {
     const box = $('[data-set=pihole]', host);
     if (!box) return;
     box.innerHTML = '<p class="net-dns-note">Loading…</p>';
-    let cfg = {}, detect = {};
+    let cfg = {}, detect = {}, upd = {};
     try { cfg = await api('/network/dns/pihole/config'); } catch { /* defaults */ }
     try { detect = await api('/network/dns/pihole/detect'); } catch { /* agent maybe absent */ }
+    if (detect.installed) { try { upd = await api('/network/dns/pihole/update-status'); } catch { /* */ } }
 
     const statusLine = detect.installed
       ? `<b class="set-ok">● Installed</b> (${esc(detect.method || '')}${detect.version ? ' · v' + esc(detect.version) : ''}${detect.port ? ' · port ' + detect.port : ''})`
       : (detect.agent === false ? '<b class="set-err">○ Host agent unavailable</b>' : '<b class="set-err">○ Not detected on this Pi</b>');
 
+    // Update status row (only when installed).
+    const updLine = detect.installed ? (() => {
+      if (upd.updateAvailable) {
+        const ver = upd.latestVersion ? `${esc(upd.currentVersion || '?')} → ${esc(upd.latestVersion)}` : 'a newer version';
+        return `<div class="set-kv"><span>Updates</span><b class="set-warn">● Update available</b> (${ver}) <button class="net-toggle" data-pi="update">Update Pi-hole</button></div>`;
+      }
+      const when = upd.checkedAt ? new Date(upd.checkedAt).toLocaleString() : 'never';
+      return `<div class="set-kv"><span>Updates</span><b class="set-ok">● Up to date</b> <span class="net-dns-note" style="display:inline">checked ${esc(when)}</span> <button class="net-toggle" data-pi="checkupd">Check now</button></div>`;
+    })() : '';
+
     box.innerHTML = `
       <div class="set-summary">
         <div class="set-kv"><span>Status</span>${statusLine}</div>
+        ${updLine}
         <div class="set-kv"><span>Connection</span><b>${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}</b></div>
       </div>
+      <pre class="set-pi-log" data-pi="updlog" style="display:none"></pre>
       ${!detect.installed && detect.agent !== false ? `
       <div class="set-pi-install">
         <h4 class="sess-h">Install Pi-hole</h4>
@@ -1966,6 +1979,32 @@ pageRenderers.settings = (() => {
         es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pi-hole'; };
       };
     }
+
+    // Update: check now
+    const checkBtn = $('[data-pi=checkupd]', box);
+    if (checkBtn) checkBtn.onclick = async () => {
+      checkBtn.disabled = true; checkBtn.textContent = 'Checking…';
+      try { const r = await api('/network/dns/pihole/update-check');
+        if (r.updateAvailable) toast('info', 'Pi-hole', 'Update available'); else toast('success', 'Pi-hole', 'Up to date');
+        setTimeout(() => loadPihole(host), 600);
+      } catch (e) { toast('error', 'Pi-hole', e.message); checkBtn.disabled = false; checkBtn.textContent = 'Check now'; }
+    };
+    // Update: apply (streamed)
+    const updBtn = $('[data-pi=update]', box);
+    if (updBtn) updBtn.onclick = async () => {
+      if (!await rapisysConfirm('Update Pi-hole now? This runs the appropriate upgrade for your install (host: pihole -up; docker: pull + recreate from the persisted config). DNS may blip briefly during the restart.', { confirmLabel: 'Update Pi-hole' })) return;
+      const logEl = $('[data-pi=updlog]', box); logEl.style.display = ''; logEl.textContent = '';
+      updBtn.disabled = true; updBtn.textContent = 'Updating…';
+      const appendLog = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+      let finished = false;
+      const es = new EventSource('/api/network/dns/pihole/update/stream');
+      es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
+      es.addEventListener('done', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+        appendLog(`✓ Updated${r.version ? ' to v' + r.version : ''}.`); toast('success', 'Pi-hole', 'Updated'); setTimeout(() => loadPihole(host), 1500); });
+      es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Update failed'; try { m = JSON.parse(ev.data).message || m; } catch {}
+        appendLog('✗ ' + m); toast('error', 'Pi-hole', m); updBtn.disabled = false; updBtn.textContent = 'Update Pi-hole'; });
+      es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); updBtn.disabled = false; updBtn.textContent = 'Update Pi-hole'; };
+    };
   }
 
   // ---- Remote Access settings pane ----
@@ -3315,7 +3354,7 @@ pageRenderers.inventory = (() => {
 // ---------------------------------------------------------------------------
 
 pageRenderers.updates = (() => {
-  let updates = [], firmware = null, selected = new Set(), activeFilter = 'all';
+  let updates = [], firmware = null, selected = new Set(), activeFilter = 'all', piholeUpd = null;
   let streaming = false, expandedLog = null, logCache = {}, editSchedule = false, schedPollHost = null;
   const oldExpanded = new Set();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -3391,6 +3430,7 @@ pageRenderers.updates = (() => {
     // pull the auto-check last-run summary so we can show "Auto-checked Xh ago"
     autoCheck = await api('/updates/schedule').then((c) => c.lastRun || null).catch(() => null);
     firmware = await api('/updates/firmware').catch(() => null);
+    piholeUpd = await api('/network/dns/pihole/update-status').catch(() => null);
     if (data.available) render(host);   // we have a cached scan (even if 0 updates)
     else {
       // never checked on this install
@@ -3442,9 +3482,12 @@ pageRenderers.updates = (() => {
       <button class="up-chip up-filter up-chip-sec" data-filter="security">Security (${sec})</button>
       <button class="up-chip up-filter up-chip-kern" data-filter="kernel">Kernel (${kern})</button>
       <button class="up-chip up-filter ${fw ? 'up-chip-fw' : ''}" data-filter="firmware">Firmware ${fw ? `(1)` : '(0)'}</button>
+      ${piholeUpd?.updateAvailable ? `<button class="up-chip up-chip-pihole" data-up="piholego" title="${esc(piholeUpd.currentVersion || '')}${piholeUpd.latestVersion ? ' → ' + esc(piholeUpd.latestVersion) : ''}">Pi-hole (1)</button>` : ''}
       ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}
       ${autoCheck ? `<span class="up-checked up-autocheck" title="Last automatic background check: ${autoCheck.checked} updates, ${autoCheck.security} security">Auto-checked ${fmtChecked(autoCheck.ts)}</span>` : ''}`;
     wireFilters(host);
+    const piGo = $('[data-up=piholego]', host);
+    if (piGo) piGo.onclick = () => { window.location.hash = '#/settings?tab=dns'; };
 
     $('[data-up=actions]', host).innerHTML =
       ACTION_BTN('refresh', ICN.refresh, 'Check for updates')

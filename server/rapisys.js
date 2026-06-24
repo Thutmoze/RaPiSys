@@ -229,6 +229,36 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('reports-daily', 6 * 3600e3, () => { try { reports.materializeDay(); reports.backfill(7); } catch { /* */ } });
   // Refresh today's partial report every 10 min so the Reports page stays live.
   scheduler.register('reports-today', 600e3, () => { try { reports.materializeDay(Date.now()); } catch { /* */ } });
+
+  // Daily Pi-hole update check. Caches the result for the Update Center chip and
+  // the DNS tab, and notifies (email/telegram) on a fresh available->true edge.
+  globalThis.__rapisysPiholeUpdate = globalThis.__rapisysPiholeUpdate || { checkedAt: 0, updateAvailable: false, method: null, currentVersion: null, latestVersion: null };
+  async function piholeUpdateCheckJob() {
+    const piCfg = (await loadSettings()).rapisys?.pihole;
+    if (!piCfg || !piCfg.enabled) { globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false }; return; }
+    let res;
+    try { res = await network.piholeCheckUpdate(); } catch (e) { return; }
+    if (!res || !res.installed) { globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false }; return; }
+    const prev = globalThis.__rapisysPiholeUpdate || {};
+    const next = { checkedAt: Date.now(), installed: true, updateAvailable: !!res.updateAvailable,
+      method: res.method || null, currentVersion: res.currentVersion || null, latestVersion: res.latestVersion || null };
+    globalThis.__rapisysPiholeUpdate = next;
+    // Notify only on a rising edge (became available since last check).
+    if (next.updateAvailable && !prev.updateAvailable) {
+      eventsFacade.add('pihole.update.available', 'info', { method: next.method, current: next.currentVersion, latest: next.latestVersion });
+      const verLine = next.latestVersion ? `${next.currentVersion || '?'} → ${next.latestVersion}` : 'a newer version';
+      const subject = 'RaPiSys: Pi-hole update available';
+      const text = `A Pi-hole update is available (${next.method} install): ${verLine}. Update it from RaPiSys → Settings → DNS, or the Update Center.`;
+      try { const cfg = await loadSettings(); if (cfg.rapisys?.updates?.emailEnabled !== false) await mailer.send({ subject, text, html: `<p>${text}</p>` }); } catch { /* mailer not configured */ }
+      try { await telegram.send({ text }); } catch { /* telegram not configured */ }
+    }
+  }
+  // Tick hourly but only actually check once per ~24h (cheap guard inside).
+  scheduler.register('pihole-update-check', 3600e3, async () => {
+    const last = globalThis.__rapisysPiholeUpdate?.checkedAt || 0;
+    if (Date.now() - last < 23 * 3600e3) return;     // ~daily
+    try { await piholeUpdateCheckJob(); } catch { /* */ }
+  }, { runNow: true });
   scheduler.register('inventory-sync', 30 * 60e3, async () => {
     try {
       const items = await inventory.collectAll();
