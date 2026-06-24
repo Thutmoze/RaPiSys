@@ -1317,7 +1317,7 @@ pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
-  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false;
+  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false;
   // shared glyphs for the colored edit / test buttons
   const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
   const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
@@ -1919,23 +1919,57 @@ pageRenderers.settings = (() => {
         <div class="set-pi-manual" data-pi="manual" style="display:none"></div>
       </div>` : ''}
       <h4 class="sess-h" style="margin-top:24px">Connection</h4>
-      <div class="net-pi-form">
-        <label class="set-toggle"><input type="checkbox" data-pi="enabled" ${cfg.enabled ? 'checked' : ''}> <span>Enable Pi-hole analytics on the Network page</span></label>
-        <div class="set-kv"><span>Host</span><input type="text" data-pi="host" value="${esc(cfg.host || '127.0.0.1')}" placeholder="127.0.0.1"></div>
-        <div class="set-kv"><span>Port</span><input type="number" data-pi="port" value="${cfg.port || 80}" min="1" max="65535"></div>
-        <div class="set-kv"><span>Scheme</span><select data-pi="scheme"><option value="http"${cfg.scheme !== 'https' ? ' selected' : ''}>http</option><option value="https"${cfg.scheme === 'https' ? ' selected' : ''}>https</option></select></div>
-        <div class="set-kv"><span>API version</span><select data-pi="version">
-          <option value="auto"${(cfg.version || 'auto') === 'auto' ? ' selected' : ''}>Auto-detect</option>
-          <option value="6"${cfg.version === '6' ? ' selected' : ''}>v6</option>
-          <option value="5"${cfg.version === '5' ? ' selected' : ''}>v5</option></select></div>
-        <div class="set-kv"><span>Password${cfg.hasPassword ? ' (set)' : ''}</span><input type="password" data-pi="password" placeholder="${cfg.hasPassword ? '•••••• (unchanged)' : 'app-password / API token'}"></div>
-        <p class="net-dns-note">A password is only needed if the Pi-hole web UI is password-protected (v6: an app-password from Settings → Web interface/API; v5: the API token).</p>
-        <div class="set-actions">
-          <button class="set-btn set-btn-primary" data-pi="save">${SAVE_ICON}<span>Save</span></button>
-          <button class="set-btn set-btn-edit" data-pi="test">${TEST_ICON}<span>Test connection</span></button>
-          <span class="net-pi-testresult" data-pi="result"></span>
-        </div>
-      </div>`;
+      ${(() => {
+        const showForm = editPihole || !cfg.enabled;
+        const schemeHost = `${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}`;
+        if (!showForm) {
+          // Configured: show a compact summary with Edit + Test (form hidden).
+          return `<div class="net-pi-form">
+            <div class="set-kv set-kv-toggle">
+              <span>Pi-hole analytics on the Network page</span>
+              <label class="set-switch" title="Disable Pi-hole analytics">
+                <input type="checkbox" data-pi="enabled" checked>
+                <span class="set-switch-track"><span class="set-switch-thumb"></span></span>
+              </label>
+            </div>
+            <div class="set-summary">
+              <div class="set-kv"><span>Address</span><b>${schemeHost}</b></div>
+              <div class="set-kv"><span>API version</span><b>${cfg.version && cfg.version !== 'auto' ? 'v' + esc(cfg.version) : 'Auto-detect'}</b></div>
+              <div class="set-kv"><span>Password</span><b>${cfg.hasPassword ? 'Set' : 'None'}</b></div>
+            </div>
+            <div class="set-actions">
+              <button class="set-btn set-btn-edit" data-pi="edit">${EDIT_ICON}<span>Edit</span></button>
+              <button class="set-btn set-btn-test" data-pi="test">${TEST_ICON}<span>Test connection</span></button>
+              <span class="net-pi-testresult" data-pi="result"></span>
+            </div>
+          </div>`;
+        }
+        // Not configured (or editing): full form.
+        return `<div class="net-pi-form">
+          <div class="set-kv set-kv-toggle">
+            <span>Enable Pi-hole analytics on the Network page</span>
+            <label class="set-switch" title="Enable Pi-hole analytics">
+              <input type="checkbox" data-pi="enabled" ${cfg.enabled ? 'checked' : ''}>
+              <span class="set-switch-track"><span class="set-switch-thumb"></span></span>
+            </label>
+          </div>
+          <div class="set-kv"><span>Host</span><input type="text" data-pi="host" value="${esc(cfg.host || '127.0.0.1')}" placeholder="127.0.0.1"></div>
+          <div class="set-kv"><span>Port</span><input type="number" data-pi="port" value="${cfg.port || 80}" min="1" max="65535"></div>
+          <div class="set-kv"><span>Scheme</span><select data-pi="scheme"><option value="http"${cfg.scheme !== 'https' ? ' selected' : ''}>http</option><option value="https"${cfg.scheme === 'https' ? ' selected' : ''}>https</option></select></div>
+          <div class="set-kv"><span>API version</span><select data-pi="version">
+            <option value="auto"${(cfg.version || 'auto') === 'auto' ? ' selected' : ''}>Auto-detect</option>
+            <option value="6"${cfg.version === '6' ? ' selected' : ''}>v6</option>
+            <option value="5"${cfg.version === '5' ? ' selected' : ''}>v5</option></select></div>
+          <div class="set-kv"><span>Password${cfg.hasPassword ? ' (set)' : ''}</span><input type="password" data-pi="password" placeholder="${cfg.hasPassword ? '•••••• (unchanged)' : 'app-password / API token'}"></div>
+          <p class="net-dns-note">A password is only needed if the Pi-hole web UI is password-protected (v6: an app-password from Settings → Web interface/API; v5: the API token).</p>
+          <div class="set-actions">
+            <button class="set-btn set-btn-primary" data-pi="save">${SAVE_ICON}<span>Save</span></button>
+            <button class="set-btn set-btn-test" data-pi="test">${TEST_ICON}<span>Test connection</span></button>
+            ${cfg.enabled ? `<button class="set-btn set-btn-cancel" data-pi="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
+            <span class="net-pi-testresult" data-pi="result"></span>
+          </div>
+        </div>`;
+      })()}`;
     enhanceSelects(box);
 
     const val = (k) => { const e = $(`[data-pi=${k}]`, box); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
@@ -1944,15 +1978,29 @@ pageRenderers.settings = (() => {
       const pw = val('password'); if (pw) o.password = pw;
       return o;
     };
+    // Edit / Cancel toggle the form vs summary.
+    const editBtn = $('[data-pi=edit]', box);
+    if (editBtn) editBtn.onclick = () => { editPihole = true; loadPihole(host); };
+    const cancelBtn = $('[data-pi=cancel]', box);
+    if (cancelBtn) cancelBtn.onclick = () => { editPihole = false; loadPihole(host); };
+    // The enabled toggle: when summary is shown (configured), flipping it off
+    // disables analytics immediately; flipping on re-enables.
+    const enabledCb = $('[data-pi=enabled]', box);
+    if (enabledCb && !editPihole && cfg.enabled) enabledCb.onchange = async () => {
+      try { await api('/network/dns/pihole/config', { method: 'POST', body: { ...collectCfg(), enabled: enabledCb.checked, host: cfg.host, port: cfg.port, scheme: cfg.scheme, version: cfg.version } });
+        toast(enabledCb.checked ? 'success' : 'info', 'Pi-hole', enabledCb.checked ? 'Analytics enabled' : 'Analytics disabled');
+        setTimeout(() => loadPihole(host), 500);
+      } catch (e) { toast('error', 'Pi-hole', e.message); enabledCb.checked = !enabledCb.checked; }
+    };
     const saveBtn = $('[data-pi=save]', box);
     if (saveBtn) saveBtn.onclick = async () => {
-      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() }); toast('success', 'Pi-hole', 'Settings saved'); }
+      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() }); editPihole = false; toast('success', 'Pi-hole', 'Settings saved'); setTimeout(() => loadPihole(host), 500); }
       catch (e) { toast('error', 'Pi-hole', e.message); }
     };
     const testBtn = $('[data-pi=test]', box);
     if (testBtn) testBtn.onclick = async () => {
       const r0 = $('[data-pi=result]', box); r0.textContent = 'Testing…'; r0.className = 'net-pi-testresult';
-      try { await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
+      try { if (editPihole || !cfg.enabled) await api('/network/dns/pihole/config', { method: 'POST', body: collectCfg() });
         const r = await api('/network/dns/pihole/test', { method: 'POST' });
         if (r.ok) { r0.textContent = `✓ Connected (v${r.apiVersion}${r.totalQueries != null ? ', ' + r.totalQueries.toLocaleString() + ' queries' : ''})`; r0.classList.add('ok'); }
         else { r0.textContent = '✗ ' + (r.error || 'Failed'); r0.classList.add('bad'); }
