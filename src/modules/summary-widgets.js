@@ -104,6 +104,15 @@ export const SUMMARY_WIDGETS = [
     async load(elv) {
       const d = await getJSON('/api/network');
       const dns = d.dns || {};
+      // Pi-hole source: headline = total queries, rows = top permitted domains.
+      if (dns.source === 'pihole' && dns.available !== false) {
+        const top = dns.topPermitted || [];
+        const total = dns.totals?.total;
+        setBig(elv, total != null ? Number(total).toLocaleString() : (top.length || '0'), total != null ? 'queries' : 'domains');
+        if (top.length) setRow(elv, top.slice(0, 3).map((x) => [x.domain, Number(x.count).toLocaleString()]));
+        else setRow(elv, [['Domains', 'awaiting queries']]);
+        return;
+      }
       const doms = dns.domains || [];
       if (doms.length) {
         setBig(elv, doms.length, 'domains');
