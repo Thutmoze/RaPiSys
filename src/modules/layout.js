@@ -370,20 +370,20 @@ function renderDashTabs() {
     dashboard.parentNode.insertBefore(bar, dashboard);
   }
   bar.innerHTML = dashboards.map((d) => `
-    <button class="dash-tab ${d.id === currentDash ? 'dash-tab-active' : ''}" data-dash="${d.id}" draggable="true">
+    <button class="dash-tab ${d.id === currentDash ? 'dash-tab-active' : ''}" data-dash="${d.id}" ${editing ? 'draggable="true"' : ''}>
       ${glyphSvg(d.glyph)}<span class="dash-tab-name">${escHtml(d.name)}</span>
-      ${d.id === currentDash ? `<span class="dash-tab-edit" data-dash-edit="${d.id}" title="Rename / change icon">✎</span>${d.id !== 'default' ? `<span class="dash-tab-del" data-dash-del="${d.id}" title="Delete">✕</span>` : ''}` : ''}
+      ${editing && d.id === currentDash ? `<span class="dash-tab-edit" data-dash-edit="${d.id}" title="Rename / change icon">✎</span>${d.id !== 'default' ? `<span class="dash-tab-del" data-dash-del="${d.id}" title="Delete">✕</span>` : ''}` : ''}
     </button>`).join('')
-    + `<button class="dash-tab-add" data-dash-add title="New dashboard">+</button>`;
+    + (editing ? `<button class="dash-tab-add" data-dash-add title="New dashboard">+</button>` : '');
 
   bar.querySelectorAll('[data-dash]').forEach((b) => b.onclick = (e) => {
     if (e.target.closest('[data-dash-edit]') || e.target.closest('[data-dash-del]')) return;
     switchDashboard(b.dataset.dash);
   });
-  bar.querySelector('[data-dash-add]').onclick = addDashboard;
+  bar.querySelector('[data-dash-add]')?.addEventListener('click', addDashboard);
   bar.querySelectorAll('[data-dash-edit]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); editDashboard(b.dataset.dashEdit); });
   bar.querySelectorAll('[data-dash-del]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); deleteDashboard(b.dataset.dashDel); });
-  wireDashDrag(bar);
+  if (editing) wireDashDrag(bar);
 }
 
 // Drag-to-reorder the tabs. On drop, persist the new order to the server.
@@ -521,8 +521,10 @@ function ensureEditButton() {
   btn.title = 'Edit dashboard layout';
   btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
       stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/>
-      <rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>`;
+      <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+      <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+      <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+      <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>`;
   btn.addEventListener('click', () => { if (!editing) enterEditMode(); });
   actions.insertBefore(btn, actions.firstChild);
 }
@@ -536,6 +538,7 @@ async function enterEditMode() {
 
   editing = true;
   document.body.classList.add('layout-editing');
+  renderDashTabs();   // reveal add/rename/delete affordances
   removeEmptyHint();
   // tear down any locked view, rebuild as editable
   if (grid) { teardownGrid(); grid = null; }
@@ -677,6 +680,7 @@ function finishEdit() {
   toolbarEl?.remove(); toolbarEl = null;
   document.body.classList.remove('layout-editing');
   editing = false;
+  renderDashTabs();   // hide add/rename/delete affordances
   if (grid) { teardownGrid(); grid = null; }
   document.getElementById('layout-parking')?.remove();
   if (savedLayout || currentDash !== 'default') {
