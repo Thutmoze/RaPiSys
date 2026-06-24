@@ -876,11 +876,15 @@ const OPS = {
     if (det.method === 'docker') {
       const name = det.container || 'pihole';
       send?.('Creating a consistent copy inside the container…');
-      // sqlite3 ships in the pihole image; .backup to a tmp file, then stream out.
+      // The official image has no standalone `sqlite3` CLI, but pihole-FTL embeds
+      // SQLite and exposes it via `pihole-FTL sqlite3`. Use that for a consistent
+      // .backup; fall back to the sqlite3 CLI if it happens to be present.
       const tmp = `/tmp/pihole-FTL-${stamp}.db`;
+      const haveCliInCtr = await run('sh', ['-c', `docker exec ${shq(name)} sh -c 'command -v sqlite3'`], 6000).catch(() => ({ code: 1 }));
+      const sqliteCmd = haveCliInCtr.code === 0 ? 'sqlite3' : 'pihole-FTL sqlite3';
       const bk = await run('sh', ['-c',
-        `docker exec ${shq(name)} sh -c ${shq(`sqlite3 /etc/pihole/pihole-FTL.db ".backup '${tmp}'"`)}`], 180000);
-      assert(bk.code === 0, 'sqlite3 .backup failed inside the container: ' + (bk.stderr || ''));
+        `docker exec ${shq(name)} sh -c ${shq(`${sqliteCmd} /etc/pihole/pihole-FTL.db ".backup '${tmp}'"`)}`], 180000);
+      assert(bk.code === 0, 'consistent copy failed inside the container: ' + (bk.stderr || bk.stdout || ''));
       send?.('Compressing and copying to the NAS…');
       // Stream the tmp DB out of the container, gzip on the host, write to NAS.
       const out = await run('sh', ['-c',
@@ -892,12 +896,16 @@ const OPS = {
       assert(fs.existsSync(db), 'Pi-hole DB not found at ' + db);
       const tmp = `/tmp/pihole-FTL-${stamp}.db`;
       send?.('Creating a consistent copy…');
+      // Prefer the sqlite3 CLI; otherwise use pihole-FTL's embedded SQLite; else cp.
+      const haveFtl = await run('sh', ['-c', 'command -v pihole-FTL'], 4000).catch(() => ({ code: 1 }));
       if (haveSqlite.code === 0) {
         const bk = await run('sqlite3', [db, `.backup '${tmp}'`], 180000);
-        assert(bk.code === 0, 'sqlite3 .backup failed: ' + (bk.stderr || ''));
+        assert(bk.code === 0, 'consistent copy failed: ' + (bk.stderr || ''));
+      } else if (haveFtl.code === 0) {
+        const bk = await run('sh', ['-c', `pihole-FTL sqlite3 ${shq(db)} ".backup '${tmp}'"`], 180000);
+        assert(bk.code === 0, 'consistent copy failed: ' + (bk.stderr || bk.stdout || ''));
       } else {
-        // Fallback: cp is less safe but acceptable; FTL uses WAL so a plain copy
-        // is usually consistent enough. Prefer sqlite3 when present.
+        // Last resort: plain copy. FTL uses WAL so this is usually consistent.
         await run('cp', [db, tmp], 60000);
       }
       send?.('Compressing and copying to the NAS…');
