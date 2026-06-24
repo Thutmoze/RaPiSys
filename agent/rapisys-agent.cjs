@@ -90,6 +90,19 @@ function assert(cond, msg) { if (!cond) throw new Error(msg); }
 /** Shell-quote a single argument for use inside `sh -c` strings. */
 function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 
+/** Is a TCP port free on the host? (checks listeners via ss) */
+async function portInUse(port) {
+  const r = await run('sh', ['-c', `ss -lntH 2>/dev/null | awk '{print $4}' | grep -qE '[:.]${port}$' && echo USED || echo FREE`], 5000)
+    .catch(() => ({ stdout: 'FREE' }));
+  return /USED/.test(r.stdout || '');
+}
+/** Pick the first free port starting from `preferred`, then a fallback list. */
+async function firstFreePort(preferred) {
+  const tries = [...new Set([preferred, 8081, 8080, 8088, 8089, 8090, 80].filter(Boolean))];
+  for (const p of tries) { if (!(await portInUse(p))) return p; }
+  return preferred;   // give up gracefully; caller surfaces the bind error
+}
+
 /** systemd unit name for a mountpoint: /mnt/rapisys/nas1 -> mnt-rapisys-nas1.mount */
 function unitNameFor(mountpoint) {
   return mountpoint.replace(/^\//, '').replace(/-/g, '\\x2d').replace(/\//g, '-');
@@ -532,7 +545,25 @@ const OPS = {
   // Docker container. Reports version and the web/API port so the dashboard can
   // connect without the user hunting for it.
   async 'pihole.detect'() {
-    const out = { installed: false, method: null, version: null, port: null, container: null };
+    const out = { installed: false, method: null, version: null, port: null, container: null, apiReachable: false };
+    // Probe a port for a live Pi-hole v6 API (or v5). Returns true if it answers.
+    const probe = (port) => run('sh', ['-c',
+      `curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${port}/api/auth; ` +
+      `echo '|'; curl -s -o /dev/null -w '%{http_code}' --max-time 3 'http://127.0.0.1:${port}/admin/api.php?versions'`], 8000)
+      .then((r) => {
+        const [v6, v5] = (r.stdout || '').split('|');
+        // v6 /api/auth answers 200 (no pw) or 401 (pw set); v5 api.php answers 200.
+        return /^(200|401)$/.test((v6 || '').trim()) || /^200$/.test((v5 || '').trim());
+      }).catch(() => false);
+    // Parse a configured webserver.port value (handles "8081o,[::]:8081o" form).
+    const parsePort = (s) => { const m = (s || '').match(/(\d{2,5})/); return m ? Number(m[1]) : null; };
+    // Find the first port that actually answers, trying the configured one first.
+    const findPort = async (configured) => {
+      const candidates = [...new Set([configured, 80, 8080, 8081, 443].filter(Boolean))];
+      for (const p of candidates) { if (await probe(p)) return { port: p, reachable: true }; }
+      return { port: configured || 80, reachable: false };
+    };
+
     // Native: the `pihole` CLI / pihole-FTL service.
     const cli = await run('sh', ['-c', 'command -v pihole || command -v pihole-FTL'], 4000);
     if (cli.code === 0 && cli.stdout.trim()) {
@@ -540,22 +571,24 @@ const OPS = {
       const v = await run('pihole', ['-v'], 8000).catch(() => ({ stdout: '' }));
       const m = (v.stdout || '').match(/Core\s+version\s+is\s+v?([\d.]+)/i) || (v.stdout || '').match(/v?([\d.]+)/);
       out.version = m ? m[1] : null;
-      // v6 embedded webserver port (pihole.toml webserver.port); default 80.
       const portRead = await run('sh', ['-c', "pihole-FTL --config webserver.port 2>/dev/null | head -1"], 5000).catch(() => ({ stdout: '' }));
-      const pm = (portRead.stdout || '').match(/(\d{2,5})/);
-      out.port = pm ? Number(pm[1]) : 80;
+      const found = await findPort(parsePort(portRead.stdout));
+      out.port = found.port; out.apiReachable = found.reachable;
       return out;
     }
     // Docker: a running container from the pihole/pihole image.
-    const dk = await run('sh', ['-c', "command -v docker >/dev/null && docker ps --filter ancestor=pihole/pihole --format '{{.Names}};{{.Ports}}' 2>/dev/null | head -1"], 6000);
+    const dk = await run('sh', ['-c', "command -v docker >/dev/null && docker ps --filter ancestor=pihole/pihole --format '{{.Names}}' 2>/dev/null | head -1"], 6000);
     if (dk.code === 0 && dk.stdout.trim()) {
-      const [name, ports] = dk.stdout.trim().split(';');
-      out.installed = true; out.method = 'docker'; out.container = name || 'pihole';
-      const pm = (ports || '').match(/:(\d+)->(?:80|8080)\/tcp/);
-      out.port = pm ? Number(pm[1]) : 80;
-      const v = await run('sh', ['-c', `docker exec ${shq(name || 'pihole')} pihole -v 2>/dev/null`], 10000).catch(() => ({ stdout: '' }));
+      const name = dk.stdout.trim();
+      out.installed = true; out.method = 'docker'; out.container = name;
+      const v = await run('sh', ['-c', `docker exec ${shq(name)} pihole -v 2>/dev/null`], 10000).catch(() => ({ stdout: '' }));
       const m = (v.stdout || '').match(/Core\s+version\s+is\s+v?([\d.]+)/i);
       out.version = m ? m[1] : null;
+      // Host networking shows no docker port map, so read the configured port from
+      // inside the container, then VERIFY by probing where the API actually answers.
+      const portRead = await run('sh', ['-c', `docker exec ${shq(name)} pihole-FTL --config webserver.port 2>/dev/null | head -1`], 8000).catch(() => ({ stdout: '' }));
+      const found = await findPort(parsePort(portRead.stdout));
+      out.port = found.port; out.apiReachable = found.reachable;
       return out;
     }
     return out;
@@ -621,11 +654,24 @@ const OPS = {
     send('Installing Pi-hole as a Docker container (official image)…');
     const have = await run('sh', ['-c', 'command -v docker'], 4000);
     assert(have.code === 0, 'Docker is not installed on the host');
+    // Pick a free web/API port. With host networking Pi-hole can't fall back on
+    // its own, so if the chosen port is taken we move to the next free one and
+    // tell the user (this is exactly the :80 collision that breaks installs).
+    let webPort2 = port;
+    if (await portInUse(webPort2)) {
+      const free = await firstFreePort(webPort2 === 80 ? 8081 : webPort2 + 1);
+      send(`Port ${webPort2} is already in use — using ${free} for the Pi-hole web interface instead.`);
+      webPort2 = free;
+    } else {
+      send(`Using port ${webPort2} for the Pi-hole web interface.`);
+    }
     // Free port 53 if systemd-resolved holds it (reversible: disable stub listener).
     send('Checking port 53 (systemd-resolved stub)…');
     await run('sh', ['-c', "ss -lntu 2>/dev/null | grep -q ':53 ' && (mkdir -p /etc/systemd/resolved.conf.d && printf '[Resolve]\\nDNSStubListener=no\\n' > /etc/systemd/resolved.conf.d/rapisys-pihole.conf && systemctl restart systemd-resolved) || true"], 20000);
     const dir = '/opt/pihole-docker';
     fs.mkdirSync(dir, { recursive: true });
+    // Under host networking, non-default web ports need the "<port>o" (HTTP) form.
+    const portSpec = `${webPort2}o,[::]:${webPort2}o`;
     const compose = [
       'services:',
       '  pihole:',
@@ -636,7 +682,7 @@ const OPS = {
       '      TZ: "Etc/UTC"',
       `      FTLCONF_webserver_api_password: "${webPassword.replace(/"/g, '')}"`,
       `      FTLCONF_dns_upstreams: "${upstream}${upstream2 ? ';' + upstream2 : ''}"`,
-      `      FTLCONF_webserver_port: "${port}"`,
+      `      FTLCONF_webserver_port: "${portSpec}"`,
       '    volumes:',
       '      - "./etc-pihole:/etc/pihole"',
       '    cap_add:',
@@ -647,9 +693,11 @@ const OPS = {
     send('Pulling image and starting container…');
     const up = await runStreaming('sh', ['-c', `cd ${shq(dir)} && (docker compose up -d || docker-compose up -d)`], {}, send);
     assert(up.code === 0, `docker compose failed (code ${up.code})`);
-    send('Container started. Detecting connection details…');
+    send('Container started. Verifying the web/API port…');
+    // Give FTL a moment to bind, then detect (which probes for the live API port).
+    await new Promise((r) => setTimeout(r, 4000));
     const det = await OPS['pihole.detect']();
-    return { ok: true, method: 'docker', version: det.version, port: det.port || port, hasPassword: !!webPassword };
+    return { ok: true, method: 'docker', version: det.version, port: det.port || webPort2, hasPassword: !!webPassword, apiReachable: det.apiReachable };
   },
 
   // Check whether a Pi-hole update is available, method-aware.

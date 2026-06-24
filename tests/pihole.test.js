@@ -79,6 +79,7 @@ describe('pihole client — v6', () => {
     expect(s.totals.blocked).toBe(250);
     expect(s.topPermitted[0].domain).toBe('github.com');
     expect(s.topBlocked[0].domain).toBe('ads.example.com');
+    expect(s.webPort).toBe(mock.port);
     const blockedCat = s.categories.find((c) => c.key === 'blocked');
     expect(blockedCat.count).toBe(250);
     expect(blockedCat.percent).toBe(25);

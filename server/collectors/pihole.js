@@ -129,7 +129,7 @@ export function createPiholeClient({ getConfig, getPassword }) {
     const norm = (arr) => (arr?.domains || arr?.top_domains || [])
       .map((d) => ({ domain: d.domain, count: d.count })).filter((d) => d.domain);
     return {
-      available: true, source: 'pihole', apiVersion: 6, loggingEnabled: true,
+      available: true, source: 'pihole', apiVersion: 6, loggingEnabled: true, webPort: base().port,
       blocking: summary?.blocking ?? null,
       totals: {
         total: q.total ?? null,
@@ -185,7 +185,7 @@ export function createPiholeClient({ getConfig, getPassword }) {
     const total = Number(s.dns_queries_today ?? 0);
     const blocked = Number(s.ads_blocked_today ?? 0);
     return {
-      available: true, source: 'pihole', apiVersion: 5, loggingEnabled: true,
+      available: true, source: 'pihole', apiVersion: 5, loggingEnabled: true, webPort: base().port,
       blocking: s.status === 'enabled' ? true : (s.status === 'disabled' ? false : null),
       totals: {
         total, blocked,

@@ -1852,6 +1852,23 @@ pageRenderers.settings = (() => {
       ? `<b class="set-ok">● Installed</b> (${esc(detect.method || '')}${detect.version ? ' · v' + esc(detect.version) : ''}${detect.port ? ' · port ' + detect.port : ''})`
       : (detect.agent === false ? '<b class="set-err">○ Host agent unavailable</b>' : '<b class="set-err">○ Not detected on this Pi</b>');
 
+    // Does the detected port differ from the saved config? Offer to fix it.
+    const portMismatch = detect.installed && detect.port && cfg.port && Number(detect.port) !== Number(cfg.port);
+    const notConfigured = detect.installed && !cfg.enabled;
+    const autoLine = (portMismatch || notConfigured) ?
+      `<div class="set-kv"><span></span><span class="net-dns-note" style="display:inline">${portMismatch ? `Detected on port ${detect.port}, but config uses ${cfg.port || '—'}.` : 'Detected but not enabled.'} <button class="net-toggle" data-pi="autopop">Auto-detect &amp; populate</button></span></div>` : '';
+
+    // API reachability (detected install whose web/API didn't bind, e.g. port clash).
+    const apiLine = (detect.installed && detect.apiReachable === false) ?
+      `<div class="set-kv"><span>API</span><b class="set-warn">● Web/API not reachable</b> <span class="net-dns-note" style="display:inline">Pi-hole\u2019s web server may have failed to bind its port (often a port conflict). Try re-detecting, or reinstall on a free port.</span></div>` : '';
+
+    // Web console link (the native Pi-hole admin UI), built from the Pi\u2019s address.
+    const consolePort = detect.port || cfg.port || 80;
+    const consoleHost = (location.hostname && location.hostname !== '127.0.0.1') ? location.hostname : (cfg.host || '127.0.0.1');
+    const consoleUrl = `http://${consoleHost}:${consolePort}/admin`;
+    const consoleLine = detect.installed ?
+      `<div class="set-kv"><span>Web console</span><a class="net-toggle" href="${consoleUrl}" target="_blank" rel="noopener">Open Pi-hole admin ↗</a></div>` : '';
+
     // Update status row (only when installed).
     const updLine = detect.installed ? (() => {
       if (upd.updateAvailable) {
@@ -1865,7 +1882,10 @@ pageRenderers.settings = (() => {
     box.innerHTML = `
       <div class="set-summary">
         <div class="set-kv"><span>Status</span>${statusLine}</div>
+        ${autoLine}
+        ${apiLine}
         ${updLine}
+        ${consoleLine}
         <div class="set-kv"><span>Connection</span><b>${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}</b></div>
       </div>
       <pre class="set-pi-log" data-pi="updlog" style="display:none"></pre>
@@ -1880,8 +1900,10 @@ pageRenderers.settings = (() => {
         </div>
         <div class="wz-form set-pi-opts">
           <label>Upstream DNS <select data-pi="upstream">${PI_UPSTREAMS.map((u) => `<option value="${u.id}">${u.label}</option>`).join('')}</select></label>
+          <label>Web interface port <input data-pi="webport" type="number" value="80" min="1" max="65535"></label>
           <label>Web/API password (optional) <input data-pi="webpw" type="password" placeholder="leave blank for none"></label>
         </div>
+        <p class="net-dns-note">If the chosen port is already in use, RaPiSys automatically picks a free one and reports it (Pi-hole on host networking can\u2019t fall back on its own).</p>
         <div class="set-actions"><button class="set-btn set-btn-primary" data-pi="install">${SAVE_ICON}<span>Install Pi-hole</span></button><span data-pi="instmsg"></span></div>
         <pre class="set-pi-log" data-pi="log" style="display:none"></pre>
         <div class="set-pi-manual" data-pi="manual" style="display:none"></div>
@@ -1957,7 +1979,7 @@ pageRenderers.settings = (() => {
         if (!confirmed) return;
         const logEl = $('[data-pi=log]', box); logEl.style.display = ''; logEl.textContent = '';
         installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Installing…';
-        const params = new URLSearchParams({ method, upstream: up.dns1, upstream2: up.dns2, webPassword: val('webpw') || '', webPort: '80' });
+        const params = new URLSearchParams({ method, upstream: up.dns1, upstream2: up.dns2, webPassword: val('webpw') || '', webPort: String(val('webport') || 80) });
         let finished = false;
         const es = new EventSource('/api/network/dns/pihole/install/stream?' + params.toString());
         const appendLog = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
@@ -1979,6 +2001,16 @@ pageRenderers.settings = (() => {
         es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pi-hole'; };
       };
     }
+
+    // Auto-detect & populate the connection config from detection
+    const autoBtn = $('[data-pi=autopop]', box);
+    if (autoBtn) autoBtn.onclick = async () => {
+      autoBtn.disabled = true; autoBtn.textContent = 'Detecting…';
+      try { const r = await api('/network/dns/pihole/autoconfig', { method: 'POST' });
+        toast('success', 'Pi-hole', `Configured on port ${r.port}${r.apiReachable === false ? ' (API not reachable yet)' : ''}`);
+        setTimeout(() => loadPihole(host), 600);
+      } catch (e) { toast('error', 'Pi-hole', e.message); autoBtn.disabled = false; autoBtn.textContent = 'Auto-detect & populate'; }
+    };
 
     // Update: check now
     const checkBtn = $('[data-pi=checkupd]', box);
@@ -2475,9 +2507,12 @@ pageRenderers.network = (() => {
             <span class="net-proto-n">${fmtN(x.count)}</span>
           </div>`).join('');
       };
+      const consoleHost = (location.hostname && location.hostname !== '127.0.0.1') ? location.hostname : '127.0.0.1';
+      const consoleUrl = `http://${consoleHost}:${d.webPort || 80}/admin`;
       html = `<div class="net-pihole-head">
           <span class="net-pihole-badge">Pi-hole v${d.apiVersion || '6'}</span>
           <span class="net-pihole-block ${blockingOn ? 'on' : 'off'}">${blockingOn ? 'Blocking on' : 'Blocking paused'}</span>
+          <a class="net-toggle" href="${consoleUrl}" target="_blank" rel="noopener" title="Open the native Pi-hole admin console">Console ↗</a>
           <button class="net-toggle" data-net="${blockingOn ? 'piblockoff' : 'piblockon'}">${blockingOn ? 'Disable 5 min' : 'Enable blocking'}</button>
         </div>
         <div class="net-pihole-stats">

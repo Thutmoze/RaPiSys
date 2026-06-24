@@ -111,6 +111,24 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Auto-populate the connection config from a fresh detection (host + real port).
+  r.post('/dns/pihole/autoconfig', requireControl, async (req, res) => {
+    try {
+      const det = await network.piholeDetect();
+      if (!det.installed) return res.status(404).json({ ok: false, error: 'No Pi-hole detected on this Pi' });
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        const prev = s.rapisys.pihole || {};
+        s.rapisys.pihole = { enabled: true, host: '127.0.0.1', port: det.port || 80, scheme: 'http', version: prev.version || 'auto' };
+        await saveSettings(s);
+      });
+      await refreshPiholeConfig();
+      network.piholeResetSession();
+      res.json({ ok: true, port: det.port, method: det.method, apiReachable: det.apiReachable });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // Test the Pi-hole connection with the stored config.
   r.post('/dns/pihole/test', requireControl, async (req, res) => {
     try { await refreshPiholeConfig(); network.piholeResetSession(); res.json(await network.piholeTest()); }
