@@ -73,10 +73,10 @@ body {
 }
 
 .welcome-icon {
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  border-radius: 10px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -88,6 +88,7 @@ body {
   height: 24px;
   color: white;
 }
+.welcome-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
 
 .welcome-text {
   flex: 1;
@@ -4472,12 +4473,12 @@ body.ultra .wireguard-section {
   display: flex; flex-direction: row; align-items: center; gap: 12px;
   text-decoration: none;
 }
-.nav-brand-logo { width: 40px; height: 40px; flex-shrink: 0;
+.nav-brand-logo { width: 52px; height: 52px; flex-shrink: 0;
   background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  border-radius: 11px; box-shadow: var(--glow-cyan);
+  border-radius: 14px; box-shadow: var(--glow-cyan);
   display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .nav-brand-logo svg, .nav-brand-logo img { width: 100%; height: 100%; display: block; }
-.nav-brand-name { font-size: 20px; font-weight: 800; letter-spacing: 0.01em; }
+.nav-brand-name { font-size: 22px; font-weight: 800; letter-spacing: 0.01em; }
 .brand-pi { color: #e11d63; }
 .logo-eye { width: 100%; height: 100%; display: block; object-fit: contain; }
 /* relocated system name + Live indicator, sitting under the wordmark in the rail */
