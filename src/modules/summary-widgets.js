@@ -100,27 +100,52 @@ export const SUMMARY_WIDGETS = [
     },
   },
   {
-    id: 'sum-domains', title: 'Top Domains', icon: iconGlobe, nav: '#/network',
+    id: 'sum-domains', title: 'DNS', icon: iconGlobe, nav: '#/network',
     async load(elv) {
       const d = await getJSON('/api/network');
       const dns = d.dns || {};
-      // Pi-hole source: headline = total queries, rows = top permitted domains.
+      const body = elv.querySelector('.sw-body');
+      // Pi-hole source: rich mini-view — headline queries, permitted/blocked split
+      // bar, and the top domains.
       if (dns.source === 'pihole' && dns.available !== false) {
-        const top = dns.topPermitted || [];
-        const total = dns.totals?.total;
-        setBig(elv, total != null ? Number(total).toLocaleString() : (top.length || '0'), total != null ? 'queries' : 'domains');
-        if (top.length) setRow(elv, top.slice(0, 3).map((x) => [x.domain, Number(x.count).toLocaleString()]));
-        else setRow(elv, [['Domains', 'awaiting queries']]);
+        const t = dns.totals || {};
+        const total = Number(t.total ?? 0);
+        const blocked = Number(t.blocked ?? 0);
+        const permitted = Math.max(0, total - blocked);
+        const pctB = t.percentBlocked != null ? Math.round(t.percentBlocked * 10) / 10
+          : (total ? Math.round((blocked / total) * 1000) / 10 : 0);
+        const top = (dns.topPermitted || []).slice(0, 3);
+        const fmt = (n) => Number(n).toLocaleString();
+        const permW = total ? (permitted / total) * 100 : 100;
+        const rows = top.length
+          ? top.map((x) => {
+              const max = Math.max(1, ...top.map((y) => y.count));
+              return `<div class="sw-dns-row"><span class="sw-dns-dom" title="${esc(x.domain)}">${esc(x.domain)}</span>
+                <span class="sw-dns-bar"><span style="width:${Math.max(4, (x.count / max) * 100)}%"></span></span>
+                <span class="sw-dns-n">${fmt(x.count)}</span></div>`;
+            }).join('')
+          : `<div class="sw-dns-empty">Awaiting queries…</div>`;
+        body.innerHTML = `
+          <div class="sw-main"><span class="sw-value">${fmt(total)}</span><span class="sw-label">queries today</span></div>
+          <div class="sw-dns-split" title="${fmt(permitted)} permitted · ${fmt(blocked)} blocked">
+            <span class="sw-dns-perm" style="width:${permW}%"></span>
+            <span class="sw-dns-block" style="width:${100 - permW}%"></span>
+          </div>
+          <div class="sw-dns-legend">
+            <span><i class="sw-dot-ok"></i>${fmt(permitted)} permitted</span>
+            <span><i class="sw-dot-block"></i>${fmt(blocked)} blocked (${pctB}%)</span>
+          </div>
+          <div class="sw-dns-list">${rows}</div>`;
         return;
       }
+      // Fallbacks (non-Pi-hole) keep the standard template.
+      body.innerHTML = `<div class="sw-main"><span class="sw-value" data-sw="value">—</span><span class="sw-label" data-sw="label">loading…</span></div><div class="sw-row" data-sw="row"></div>`;
       const doms = dns.domains || [];
       if (doms.length) {
         setBig(elv, doms.length, 'domains');
         setRow(elv, doms.slice(0, 3).map((x) => [x.domain, x.queries ?? '']));
         return;
       }
-      // No per-domain history available from this resolver (e.g. MagicDNS).
-      // Surface the resolver name as the headline — that's the useful info.
       const resolver = shortResolver(dns.resolver);
       setBig(elv, resolver, 'resolver');
       setRow(elv, [['Per-domain', 'not logged']]);
@@ -129,6 +154,8 @@ export const SUMMARY_WIDGETS = [
 ];
 
 // --- helpers ---------------------------------------------------------------
+
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function shortResolver(r) {
   if (!r) return '—';

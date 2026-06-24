@@ -5625,6 +5625,23 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sw-stat-val.sw-warn { color: #f59e0b; }
 .sw-stat-val.sw-crit { color: #ef4444; }
 
+/* Enhanced DNS summary widget */
+.sw-dns-split { display: flex; height: 8px; border-radius: 5px; overflow: hidden; background: var(--bg-secondary); }
+.sw-dns-perm { background: #10b981; }
+.sw-dns-block { background: #e11d63; }
+.sw-dns-split span { display: block; height: 100%; transition: width 0.4s ease; }
+.sw-dns-legend { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; color: var(--text-muted); margin-top: -4px; }
+.sw-dns-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.sw-dot-ok { background: #10b981; }
+.sw-dot-block { background: #e11d63; }
+.sw-dns-list { display: flex; flex-direction: column; gap: 7px; }
+.sw-dns-row { display: grid; grid-template-columns: 1fr 56px auto; align-items: center; gap: 10px; }
+.sw-dns-dom { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sw-dns-bar { height: 5px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; }
+.sw-dns-bar span { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); }
+.sw-dns-n { font-size: 11px; color: var(--text-muted); min-width: 40px; text-align: right; }
+.sw-dns-empty { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
+
 /* Click a process row to reveal its full command (truncated by default).
    The row is a CSS grid, so we let the expanded command span all columns on a
    new line instead of fighting the fixed column width. */
