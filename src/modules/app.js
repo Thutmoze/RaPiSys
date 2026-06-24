@@ -1847,6 +1847,8 @@ pageRenderers.settings = (() => {
     try { cfg = await api('/network/dns/pihole/config'); } catch { /* defaults */ }
     try { detect = await api('/network/dns/pihole/detect'); } catch { /* agent maybe absent */ }
     if (detect.installed) { try { upd = await api('/network/dns/pihole/update-status'); } catch { /* */ } }
+    let sysres = {};
+    if (detect.installed) { try { sysres = await api('/network/dns/pihole/system-resolver'); } catch { /* */ } }
 
     const statusLine = detect.installed
       ? `<b class="set-ok">● Installed</b> (${esc(detect.method || '')}${detect.version ? ' · v' + esc(detect.version) : ''}${detect.port ? ' · port ' + detect.port : ''})`
@@ -1869,6 +1871,13 @@ pageRenderers.settings = (() => {
     const consoleLine = detect.installed ?
       `<div class="set-kv"><span>Web console</span><a class="net-toggle" href="${consoleUrl}" target="_blank" rel="noopener">Open Pi-hole admin ↗</a></div>` : '';
 
+    // Route this Pi's own DNS through Pi-hole (so the Pi's lookups show in analytics).
+    const sysResLine = (detect.installed && sysres.agent !== false) ? (() => {
+      if (sysres.tailscaleManaged) return `<div class="set-kv"><span>This Pi\u2019s DNS</span><span class="net-dns-note" style="display:inline">Managed by Tailscale (MagicDNS) — can\u2019t route through Pi-hole without disabling MagicDNS.</span></div>`;
+      return `<div class="set-kv"><span>This Pi\u2019s DNS</span><label class="set-toggle"><input type="checkbox" data-pi="sysres" ${sysres.enabled ? 'checked' : ''}> <span>Route this Pi\u2019s lookups through Pi-hole${sysres.enabled ? ' (on)' : ''}</span></label></div>
+        <div class="set-kv"><span></span><span class="net-dns-note" style="display:inline">Only affects this Pi. A fallback resolver is kept so DNS still works if Pi-hole stops. To cover all devices, set your router\u2019s DNS to this Pi\u2019s IP.</span></div>`;
+    })() : '';
+
     // Update status row (only when installed).
     const updLine = detect.installed ? (() => {
       if (upd.updateAvailable) {
@@ -1886,6 +1895,7 @@ pageRenderers.settings = (() => {
         ${apiLine}
         ${updLine}
         ${consoleLine}
+        ${sysResLine}
         <div class="set-kv"><span>Connection</span><b>${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}</b></div>
       </div>
       <pre class="set-pi-log" data-pi="updlog" style="display:none"></pre>
@@ -2010,6 +2020,18 @@ pageRenderers.settings = (() => {
         toast('success', 'Pi-hole', `Configured on port ${r.port}${r.apiReachable === false ? ' (API not reachable yet)' : ''}`);
         setTimeout(() => loadPihole(host), 600);
       } catch (e) { toast('error', 'Pi-hole', e.message); autoBtn.disabled = false; autoBtn.textContent = 'Auto-detect & populate'; }
+    };
+
+    // Route this Pi's DNS through Pi-hole
+    const sysresCb = $('[data-pi=sysres]', box);
+    if (sysresCb) sysresCb.onchange = async () => {
+      const enable = sysresCb.checked;
+      sysresCb.disabled = true;
+      try { const r = await api('/network/dns/pihole/system-resolver', { method: 'POST', body: { enable } });
+        if (r.ok) toast('success', 'Pi-hole', enable ? 'This Pi now resolves through Pi-hole' : 'Restored the Pi\u2019s previous resolver');
+        else { toast('error', 'Pi-hole', r.error || 'Failed'); sysresCb.checked = !enable; }
+      } catch (e) { toast('error', 'Pi-hole', e.message); sysresCb.checked = !enable; }
+      finally { sysresCb.disabled = false; }
     };
 
     // Update: check now

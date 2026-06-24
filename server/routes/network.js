@@ -192,6 +192,20 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
     res.json(globalThis.__rapisysPiholeUpdate || { checkedAt: 0, updateAvailable: false });
   });
 
+  // Whether this Pi's own resolver currently points at Pi-hole.
+  r.get('/dns/pihole/system-resolver', async (req, res) => {
+    try { res.json(await network.piholeSystemResolverStatus()); }
+    catch (err) { res.status(500).json({ enabled: false, error: err.message }); }
+  });
+
+  // Toggle routing this Pi's own DNS through Pi-hole (reversible, with fallback).
+  r.post('/dns/pihole/system-resolver', requireControl, async (req, res) => {
+    const enable = !!req.body?.enable;
+    const fallback = typeof req.body?.fallback === 'string' ? req.body.fallback : undefined;
+    try { res.json(await network.piholeSetSystemResolver(enable, fallback)); }
+    catch (err) { res.status(502).json({ ok: false, error: err.message }); }
+  });
+
   // Check whether a Pi-hole update is available (method-aware).
   r.get('/dns/pihole/update-check', async (req, res) => {
     try { res.json(await network.piholeCheckUpdate()); }

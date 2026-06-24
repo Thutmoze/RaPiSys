@@ -310,6 +310,16 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('pihole.update', {}, onLine, 900000);
   }
+  // Point this Pi's own resolver at Pi-hole (reversible, with fallback).
+  async function piholeSetSystemResolver(enable, fallback) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('pihole.setSystemResolver', { enable, fallback }, null, 30000);
+  }
+  async function piholeSystemResolverStatus() {
+    if (!agentConfigured()) return { enabled: false, agent: false };
+    try { return { agent: true, ...(await agentCall('pihole.systemResolverStatus', {}, null, 10000)) }; }
+    catch (e) { return { enabled: false, agent: true, error: e.message }; }
+  }
 
   async function nethogsSample(seconds = 5) {
     if (!agentConfigured()) throw new Error('host agent required');
@@ -322,7 +332,8 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
   }
 
   return { throughput, vnstat, protocols, protocolShare, connections, topProcesses, dns, dnsSetLogging, dnsForwarder, nethogsSample, snapshot,
-    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession, piholeDetect, piholeInstall, piholeCheckUpdate, piholeUpdate };
+    piholeSnapshot, piholeTest, piholeSetBlocking, piholeResetSession, piholeDetect, piholeInstall, piholeCheckUpdate, piholeUpdate,
+    piholeSetSystemResolver, piholeSystemResolverStatus };
 }
 
 const WELL_KNOWN = {
