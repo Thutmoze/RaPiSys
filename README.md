@@ -4,7 +4,7 @@
 
 **A production-grade system dashboard for the Raspberry Pi 5**
 
-Active-cooling & PMIC telemetry · server-side metric history on your NAS · first-run setup wizard · email alerting · hardened container + host-agent architecture
+Active-cooling & PMIC telemetry · server-side metric history on your NAS · Pi-hole DNS analytics & one-click install · network/sessions/reports/inventory/updates · email & Telegram alerting · hardened container + host-agent architecture
 
 *Based on the excellent [zepgram/pi-dashboard](https://github.com/zepgram/pi-dashboard) (MIT), extended for Pi 5 deployments.*
 
@@ -27,10 +27,11 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **Pi 5 hardware** | Fan RPM, duty cycle, auto/manual control · CPU/SoC temperature with historical charts · throttle & undervoltage detection with a persistent event log · PMIC power telemetry (core voltage, 5 V rail, board watts) |
 | **History engine** | 10 s sampling into SQLite · tiered downsampling (10 s → 1 m → 10 m → 1 h) · configurable retention (7–3650 days) · DB relocatable to a NAS with automatic network-FS-safe journaling and local fallback |
 | **First-run wizard** | Guided setup for NAS mounting (SMB/CIFS incl. SMB1 legacy NAS, NFS), database location, retention policy, SMTP — all from the browser |
-| **Email alerts** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · authenticated SMTP (STARTTLS/465) · password encrypted at rest (AES-256-GCM) and write-only via API · test-send button |
+| **Alerts & notifications** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · authenticated SMTP (STARTTLS/465) · **Telegram** push notifications · credentials encrypted at rest (AES-256-GCM) and write-only via API · test-send buttons |
 | **Sessions** | Live SSH (via systemd-logind, utmp fallback), RealVNC and Tailscale sessions · login history and durations recorded server-side · disconnect active sessions |
 | **Settings page** | Manage NAS mounts (mount/remount/unmount, persisted as systemd units), relocate the metrics database, and review retention, mode, SMTP and agent status — all from the web UI |
-| **Network analytics** | Live per-interface throughput (streaming chart), vnStat bandwidth history (14-day bars), protocol distribution, top processes (socket activity, or opt-in per-process bandwidth via nethogs), and DNS analytics (resolver stats, or opt-in dnsmasq top-domain logging) — daemon-light, built on /proc, ss and vnStat |
+| **Network analytics** | Live per-interface throughput (streaming chart), vnStat bandwidth history (14-day bars), protocol distribution, top processes (socket activity, or opt-in per-process bandwidth via nethogs), and a rich **DNS Analysis** card — daemon-light, built on /proc, ss and vnStat |
+| **Pi-hole / DNS** | First-class [Pi-hole](https://pi-hole.net/) integration: **one-click install** (host `curl\|bash` or Docker, with automatic free-port selection), auto-detection & auto-populate of the connection, v6 (FTL REST) **and** v5 (PHP API) support, query/category/record-type analytics, blocking pause/resume, a toggle to route the Pi's own DNS through Pi-hole (with fallback), update detection with one-click upgrade, and **scheduled, safe backups of the Pi-hole query DB to your NAS** (consistent `sqlite3 .backup` + gzip + retention — the live DB stays on the Pi) |
 | **Reports** | Daily/weekly/monthly summaries (min/avg/max/p95 per metric, peak windows), a 0–100 weighted system health score with per-factor breakdown, metric trend sparklines, and CSV/JSON/print-to-PDF export — materialized nightly to the database |
 | **Inventory** | Searchable, paginated catalog of installed apt packages (version, size, install date), systemd services (status, description), and Docker containers (image, state) — synced to the database every 30 min, queried server-side so 1,500+ packages never flood the browser |
 | **Updates** | apt update detection with security/kernel tagging, per-package or security-only upgrades, full dist-upgrade behind a typed confirmation, rpi-eeprom firmware updates, package changelogs, and update history — upgrades stream live to the UI over SSE, executed through the host agent |
@@ -39,19 +40,23 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **DevOps** | One-command install · snapshot-based upgrades with automatic rollback · deep health checks |
 | **Self-contained** | No CDN dependencies at runtime — works on offline/air-gapped LANs |
 
-**On the roadmap** (architecture already in place): user sessions (SSH/VNC/Tailscale), network analytics (vnStat + protocol/process/DNS), reports with health score & PDF/CSV/JSON export, drag-and-drop layouts, the alert rule engine UI, software update center, and application inventory.
+> **Status:** all feature areas above are implemented and shipping. The dashboard is in active use on a Pi 5 running Raspberry Pi OS Trixie.
 
 ## Screenshots
 
-| First-run wizard | Hardware page |
+| Overview | Hardware |
 |---|---|
-| ![Wizard](docs/screenshots/wizard.png) | ![Hardware](docs/screenshots/hardware.png) |
+| ![Overview](docs/screenshots/overview.png) | ![Hardware](docs/screenshots/hardware.png) |
 
-| Operating mode & MFA enrolment | Admin sign-in (new browsers) |
+| Network & DNS analytics | Settings — DNS / Pi-hole |
 |---|---|
-| ![Mode & MFA](docs/screenshots/wizard-mfa.png) | ![Login](docs/screenshots/login.png) |
+| ![Network](docs/screenshots/network.png) | ![DNS settings](docs/screenshots/settings-dns.png) |
 
-> Captured from the actual app (demo fixture data on the Hardware page, since the build machine has no Pi 5 cooler).
+| First-run wizard | Operating mode & MFA enrolment |
+|---|---|
+| ![Wizard](docs/screenshots/wizard.png) | ![Mode & MFA](docs/screenshots/wizard-mfa.png) |
+
+> Captured from the actual app via the Playwright helpers in `docs/` (run `node docs/capture-screenshots.cjs http://<your-pi>:3001`). Demo fixture data is used on the Hardware page when the build machine has no Pi 5 cooler.
 
 ---
 
@@ -146,9 +151,10 @@ Unauthenticated relays are not supported by design.
                 │ /run/rapisys/agent.sock — HMAC-signed RPC
  ┌──────────────▼─────────────────────────────────────────────┐
  │ rapisys-agent — host systemd unit (root)                   │
- │  FIXED ALLOWLIST: vc.read · fan.* · nas.* · apt.* ·        │
- │  eeprom.* · sys.reboot(confirm) — nothing else, execFile   │
- │  only, strict param validation, journald audit log         │
+ │  FIXED ALLOWLIST: vc.read · fan.* · nas.mount/unmount ·    │
+ │  apt.* · eeprom.* · pihole.detect/install/update/backup · │
+ │  sys.reboot(confirm) — nothing else, execFile only,        │
+ │  strict param validation, journald audit log               │
  └────────────────────────────────────────────────────────────┘
 ```
 
@@ -189,6 +195,9 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 | `/api/setup/*` | wizard: status, mode, NAS mount, storage, retention, SMTP, complete |
 | `/api/auth/*` | register + MFA enrolment (wizard-only), login, logout, whoami |
 | `/api/alerts/*` · `/api/sessions/*` | alert rules/active/history · live sessions + login history |
+| `/api/network` · `/api/network/dns/*` | network snapshot · Pi-hole config/test/detect/install/blocking/update/system-resolver/backup 🔒 |
+| `/api/reports/*` · `/api/inventory/*` · `/api/updates/*` | report aggregation/export · package/service/container inventory · update detection & execution 🔒 |
+| `/api/layouts/*` | dashboards registry, per-dashboard layouts, reorder 🔒 |
 
 🔒 = requires `X-Admin-Token`.
 
@@ -214,6 +223,7 @@ RAPISYS_DEMO=1 node server/index.js
 - SMTP/NAS credentials are AES-256-GCM-encrypted with `SECRET_KEY`; the API never returns them.
 - NAS credentials additionally live only in root-only files on the host (`/etc/rapisys/creds/*.cred`, 0600).
 - SMB1 (needed by the WD My Book World Edition II) is insecure by nature — the wizard warns and we recommend isolating such devices on a trusted VLAN.
+- **Pi-hole DB backups** never run the live SQLite database off the NAS (SQLite over CIFS/NFS risks corruption and can stop FTL from starting). The live DB stays on the Pi; RaPiSys archives a consistent, gzipped `sqlite3 .backup` snapshot to the NAS on a schedule, pruned to a retention count.
 - The agent socket is `0660 root:rapisys`; every operation is HMAC-verified with a 30 s replay window and audit-logged to journald.
 
 ## License & credits

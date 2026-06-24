@@ -22,6 +22,16 @@ const base = process.argv[2] || 'http://localhost:3199';
   await page.waitForTimeout(3500);
   await page.screenshot({ path: `${__dirname}/screenshots/hardware.png` });
 
+  // Network page — throughput, protocols, and the DNS Analysis (Pi-hole) card.
+  await page.goto(`${base}/#/network`);
+  await page.waitForTimeout(5000); // let throughput chart + Pi-hole snapshot load
+  await page.screenshot({ path: `${__dirname}/screenshots/network.png` });
+
+  // Settings → DNS tab (Pi-hole connection, system-resolver, NAS backup).
+  await page.goto(`${base}/#/settings?tab=dns`);
+  await page.waitForTimeout(3500);
+  await page.screenshot({ path: `${__dirname}/screenshots/settings-dns.png` });
+
   await b.close();
   console.log('captured');
 })().catch((e) => { console.error(e); process.exit(1); });
