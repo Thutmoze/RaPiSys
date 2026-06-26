@@ -2367,11 +2367,11 @@ pageRenderers.settings = (() => {
       html += `
       <div class="set-pi-install">
         <h4 class="sess-h">Install Pironman 5 Mini</h4>
-        <p class="net-dns-note">Runs on the host through the RaPiSys agent. A reboot is required after the first install (loads the device-tree overlay for the fan &amp; RGB).</p>
+        <p class="net-dns-note">Runs on the host through the RaPiSys agent. The first install loads a device-tree overlay for the fan &amp; RGB.</p>
         <div class="set-pi-methods">
-          <label class="set-pi-method"><input type="radio" name="pirmethod" value="full" checked> <span><b>Full install</b> — case control plus the Pironman web dashboard. RaPiSys controls it live (no restart). Recommended.</span></label>
-          <label class="set-pi-method"><input type="radio" name="pirmethod" value="slim"> <span><b>Slim install</b> — case control only, no extra dashboard/InfluxDB. Lighter; changes apply via config + service restart.</span></label>
-          <label class="set-pi-method"><input type="radio" name="pirmethod" value="manual"> <span><b>Manual</b> — show me the commands to run myself.</span></label>
+          <label class="set-pi-method"><input type="radio" name="pirmethod" value="full" checked> <span><b>Full Install:</b> case control plus the Pironman web dashboard. RaPiSys controls it live (no per-change restart). <span class="set-pi-reboot">Reboot required after the first install.</span> <span class="set-pi-rec">Recommended</span></span></label>
+          <label class="set-pi-method"><input type="radio" name="pirmethod" value="slim"> <span><b>Slim Install:</b> case control only, no extra dashboard/InfluxDB. Lighter; changes apply via config + service restart. <span class="set-pi-reboot">Reboot required after the first install.</span></span></label>
+          <label class="set-pi-method"><input type="radio" name="pirmethod" value="manual"> <span><b>Manual:</b> show me the commands to run myself.</span></label>
         </div>
         <div class="net-pi-warn">⚠ The Pironman dashboard (port 34001) has no authentication and listens on all interfaces. On a shared LAN, keep it firewalled or bound to localhost.</div>
         <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="install">${INSTALL_ICON}<span>Install Pironman</span></button><button class="set-btn set-btn-edit" data-pir="redetect">Re-detect</button><span data-pir="instmsg"></span></div>
