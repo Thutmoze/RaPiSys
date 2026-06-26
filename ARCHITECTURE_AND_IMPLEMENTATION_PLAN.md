@@ -1,11 +1,11 @@
-# RaPiSys — Architecture & Implementation
+# RaPiSys: Architecture & Implementation
 
 **Project:** Production-grade enhancement of `zepgram/pi-dashboard` for Raspberry Pi 5 (shipped as **RaPiSys**)
 **Target platform:** Raspberry Pi 5 · Raspberry Pi OS Bookworm/**Trixie** (arm64) · Docker / Docker Compose
-**Status:** IMPLEMENTED — all planned feature areas are built and in production use. This document is the original design (sections 1–11) preserved for context, plus an **as-built addendum** (section 13) covering what shipped and the post-plan DNS/Pi-hole subsystem.
+**Status:** IMPLEMENTED. All planned feature areas are built and in production use. This document is the original design (sections 1–11) preserved for context, plus an **as-built addendum** (section 13) covering what shipped and the post-plan subsystems (DNS/Pi-hole and the Pironman case controller).
 **Plan date:** 2026-06-10 · **Last updated:** 2026-06-24
 
-> **Reading guide:** sections 1–11 are the original architecture/plan and remain largely accurate as the system's foundation. Section 12 (open questions) has been resolved — see §13.1. Section 13 is the current as-built state, including the DNS/Pi-hole integration and NAS-backup subsystem that were added after the original plan.
+> **Reading guide:** sections 1–11 are the original architecture/plan and remain largely accurate as the system's foundation. Section 12 (open questions) has been resolved (see §13.1). Section 13 is the current as-built state, including the DNS/Pi-hole integration, the NAS-backup subsystem, and the optional Pironman 5 Mini case controller, all added after the original plan.
 
 ---
 
@@ -44,9 +44,9 @@ Key characteristics relevant to this project:
 
 - **No database.** The only persistence is `settings.json`, guarded by a promise-based file mutex. All time-series history lives in the browser (`HISTORY_LENGTH = 30`) and is lost on refresh. Every historical feature in the requirements (graphs, reports, retention, trends) therefore needs a new storage layer.
 - **No framework on the frontend.** Vanilla JS + Vite build. Rendering is imperative DOM manipulation keyed off a polling loop. Smoothie Charts (canvas) renders live graphs. There is no component system, router, or state store.
-- **Pull-based collection.** Every `/api/stats` request triggers a fresh `systeminformation` sweep (with a static cache for slow-changing data like disks/OS info). Nothing is collected when no browser is open — another reason historical features need a server-side scheduler.
-- **Security model.** Optional `ADMIN_TOKEN` (timing-safe compare) protects mutating endpoints; optional API key protects `/api/v1/*`; in-memory per-IP rate limiting on config writes only; payloads capped at 10 KB; string sanitization on service config. CORS defaults to `*`. There is **no user/login concept** — relevant to feature 6 ("layouts per user").
-- **Container posture.** Runs with `pid: host`, `network_mode: host`, `NET_ADMIN`, read-only mounts of `/proc`, `/sys`, `/`, and the Docker socket. It already reaches deep into the host — but it still **cannot** run `apt`, mount NAS shares, or control the fan from inside the container. This constraint shapes the architecture below.
+- **Pull-based collection.** Every `/api/stats` request triggers a fresh `systeminformation` sweep (with a static cache for slow-changing data like disks/OS info). Nothing is collected when no browser is open, which is another reason historical features need a server-side scheduler.
+- **Security model.** Optional `ADMIN_TOKEN` (timing-safe compare) protects mutating endpoints; optional API key protects `/api/v1/*`; in-memory per-IP rate limiting on config writes only; payloads capped at 10 KB; string sanitization on service config. CORS defaults to `*`. There is **no user/login concept** (relevant to feature 6 ("layouts per user").
+- **Container posture.** Runs with `pid: host`, `network_mode: host`, `NET_ADMIN`, read-only mounts of `/proc`, `/sys`, `/`, and the Docker socket. It already reaches deep into the host, but it still **cannot** run `apt`, mount NAS shares, or control the fan from inside the container. This constraint shapes the architecture below.
 - **Design language** (must be preserved): deep dark theme (`--bg-primary: #0a0a0a`), glassmorphism cards (`--bg-card: rgba(17,17,17,0.8)`), cyan/purple gradients (`--accent-cyan: #00d4ff`, `--accent-purple: #a855f7`), 16px radius, Inter font, 5 color themes, 3 display modes (normal/compact/ultra), Lucide-style inline SVG icons, toast notifications, card-grid layout.
 
 ### 1.3 Existing API surface (to remain unbroken)
@@ -66,11 +66,11 @@ Key characteristics relevant to this project:
 | 5 | Reports + export | Nothing | Entire feature: aggregation, daily/weekly/monthly views, PDF/CSV/JSON export, health score |
 | 6 | Dynamic layouts | Fixed card grid; 3 display modes | Drag/drop, resize, visibility, multi-page, presets, per-profile layouts (and a minimal profile concept) |
 | 7 | Alerting + email | Client-side threshold sounds/toasts only (browser must be open) | Server-side rule engine, SMTP with secure credential storage, severity/suppression/escalation, test send |
-| 8 | Update center | `updatesAvailable` count only | Update lists (apt/security/firmware/kernel), one-click + scheduled updates, history — requires privileged host execution |
+| 8 | Update center | `updatesAvailable` count only | Update lists (apt/security/firmware/kernel), one-click + scheduled updates, history; requires privileged host execution |
 | 9 | App inventory | Docker container list only | dpkg/systemd/user-app inventory, usage tracking, search/filter |
 | 10 | DevOps | Dockerfile + compose + healthcheck | Deployment script with upgrade/rollback, host-side units, NAS mounts, env management |
 
-**Cross-cutting gaps:** server-side time-series storage, a background scheduler, a privileged execution path, and a settings schema extension — these four enable almost every feature above.
+**Cross-cutting gaps:** server-side time-series storage, a background scheduler, a privileged execution path, and a settings schema extension; these four enable almost every feature above.
 
 ---
 
@@ -141,11 +141,11 @@ agent/
 
 ### 3.3 Per-feature design
 
-**F1 — Pi 5 hardware.** The Pi 5's official cooler exposes everything via sysfs: fan RPM at `/sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input`, PWM duty at `.../pwm1` (0–255 → %), and the cooling state under `/sys/class/thermal/cooling_device*`. The Pi 5's PMIC adds rich telemetry via `vcgencmd pmic_read_adc` (per-rail volts/amps — we'll surface VDD_CORE, EXT5V, and total computed wattage), plus `vcgencmd measure_volts`, `get_throttled` (already parsed upstream — we extend it to **log transitions** so undervoltage events are recorded with timestamps even if nobody is watching). Fan mode read from `/sys/.../pwm1_enable`; manual duty set only through the agent. GPU temp via `vcgencmd measure_temp` (on Pi 5 it shares the SoC sensor; we label it accordingly rather than faking a second sensor).
+**F1. Pi 5 hardware.** The Pi 5's official cooler exposes everything via sysfs: fan RPM at `/sys/devices/platform/cooling_fan/hwmon/hwmon*/fan1_input`, PWM duty at `.../pwm1` (0–255 → %), and the cooling state under `/sys/class/thermal/cooling_device*`. The Pi 5's PMIC adds rich telemetry via `vcgencmd pmic_read_adc` (per-rail volts/amps; we surface VDD_CORE, EXT5V, and total computed wattage), plus `vcgencmd measure_volts`, `get_throttled` (already parsed upstream, extended here to **log transitions** so undervoltage events are recorded with timestamps even if nobody is watching). Fan mode read from `/sys/.../pwm1_enable`; manual duty set only through the agent. GPU temp via `vcgencmd measure_temp` (on Pi 5 it shares the SoC sensor; we label it accordingly rather than faking a second sensor).
 
-**F2 — Sessions.** SSH via `who -u` + `/var/run/utmp` semantics (user, tty, source IP, login time, idle) cross-checked with `ss -tnp 'sport = :22'`; VNC by detecting wayvnc/RealVNC processes and established connections on :5900–5910; Tailscale via `tailscale status --json` (peers, last-seen, active flag) — feature auto-hides if the binary is absent. A 60 s sampler diffs current vs. known sessions and writes `session_log` rows (open/close events), giving login history and duration analytics for free.
+**F2. Sessions.** SSH via `who -u` + `/var/run/utmp` semantics (user, tty, source IP, login time, idle) cross-checked with `ss -tnp 'sport = :22'`; VNC by detecting wayvnc/RealVNC processes and established connections on :5900–5910; Tailscale via `tailscale status --json` (peers, last-seen, active flag); the feature auto-hides if the binary is absent. A 60 s sampler diffs current vs. known sessions and writes `session_log` rows (open/close events), giving login history and duration analytics for free.
 
-**F3 — Network analytics. Technology selection:**
+**F3. Network analytics. Technology selection:**
 
 | Option | Verdict | Why |
 |---|---|---|
@@ -154,40 +154,40 @@ agent/
 | **nethogs** | ⚙️ Optional | `nethogs -t` trace mode as an *optional* per-process refinement (uses pcap ≈ CPU). Off by default; toggle in UI. |
 | **dnsmasq/Pi-hole log tail** | ⚙️ Optional | If Pi-hole or dnsmasq with query logging is detected, tail its log for domain stats. Otherwise DNS panel shows resolver stats from `resolvectl statistics` or hides. We will **not** sniff port 53 by default. |
 | ntopng | ❌ Reject | 300–600 MB RAM + Redis dependency; duplicates our UI; defeats "lightweight." |
-| Netdata | ❌ Reject | Excellent tool but it *is* a dashboard — embedding it breaks the design-language requirement and costs ~150 MB RAM. |
+| Netdata | ❌ Reject | Excellent tool but it *is* a dashboard, so embedding it breaks the design-language requirement and costs ~150 MB RAM. |
 | eBPF (custom) | ❌ Defer | Bookworm's 6.6+ kernel supports it, but maintaining CO-RE programs for marginal gain over `ss`-sampling isn't justified in v1. Architecture leaves a collector slot for a future eBPF module. |
 | tcpdump | ❌ Reject as daemon | Used only behind the optional nethogs-style deep-inspection toggle, never continuously. |
 
-Geographic distribution (optional requirement): offline MaxMind-style lookup via the `geoip-lite` npm package (bundled DB, no external calls) — toggleable, default off to save ~60 MB RAM.
+Geographic distribution (optional requirement): offline MaxMind-style lookup via the `geoip-lite` npm package (bundled DB, no external calls), toggleable, default off to save ~60 MB RAM.
 
-**F4 — NAS & retention.** Mount management goes through the agent, which writes **systemd `.mount` + `.automount` units** (not fstab edits — cleaner rollback, automatic retry, no boot hangs when the NAS is off). CIFS with `vers=` selectable (the WD My Book World Edition II is SMB1-only — we'll surface `vers=1.0` with a security warning; the EX2 Ultra speaks SMB2/3 and NFS). Credentials in root-only `/etc/pi-dashboard/creds/*.cred` files referenced by `credentials=`. Retention presets (7/30/90/180/365/custom) drive a tiered downsampler: raw 10 s → 1 min after 48 h → 10 min after 30 d → hourly after 90 d; expired partitions are exported to zstd-compressed monthly archive files on the NAS before deletion. Storage monitor samples `df` on data dir + NAS mount, fits a linear regression over 14 days of growth, projects exhaustion date.
+**F4. NAS & retention.** Mount management goes through the agent, which writes **systemd `.mount` + `.automount` units** (not fstab edits, for cleaner rollback, automatic retry, and no boot hangs when the NAS is off). CIFS with `vers=` selectable (the WD My Book World Edition II is SMB1-only, so we surface `vers=1.0` with a security warning; the EX2 Ultra speaks SMB2/3 and NFS). Credentials in root-only `/etc/pi-dashboard/creds/*.cred` files referenced by `credentials=`. Retention presets (7/30/90/180/365/custom) drive a tiered downsampler: raw 10 s → 1 min after 48 h → 10 min after 30 d → hourly after 90 d; expired partitions are exported to zstd-compressed monthly archive files on the NAS before deletion. Storage monitor samples `df` on data dir + NAS mount, fits a linear regression over 14 days of growth, projects exhaustion date.
 
-**F5 — Reports.** Nightly job materializes `report_daily` rows (min/avg/max/p95 per metric, peak windows, anomaly flags via simple z-score on the daily mean, session counts, bandwidth totals); weekly/monthly are computed from dailies on demand. Health score = weighted rubric (thermal headroom, throttle events, undervoltage events, storage runway, service-check failures, update lag) → 0–100 with per-factor breakdown. Export: CSV/JSON server-side; **PDF generated client-side via a print-optimized stylesheet + `window.print()`** in v1 (zero server dependencies, preserves the dashboard's visual identity in the report), with a server-side `pdfkit` option flagged as a stretch goal.
+**F5. Reports.** Nightly job materializes `report_daily` rows (min/avg/max/p95 per metric, peak windows, anomaly flags via simple z-score on the daily mean, session counts, bandwidth totals); weekly/monthly are computed from dailies on demand. Health score = weighted rubric (thermal headroom, throttle events, undervoltage events, storage runway, service-check failures, update lag) → 0–100 with per-factor breakdown. Export: CSV/JSON server-side; **PDF generated client-side via a print-optimized stylesheet + `window.print()`** in v1 (zero server dependencies, preserves the dashboard's visual identity in the report), with a server-side `pdfkit` option flagged as a stretch goal.
 
-**F6 — Layouts.** Adopt **GridStack.js** (MIT, ~40 KB gzip, framework-agnostic, touch support) for drag/resize. Every existing card gets wrapped in a grid item with its current position as the default — pixel-identical until the user enters "Edit layout" mode. Layouts (JSON: pages → widgets → x/y/w/h/visible) stored server-side per **profile**. Profiles are lightweight named layout owners (name + optional PIN), *not* a full auth system — selected via a header dropdown, remembered per device. Presets: "Default" (upstream layout), "Ops" (hardware+alerts focus), "Network", "Kiosk".
+**F6. Layouts.** Adopt **GridStack.js** (MIT, ~40 KB gzip, framework-agnostic, touch support) for drag/resize. Every existing card gets wrapped in a grid item with its current position as the default, pixel-identical until the user enters "Edit layout" mode. Layouts (JSON: pages → widgets → x/y/w/h/visible) stored server-side per **profile**. Profiles are lightweight named layout owners (name + optional PIN), *not* a full auth system, selected via a header dropdown, remembered per device. Presets: "Default" (upstream layout), "Ops" (hardware+alerts focus), "Network", "Kiosk".
 
-**F7 — Alerting.** Server-side rule engine evaluated every collector cycle: rule = metric + comparator + threshold + sustain-duration + severity (info/warning/critical). State machine (ok → pending → firing → resolved) prevents flapping; suppression windows (per-rule cooldown + global quiet hours); escalation = "if still firing after N minutes, re-notify at next severity's channel set." Channels: email (nodemailer) + the existing in-UI toast/sound path. SMTP credentials encrypted at rest with AES-256-GCM keyed from `SECRET_KEY` env (generated by deploy script); password never returned by the API (write-only field). **SMTP provider recommendations (verified current, June 2026):**
+**F7. Alerting.** Server-side rule engine evaluated every collector cycle: rule = metric + comparator + threshold + sustain-duration + severity (info/warning/critical). State machine (ok → pending → firing → resolved) prevents flapping; suppression windows (per-rule cooldown + global quiet hours); escalation = "if still firing after N minutes, re-notify at next severity's channel set." Channels: email (nodemailer) + the existing in-UI toast/sound path. SMTP credentials encrypted at rest with AES-256-GCM keyed from `SECRET_KEY` env (generated by deploy script); password never returned by the API (write-only field). **SMTP provider recommendations (verified current, June 2026):**
 
 | Provider | Free tier | Verdict |
 |---|---|---|
-| **Brevo** | 300 emails/day | **Recommended default** — plain SMTP AUTH with API key as password, reliable, no domain required |
-| **SMTP2GO** | 1,000/month | Recommended alternative — great deliverability, simple setup |
+| **Brevo** | 300 emails/day | **Recommended default**, plain SMTP AUTH with API key as password, reliable, no domain required |
+| **SMTP2GO** | 1,000/month | Recommended alternative, great deliverability, simple setup |
 | **Gmail** | ~500/day | Works via **App Password** (requires 2FA on the Google account); fine for personal use |
-| **Outlook / Microsoft 365** | — | **Not recommended:** Microsoft finished retiring basic SMTP authentication in April 2026; password/app-password SMTP no longer works and OAuth 2.0 app registration is required — impractical for a self-hosted dashboard. The UI will show this note. |
+| **Outlook / Microsoft 365** | n/a | **Not recommended:** Microsoft finished retiring basic SMTP authentication in April 2026; password/app-password SMTP no longer works and OAuth 2.0 app registration is required, impractical for a self-hosted dashboard. The UI will show this note. |
 
 Per your note, we assume authenticated SMTP everywhere (STARTTLS/465), with a "Send test email" button and last-delivery status display.
 
-**F8 — Updates.** Collector (6 h cadence + manual refresh) runs `apt-get update` (agent) then parses `apt list --upgradable`, tags security updates via `apt-get -s dist-upgrade` against `-security` pockets, kernel via `linux-image-rpi-*` presence, firmware via `rpi-eeprom-update`. One-click/scheduled upgrades execute through the agent as `apt-get install --only-upgrade <explicit package list>` (never bare `dist-upgrade` from the UI without confirmation), streamed to the UI via SSE, logged to `update_history`. Changelogs via `apt changelog <pkg> | head`. Container self-update = pull-and-recreate flow documented, optionally via Watchtower.
+**F8. Updates.** Collector (6 h cadence + manual refresh) runs `apt-get update` (agent) then parses `apt list --upgradable`, tags security updates via `apt-get -s dist-upgrade` against `-security` pockets, kernel via `linux-image-rpi-*` presence, firmware via `rpi-eeprom-update`. One-click/scheduled upgrades execute through the agent as `apt-get install --only-upgrade <explicit package list>` (never bare `dist-upgrade` from the UI without confirmation), streamed to the UI via SSE, logged to `update_history`. Changelogs via `apt changelog <pkg> | head`. Container self-update = pull-and-recreate flow documented, optionally via Watchtower.
 
-**F9 — Inventory.** `dpkg-query -W -f` (name/version/install time from `/var/lib/dpkg/info/*.list` mtimes), `systemctl list-units --type=service` + `systemctl show` for uptime/status, Docker containers (reuse existing collector), plus `~/.local/share/applications` for user apps. Usage tracking: service active-enter timestamps from systemd, process last-seen sampling for non-service apps (best-effort, documented limitation). Server-side search/filter endpoints with pagination (a Pi can have 1,500+ packages — we won't ship them all to the browser at once).
+**F9. Inventory.** `dpkg-query -W -f` (name/version/install time from `/var/lib/dpkg/info/*.list` mtimes), `systemctl list-units --type=service` + `systemctl show` for uptime/status, Docker containers (reuse existing collector), plus `~/.local/share/applications` for user apps. Usage tracking: service active-enter timestamps from systemd, process last-seen sampling for non-service apps (best-effort, documented limitation). Server-side search/filter endpoints with pagination (a Pi can have 1,500+ packages, so we won't ship them all to the browser at once).
 
-**F10 — DevOps.** Single `deploy.sh` with subcommands `install | upgrade | rollback | status | uninstall`. Install: prereq checks (Pi 5 + Bookworm + Docker), creates `/opt/pi-dashboard` + `/var/lib/pi-dashboard`, generates secrets into `.env`, installs the agent unit, optional vnStat, optional NAS wizard, `docker compose up -d`, health-gate (poll `/api/health` + new `/api/health/deep`). Upgrade: snapshot (tag current image + `sqlite3 .backup` + tar config) → pull → migrate → health-gate → auto-rollback on failure. Rollback: restore last snapshot. Idempotent and re-runnable.
+**F10. DevOps.** Single `deploy.sh` with subcommands `install | upgrade | rollback | status | uninstall`. Install: prereq checks (Pi 5 + Bookworm + Docker), creates `/opt/pi-dashboard` + `/var/lib/pi-dashboard`, generates secrets into `.env`, installs the agent unit, optional vnStat, optional NAS wizard, `docker compose up -d`, health-gate (poll `/api/health` + new `/api/health/deep`). Upgrade: snapshot (tag current image + `sqlite3 .backup` + tar config) → pull → migrate → health-gate → auto-rollback on failure. Rollback: restore last snapshot. Idempotent and re-runnable.
 
 ---
 
 ## 4. Database / Storage Design
 
-SQLite, WAL mode, `synchronous=NORMAL`, single file `/app/data/pi-dashboard.db` (relocatable; archives go to NAS). Schema (abridged DDL — full migrations in implementation):
+SQLite, WAL mode, `synchronous=NORMAL`, single file `/app/data/pi-dashboard.db` (relocatable; archives go to NAS). Schema (abridged DDL, full migrations in implementation):
 
 ```sql
 -- versioned migrations table
@@ -324,9 +324,9 @@ Order rationale: phase 0 unblocks everything; alerting early because later featu
 | `gridstack` | frontend | ~40 KB gz | drag/resize layouts |
 | `geoip-lite` | server, **optional/off** | ~60 MB RAM when on | geo distribution |
 | `vnstat` | host/sidecar apt pkg | ~1 MB RAM | bandwidth history |
-| `cifs-utils`, `nfs-common` | host (deploy script) | — | NAS mounts |
+| `cifs-utils`, `nfs-common` | host (deploy script) | n/a | NAS mounts |
 | `nethogs` | host, **optional** | CPU when on | per-process deep mode |
-| dev: `vitest`, `supertest` | dev only | — | tests |
+| dev: `vitest`, `supertest` | dev only | n/a | tests |
 
 Deliberately *not* added: any frontend framework, Redis, Influx/Prometheus, ntopng, Netdata.
 
@@ -340,11 +340,11 @@ Deliberately *not* added: any frontend framework, Redis, Influx/Prometheus, ntop
 | Schedulers + SQLite writes | < 1 % | +30–50 MB | 10 s cadence, batched transactions |
 | vnstatd | < 0.1 % | ~1 MB | kernel counters only |
 | Agent | ~0 idle | ~25 MB | event-driven |
-| Retention/report jobs | brief 5–10 % bursts | — | nightly, niced |
+| Retention/report jobs | brief 5–10 % bursts | n/a | nightly, niced |
 | **Target total** | **< 4 % avg** | **< 200 MB added** | leaves Pi 5 (4/8 GB) untouched for real workloads |
-| Optional deep-inspect (nethogs/geoip) | +2–5 % / +60 MB | — | off by default, labeled in UI |
+| Optional deep-inspect (nethogs/geoip) | +2–5 % / +60 MB | n/a | off by default, labeled in UI |
 
-Disk I/O: WAL + grouped inserts ≈ a few hundred KB/min — safe for SD cards, trivial for NVMe. Frontend: history charts fetch downsampled series (≤ 500 points per chart) so page loads stay < 100 KB per panel.
+Disk I/O: WAL + grouped inserts ≈ a few hundred KB/min, safe for SD cards, trivial for NVMe. Frontend: history charts fetch downsampled series (≤ 500 points per chart) so page loads stay < 100 KB per panel.
 
 ---
 
@@ -353,9 +353,9 @@ Disk I/O: WAL + grouped inserts ≈ a few hundred KB/min — safe for SD cards, 
 **Existing issues we will fix:** `ADMIN_TOKEN` optional (auth silently disabled when empty) → deploy script always generates one, and the server logs a prominent warning + disables mutating agent-backed endpoints if unset; CORS `*` default → deploy defaults to LAN origin; rate limiting only on one route → generalized middleware on all mutating routes.
 
 **New surface, mitigations:**
-- **Host agent** is the critical piece: fixed allowlist of named ops with typed, validated params (package names regex-checked against `apt-cache` output; mount options from an allowlist; no string concatenation into shells — `execFile` only); HMAC-authenticated requests using a secret created at install with 0600 perms; socket `0660 root:pi-dashboard`; every op audit-logged to journald + `events` table; destructive ops (upgrade, reboot, mount) require the admin token end-to-end.
+- **Host agent** is the critical piece: fixed allowlist of named ops with typed, validated params (package names regex-checked against `apt-cache` output; mount options from an allowlist; no string concatenation into shells, `execFile` only); HMAC-authenticated requests using a secret created at install with 0600 perms; socket `0660 root:pi-dashboard`; every op audit-logged to journald + `events` table; destructive ops (upgrade, reboot, mount) require the admin token end-to-end.
 - **Secrets at rest:** SMTP/NAS credentials AES-256-GCM encrypted with `SECRET_KEY` from `.env` (0600); API never echoes secrets; NAS creds additionally live only on the host side in root-only files.
-- **Container hardening:** drop to non-root user in the image, `cap_drop: ALL` then re-add only `NET_ADMIN` (WireGuard) — possible now that privileged work moved to the agent; Docker socket stays `:ro`.
+- **Container hardening:** drop to non-root user in the image, `cap_drop: ALL` then re-add only `NET_ADMIN` (WireGuard), possible now that privileged work moved to the agent; Docker socket stays `:ro`.
 - **SMB1 warning** surfaced in the NAS wizard for the My Book World Edition II (protocol is inherently insecure; recommend isolating it on a trusted VLAN).
 - **Update execution:** explicit package lists only, simulated (`-s`) first, output streamed and stored; scheduled updates run `unattended-upgrades`-style security-only by default.
 
@@ -363,7 +363,7 @@ Disk I/O: WAL + grouped inserts ≈ a few hundred KB/min — safe for SD cards, 
 
 ## 10. Testing Strategy
 
-- **Unit (vitest):** collectors against fixture files (recorded `/proc/net/dev`, `vcgencmd` outputs, `who -u`, `tailscale status --json`, `apt list` outputs — fixtures captured from a real Pi 5); alert state machine; downsampler; health-score rubric; crypto round-trips.
+- **Unit (vitest):** collectors against fixture files (recorded `/proc/net/dev`, `vcgencmd` outputs, `who -u`, `tailscale status --json`, `apt list` outputs, all fixtures captured from a real Pi 5); alert state machine; downsampler; health-score rubric; crypto round-trips.
 - **Integration (supertest + temp SQLite):** every new route incl. auth/rate-limit paths; migration up-from-empty and up-from-v1 (existing `settings.json` untouched); agent client against a mock socket server (and a "deny everything not allowlisted" test).
 - **E2E smoke (on-device):** `deploy.sh install` on a clean Bookworm image → health-gate → scripted checks (fan RPM nonzero with official cooler, SMTP test send to a mailpit container, NAS mount/unmount cycle, simulated upgrade+rollback).
 - **Regression guard:** snapshot tests asserting the legacy `/api/stats`, `/api/settings`, `/api/v1/system` response shapes are byte-compatible.
@@ -395,16 +395,16 @@ Compose changes: pinned image tag, non-root user, `cap_drop`, agent socket + `/v
 
 ## 12. Open Questions Before Implementation
 
-1. **Repository:** you mentioned providing your GitHub repo — please share the URL (and whether it's a fork of upstream or a fresh repo) so commit/PR structure can match it. *(Note: I can prepare the full branch as commits locally and as patch files/bundles for you to push — I won't be able to push to GitHub on your behalf from this environment.)*
+1. **Repository:** you mentioned providing your GitHub repo. Please share the URL (and whether it's a fork of upstream or a fresh repo) so commit/PR structure can match it. *(Note: I can prepare the full branch as commits locally and as patch files/bundles for you to push; I won't be able to push to GitHub on your behalf from this environment.)*
 2. **Pi storage:** SD card or NVMe? (Affects default sampling cadence and whether I add extra SD-wear mitigations.)
 3. **VNC server in use:** RealVNC (Pi OS default) or wayvnc? Both will be supported, but I'll prioritize fixtures for yours.
 4. **Profiles scope:** is the lightweight name+PIN profile model (no real authentication) acceptable for "layouts per user," or do you want full login accounts (significantly larger scope)?
 5. **One-click `dist-upgrade`:** acceptable behind a confirmation dialog, or should the UI be restricted to per-package and security-only updates?
-6. **Default retention:** propose 90 days local + 365 days archived on NAS — OK?
+6. **Default retention:** propose 90 days local + 365 days archived on NAS. OK?
 
 ---
 
-**Approval requested.** *(Resolved — the plan was approved and implemented; see §13.)*
+**Approval requested.** *(Resolved: the plan was approved and implemented; see §13.)*
 
 ---
 
@@ -414,10 +414,10 @@ This section records how the system actually shipped and the major subsystem (DN
 
 ### 13.1 Resolved open questions (§12)
 
-1. **Repository:** [`github.com/Thutmoze/RaPiSys`](https://github.com/Thutmoze/RaPiSys) — a fresh repo (not a GitHub fork), MIT, crediting upstream. Delivered as an ongoing series of conventional-commit patches applied on the Pi.
+1. **Repository:** [`github.com/Thutmoze/RaPiSys`](https://github.com/Thutmoze/RaPiSys), a fresh repo (not a GitHub fork), MIT, crediting upstream. Delivered as an ongoing series of conventional-commit patches applied on the Pi.
 2. **Pi storage:** runs on a Pi 5 with the metrics DB relocatable to (and in practice hosted on) the NAS; SD-wear mitigations via WAL + grouped inserts retained.
 3. **VNC:** RealVNC/wayvnc both supported; sessions surfaced via the Sessions page.
-4. **Profiles/layouts:** implemented as named **dashboards** (multi-page, drag-reorderable tabs, per-dashboard GridStack layouts) for the local admin, gated to edit mode — not a multi-user PIN model.
+4. **Profiles/layouts:** implemented as named **dashboards** (multi-page, drag-reorderable tabs, per-dashboard GridStack layouts) for the local admin, gated to edit mode, not a multi-user PIN model.
 5. **dist-upgrade:** allowed only behind a typed confirmation; per-package and security-only are the defaults.
 6. **Retention:** 90-day local default retained; archive policy configurable.
 
@@ -431,20 +431,20 @@ The test suite covers the new subsystems across 12 files (auth/TOTP, alerting, c
 
 The original plan treated DNS as a light "resolver stats / optional dnsmasq log tail" panel. It grew into a first-class Pi-hole integration:
 
-**Analytics client** (`server/collectors/pihole.js`) — a single client that auto-detects and speaks both **Pi-hole v6** (FTL REST API: `POST /api/auth` → SID via `X-FTL-SID`, `stats/summary`, `stats/top_domains`, `stats/top_clients`, `dns/blocking`) and **v5** (PHP `api.php?summaryRaw/topItems` with token auth). It normalizes both into one snapshot: totals, **query categories** (FTL status breakdown — forwarded/cached/gravity/regex/…), **record types** (A/AAAA/HTTPS/PTR/…), top permitted/blocked domains, blocking state, and the live web port. Self-signed certs tolerated; SID cached with re-auth on 401.
+**Analytics client** (`server/collectors/pihole.js`): a single client that auto-detects and speaks both **Pi-hole v6** (FTL REST API: `POST /api/auth` → SID via `X-FTL-SID`, `stats/summary`, `stats/top_domains`, `stats/top_clients`, `dns/blocking`) and **v5** (PHP `api.php?summaryRaw/topItems` with token auth). It normalizes both into one snapshot: totals, **query categories** (FTL status breakdown: forwarded/cached/gravity/regex/…), **record types** (A/AAAA/HTTPS/PTR/…), top permitted/blocked domains, blocking state, and the live web port. Self-signed certs tolerated; SID cached with re-auth on 401.
 
-**Privileged agent ops** (`agent/rapisys-agent.cjs`, allowlisted) —
+**Privileged agent ops** (`agent/rapisys-agent.cjs`, allowlisted):
 `pihole.detect` (finds host vs docker install and the *real* API port by probing, since host-networking hides docker port maps),
 `pihole.install` (one-click: host `curl|bash --unattended` or Docker via the official image, with **automatic free-port selection** and the correct `FTLCONF_webserver_port` specifier),
 `pihole.checkUpdate` / `pihole.update` (host `pihole -up`, or docker `compose pull && up -d`),
 `pihole.setSystemResolver` / `pihole.systemResolverStatus` (point the Pi's own resolver at Pi-hole with a fallback nameserver; refuses cleanly when Tailscale/MagicDNS manages `resolv.conf`),
 `pihole.backupToNas` / `pihole.backupStatus` (see below).
 
-**NAS backup of the Pi-hole DB** — because SQLite over CIFS/NFS is unsafe, the live `pihole-FTL.db` stays on the Pi. A scheduled agent op makes a **consistent copy** (`pihole-FTL sqlite3 … ".backup"` inside the official image, which ships no standalone `sqlite3` CLI; the `sqlite3` CLI or `cp` as fallbacks), gzips it, writes a timestamped `pihole-FTL-<stamp>.db.gz` to `<nas>/pihole-backups/`, and prunes to a retention count. A daily/weekly scheduler job runs it when enabled and a NAS is configured.
+**NAS backup of the Pi-hole DB**: because SQLite over CIFS/NFS is unsafe, the live `pihole-FTL.db` stays on the Pi. A scheduled agent op makes a **consistent copy** (`pihole-FTL sqlite3 … ".backup"` inside the official image, which ships no standalone `sqlite3` CLI; the `sqlite3` CLI or `cp` as fallbacks), gzips it, writes a timestamped `pihole-FTL-<stamp>.db.gz` to `<nas>/pihole-backups/`, and prunes to a retention count. A daily/weekly scheduler job runs it when enabled and a NAS is configured.
 
 **Routes** (`server/routes/network.js`, mutations gated by `requireControl`): `GET/POST /dns/pihole/config`, `/status`, `/test`, `/autoconfig`, `/blocking`, `/detect`, `/install/stream` (SSE), `/update-check`, `/update-status`, `/update/stream` (SSE), `/system-resolver`, `/backup`, `/backup/config`, `/backup/run/stream` (SSE).
 
-**UI** — a redesigned **DNS Analysis** card on the Network page (header/stat-tiles/categories/top-domains sections), an enhanced **DNS** summary widget on the Overview (queries headline + permitted/blocked split bar + top domains), and a **Settings → DNS** tab with: connection (toggle + collapse-when-configured + site-wide Test button), one-click install (method chooser + user-selectable web port), update detection, system-resolver toggle, web-console deep link, and the "Back up logs to NAS" panel.
+**UI**: a redesigned **DNS Analysis** card on the Network page (header/stat-tiles/categories/top-domains sections), an enhanced **DNS** summary widget on the Overview (queries headline + permitted/blocked split bar + top domains), and a **Settings → DNS** tab with: connection (toggle + collapse-when-configured + site-wide Test button), one-click install (method chooser + user-selectable web port), update detection, system-resolver toggle, web-console deep link, and the "Back up logs to NAS" panel.
 
 ### 13.4 Brand & UI polish
 
@@ -454,7 +454,25 @@ The original plan treated DNS as a light "resolver stats / optional dnsmasq log 
 
 ### 13.5 Storage reality
 
-There are two databases: the **RaPiSys** metrics/inventory/events/reports DB (`rapisys.db`, a single SQLite file, relocatable to and in practice hosted on the NAS) and the **Pi-hole** query DB (`pihole-FTL.db`, kept live on the Pi, archived to the NAS by the backup job). Everything RaPiSys records — temperature/CPU/memory history, software inventory, events, update cache, dashboards/layouts, sessions, reports — lives in the one `rapisys.db`; there is no separate per-category log file.
+There are two databases: the **RaPiSys** metrics/inventory/events/reports DB (`rapisys.db`, a single SQLite file, relocatable to and in practice hosted on the NAS) and the **Pi-hole** query DB (`pihole-FTL.db`, kept live on the Pi, archived to the NAS by the backup job). Everything RaPiSys records (temperature/CPU/memory history, software inventory, events, update cache, dashboards/layouts, sessions, reports) lives in the one `rapisys.db`; there is no separate per-category log file.
+
+---
+
+### 13.6 Case controller subsystem (Pironman 5 Mini, post-plan)
+
+The original plan did not cover third-party enclosures. RaPiSys gained an optional integration for the SunFounder **Pironman 5 Mini** case, which adds a controllable case fan, addressable RGB lighting, and a small OLED. It is entirely opt-in: a master toggle on a **Settings to Case** tab gates the whole subsystem, and every surface stays hidden until the controller is both enabled and installed.
+
+**Privileged agent ops** (`agent/rapisys-agent.cjs`, allowlisted): `pironman.detect` (host vs Docker install, service state, version), `pironman.install` (one-click Full or Slim via the SunFounder installer, streamed over the agent line protocol; Manual mode just surfaces the commands), `pironman.checkUpdate` / `pironman.update`, `pironman.restart`, and `pironman.readConfig` / `pironman.writeConfig` (the latter validates keys against a fixed allowlist before touching the SunFounder config file). The first install writes a device-tree overlay, so it requires a reboot.
+
+**Collector** (`server/collectors/pironman.js`): `createPironmanClient({ getConfig })` talks to the SunFounder **pm_dashboard** REST API on `127.0.0.1:34001/api/v1.0/` for live reads and writes (fan mode, fan LED, RGB enable/style/colour/brightness/speed, OLED temperature unit), and falls back to the agent's config file read/write when the pm_dashboard service is not running. `snapshot()` normalizes everything into one object (installed, service state, reachability, version, fan, rgb, display).
+
+**Routes** (`server/routes/pironman.js`, mounted at `/api/pironman`, mutations gated by `requireControl`): `GET /status`, `/detect`, `/config`, `/settings`, `/update-check`; `POST /settings`, `/config`, `/test`, `/restart`; and SSE streams `GET /install/stream`, `/update/stream`. The config is cached in settings under `rapisys.pironman` and refreshed on change.
+
+**Telemetry**: a `pironman-telemetry` scheduler job (60 s, gated on the master toggle) snapshots the controller and writes a `case.state_changed` event to the existing `events` table whenever the fan mode, fan LED, RGB, or OLED unit changes. The case fan is GPIO on/off by mode with no tachometer, so there is no RPM time-series; change-events are the natural granularity and no new migration is needed.
+
+**UI**: a **Settings to Case** tab (master toggle, install method chooser with live SSE log, then live fan/RGB/display controls once installed), a compact **Case** summary widget on the Overview, and a gated **Case** card on the Hardware page with inline fan-mode and fan-LED controls. All three honour the existing design tokens and stay hidden unless the controller is enabled and installed. This Pi 5's own active cooling (the PWM fan on the board) remains a separate Hardware card; the Case card covers the enclosure's fan and lighting only.
+
+**Security**: pm_dashboard listens on port 34001 without authentication and binds all interfaces; RaPiSys only ever contacts it on localhost, and the Case tab warns the operator to keep that port firewalled or localhost-bound on a shared LAN. The SunFounder software runs as its own GPL-licensed process, isolated from RaPiSys.
 
 ---
 

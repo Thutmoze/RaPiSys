@@ -319,6 +319,29 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   let pironmanConfigCache = settings.rapisys?.pironman || null;
   const refreshPironmanConfig = async () => { pironmanConfigCache = (await loadSettings()).rapisys?.pironman || null; };
   const pironman = createPironmanClient({ getConfig: () => pironmanConfigCache });
+
+  // Case (Pironman) telemetry: snapshot on an interval and record state changes
+  // to the existing events table. The case fan has no tachometer (GPIO on/off by
+  // mode), so change-events are the right granularity; no new migration needed.
+  let lastPironmanState = null;
+  scheduler.register('pironman-telemetry', 60e3, async () => {
+    if (!pironmanConfigCache?.enabled) return;
+    const snap = await pironman.snapshot({ withDetect: false }).catch(() => null);
+    if (!snap || snap.installed !== true) return;
+    const fan = snap.fan || {}, rgb = snap.rgb || {}, disp = snap.display || {};
+    const state = {
+      fanMode: fan.mode ?? null,
+      fanLed: fan.led ?? null,
+      rgb: rgb.enable ? `${rgb.style || ''}:${rgb.color || ''}:${rgb.brightness ?? ''}:${rgb.speed ?? ''}` : 'off',
+      unit: disp.temperatureUnit ?? null,
+    };
+    if (lastPironmanState === null) { lastPironmanState = state; return; }
+    const changed = Object.keys(state).filter((k) => state[k] !== lastPironmanState[k]);
+    if (changed.length) {
+      eventsFacade.add('case.state_changed', 'info', { changed, state });
+      lastPironmanState = state;
+    }
+  });
   app.use('/api/pironman', rc, pironmanRouter({ pironman, requireControl: auth.requireControl,
     loadSettings, saveSettings, withFileLock, refreshPironmanConfig }));
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
