@@ -146,7 +146,188 @@ function findCpuThermalZone() {
   return null;
 }
 
+// ---- Pironman 5 Mini -------------------------------------------------------
+const PIRONMAN_REPO    = 'https://github.com/sunfounder/pironman5-mini.git';
+const PIRONMAN_SRC     = '/opt/pironman5-mini-src';
+const PIRONMAN_DIR     = '/opt/pironman5-mini';
+const PIRONMAN_VENV_PY = '/opt/pironman5-mini/venv/bin/python3';
+const PIRONMAN_VENV_PIP= '/opt/pironman5-mini/venv/bin/pip3';
+const PIRONMAN_SERVICE = 'pironman5-mini.service';
+const PIRONMAN_API_PORT= 34001;
+const PIRONMAN_REMOTE_VERSION =
+  'https://raw.githubusercontent.com/sunfounder/pironman5-mini/main/pironman5_mini/version.py';
+
+// Real fan profiles from pm_auto (index 0..4); used to validate gpio_fan_mode.
+const PIRONMAN_FAN_MODES  = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
+const PIRONMAN_RGB_STYLES = new Set(['rainbow', 'breath', 'leap', 'flow', 'raise_up', 'colorful']);
+const PIRONMAN_FAN_LED    = new Set(['follow', 'on', 'off']);
+const PIRONMAN_HEX_RE     = /^#?[0-9a-fA-F]{6}$/;
+
+/** Validate + normalise a Pironman config patch (the `system` block). Hardware
+ *  pins are intentionally NOT writable. Throws on any non-allowlisted key. */
+function pironmanValidateConfig(input) {
+  assert(input && typeof input === 'object', 'config must be an object');
+  const sys = (input.system && typeof input.system === 'object') ? input.system : input;
+  const out = {};
+  const setInt = (k, v, lo, hi) => {
+    const n = Math.round(Number(v));
+    assert(Number.isFinite(n) && n >= lo && n <= hi, `${k} must be an integer ${lo}-${hi}`);
+    out[k] = n;
+  };
+  for (const [k, v] of Object.entries(sys)) {
+    switch (k) {
+      case 'temperature_unit':
+        assert(v === 'C' || v === 'F', 'temperature_unit must be C or F'); out[k] = v; break;
+      case 'rgb_enable':
+        assert(typeof v === 'boolean', 'rgb_enable must be boolean'); out[k] = v; break;
+      case 'rgb_color':
+        assert(typeof v === 'string' && PIRONMAN_HEX_RE.test(v), 'rgb_color must be a hex colour');
+        out[k] = (v.startsWith('#') ? v : '#' + v).toLowerCase(); break;
+      case 'rgb_style':
+        assert(PIRONMAN_RGB_STYLES.has(v), `rgb_style must be one of: ${[...PIRONMAN_RGB_STYLES].join(', ')}`);
+        out[k] = v; break;
+      case 'rgb_brightness': setInt(k, v, 0, 100); break;
+      case 'rgb_speed':      setInt(k, v, 0, 100); break;
+      case 'rgb_led_count':  setInt(k, v, 1, 256); break;
+      case 'gpio_fan_mode':  setInt(k, v, 0, PIRONMAN_FAN_MODES.length - 1); break;
+      case 'gpio_fan_led':
+        assert(PIRONMAN_FAN_LED.has(v), 'gpio_fan_led must be follow|on|off'); out[k] = v; break;
+      default:
+        throw new Error(`config key not permitted from the dashboard: ${k}`);
+    }
+  }
+  assert(Object.keys(out).length > 0, 'no valid config keys provided');
+  return out;
+}
+
+/** Resolve the live config.json path via the installed package, or null. */
+async function pironmanConfigPath() {
+  if (!fs.existsSync(PIRONMAN_VENV_PY)) return null;
+  const r = await run(PIRONMAN_VENV_PY,
+    ['-c', "from pkg_resources import resource_filename as f; print(f('pironman5_mini','config.json'))"], 8000)
+    .catch(() => ({ code: 1, stdout: '' }));
+  const p = (r.stdout || '').trim();
+  return (r.code === 0 && p) ? p : null;
+}
+
 const OPS = {
+
+  // ---- Pironman 5 Mini -----------------------------------------------------
+  // Hybrid model: the server proxies live config to pm_dashboard's API (port
+  // 34001); these ops handle install/update/restart and the file fallback.
+
+  async 'pironman.detect'() {
+    const out = { installed: false, serviceActive: false, version: null,
+      apiPort: PIRONMAN_API_PORT, apiReachable: false, hasDashboard: false, configPath: null };
+    const unit = await run('sh', ['-c',
+      `systemctl list-unit-files ${shq(PIRONMAN_SERVICE)} 2>/dev/null | grep -q ${shq(PIRONMAN_SERVICE)} && echo YES`], 5000)
+      .catch(() => ({ stdout: '' }));
+    out.installed = /YES/.test(unit.stdout) || fs.existsSync(PIRONMAN_VENV_PY);
+    if (!out.installed) return out;
+    out.serviceActive = (await run('systemctl', ['is-active', PIRONMAN_SERVICE], 5000)
+      .catch(() => ({ stdout: '' }))).stdout.trim() === 'active';
+    const v = await run(PIRONMAN_VENV_PY,
+      ['-c', 'from pironman5_mini.version import __version__; print(__version__)'], 8000)
+      .catch(() => ({ stdout: '' }));
+    out.version = (v.stdout || '').trim() || null;
+    const dash = await run('sh', ['-c', `${shq(PIRONMAN_VENV_PIP)} show pm_dashboard >/dev/null 2>&1 && echo YES`], 8000)
+      .catch(() => ({ stdout: '' }));
+    out.hasDashboard = /YES/.test(dash.stdout);
+    out.configPath = await pironmanConfigPath();
+    const probe = await run('sh', ['-c',
+      `curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:${PIRONMAN_API_PORT}/api/v1.0/test`], 6000)
+      .catch(() => ({ stdout: '' }));
+    out.apiReachable = /^200$/.test((probe.stdout || '').trim());
+    return out;
+  },
+
+  async 'pironman.install'({ disableDashboard = false } = {}, send) {
+    const noDash = !!disableDashboard;
+    send('Checking prerequisites (git, python3)...');
+    const have = await run('sh', ['-c', 'command -v git >/dev/null && command -v python3 >/dev/null && echo OK'], 6000);
+    assert(/OK/.test(have.stdout), 'git and python3 are required on the host');
+    send('Fetching Pironman 5 Mini source...');
+    await run('rm', ['-rf', PIRONMAN_SRC], 10000).catch(() => {});
+    fs.mkdirSync(path.dirname(PIRONMAN_SRC), { recursive: true });
+    const clone = await runStreaming('git', ['clone', '--depth', '1', PIRONMAN_REPO, PIRONMAN_SRC], {}, send);
+    assert(clone.code === 0, 'git clone failed');
+    send(noDash ? 'Running installer (slim - no dashboard/InfluxDB)...'
+                : 'Running installer (this can take several minutes)...');
+    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py${noDash ? ' --disable-dashboard' : ''}`;
+    const r = await runStreaming('sh', ['-c', cmd], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+    assert(r.code === 0, `installer exited with code ${r.code}`);
+    send('Installed. A reboot is required to load the device-tree overlay.');
+    const det = await OPS['pironman.detect']();
+    return { ok: true, installed: det.installed, version: det.version,
+      hasDashboard: det.hasDashboard, apiReachable: det.apiReachable, rebootRequired: true };
+  },
+
+  async 'pironman.checkUpdate'() {
+    const det = await OPS['pironman.detect']();
+    if (!det.installed) return { installed: false, updateAvailable: false };
+    const remote = await run('sh', ['-c', `curl -fsSL --max-time 8 ${shq(PIRONMAN_REMOTE_VERSION)}`], 12000)
+      .catch(() => ({ stdout: '' }));
+    const m = (remote.stdout || '').match(/__version__\s*=\s*['"]([\w.]+)['"]/);
+    const latest = m ? m[1] : null;
+    return { installed: true, currentVersion: det.version, latestVersion: latest,
+      updateAvailable: !!(latest && det.version && latest !== det.version) };
+  },
+
+  async 'pironman.update'(_, send) {
+    const det = await OPS['pironman.detect']();
+    assert(det.installed, 'Pironman is not installed');
+    const noDash = !det.hasDashboard;
+    send('Fetching latest Pironman 5 Mini source...');
+    await run('rm', ['-rf', PIRONMAN_SRC], 10000).catch(() => {});
+    fs.mkdirSync(path.dirname(PIRONMAN_SRC), { recursive: true });
+    const clone = await runStreaming('git', ['clone', '--depth', '1', PIRONMAN_REPO, PIRONMAN_SRC], {}, send);
+    assert(clone.code === 0, 'git clone failed');
+    send(noDash ? 'Reinstalling (slim - no dashboard)...' : 'Reinstalling latest...');
+    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py${noDash ? ' --disable-dashboard' : ''}`;
+    const r = await runStreaming('sh', ['-c', cmd], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+    assert(r.code === 0, `installer exited with code ${r.code}`);
+    send('Restarting service...');
+    await run('systemctl', ['restart', PIRONMAN_SERVICE], 30000).catch(() => {});
+    const after = await OPS['pironman.detect']();
+    return { ok: true, version: after.version, hasDashboard: after.hasDashboard };
+  },
+
+  async 'pironman.restart'() {
+    assert(fs.existsSync(PIRONMAN_VENV_PY), 'Pironman is not installed');
+    await run('systemctl', ['restart', PIRONMAN_SERVICE], 30000);
+    const active = (await run('systemctl', ['is-active', PIRONMAN_SERVICE], 5000)
+      .catch(() => ({ stdout: '' }))).stdout.trim();
+    return { ok: true, serviceActive: active === 'active' };
+  },
+
+  async 'pironman.readConfig'() {
+    const p = await pironmanConfigPath();
+    assert(p && fs.existsSync(p), 'Pironman config not found');
+    let json = {};
+    try { json = JSON.parse(fs.readFileSync(p, 'utf-8')); }
+    catch { throw new Error('config.json is not valid JSON'); }
+    return { configPath: p, config: json, system: json.system || {} };
+  },
+
+  async 'pironman.writeConfig'({ config } = {}, send) {
+    const clean = pironmanValidateConfig(config);
+    const p = await pironmanConfigPath();
+    assert(p && fs.existsSync(p), 'Pironman config not found');
+    let current = {};
+    try { current = JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { current = {}; }
+    if (!current.system || typeof current.system !== 'object') current.system = {};
+    Object.assign(current.system, clean);
+    let uid = 0, gid = 0, mode = 0o644;
+    try { const s = fs.statSync(p); uid = s.uid; gid = s.gid; mode = s.mode & 0o777; } catch {}
+    const tmp = p + '.rapisys.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(current, null, 4));
+    try { fs.chownSync(tmp, uid, gid); } catch {}
+    try { fs.chmodSync(tmp, mode); } catch {}
+    fs.renameSync(tmp, p);
+    if (send) send('Config written. Restarting service to apply...');
+    await run('systemctl', ['restart', PIRONMAN_SERVICE], 30000).catch(() => {});
+    return { ok: true, applied: Object.keys(clean), configPath: p, restarted: true };
+  },
   async 'ping'() {
     return { pong: true, version: '1.0.0', pid: process.pid };
   },
