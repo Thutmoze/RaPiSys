@@ -5118,11 +5118,11 @@ async function maybeShowWizard() {
               </select></label>
               <label data-smb>Username <input data-nas="user"></label>
               <label data-smb>Password <input data-nas="pass" type="password"></label>
-              <p class="wz-warn" data-smb1 hidden>SMB1 is insecure — only use it on a trusted LAN/VLAN. Required by the WD My Book World Edition II.</p>
+              <p class="wz-warn" data-smb1 hidden>⚠ SMB1 is insecure; only use it on a trusted LAN/VLAN. Required by the WD My Book World Edition II.</p>
               <button class="action-btn" data-nas="mount">Mount share</button>
               <span class="wz-mount-status" data-nas="status"></span>
             </div>
-          </details>` : `<p class="wz-warn">Host agent not detected — NAS mounting from here is unavailable. You can still point RaPiSys at any directory already mounted on the Pi (bind-mounted into the container), or keep the local default and relocate later in Settings.</p>`}
+          </details>` : `<p class="wz-warn">⚠ Host agent not detected. NAS mounting from here is unavailable. You can still point RaPiSys at any directory already mounted on the Pi (bind-mounted into the container), or keep the local default and relocate later in Settings.</p>`}
           <div class="wz-form">
             <label>Database directory
               <input data-st="dir" placeholder="/mnt/rapisys/mybook  (leave empty for local)" value="">
