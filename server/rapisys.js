@@ -50,6 +50,8 @@ import { layoutsRouter } from './routes/layouts.js';
 import { updatesRouter } from './routes/updates.js';
 import { remoteRouter } from './routes/remote.js';
 import { authRouter } from './routes/auth.js';
+import { createPironmanClient } from './collectors/pironman.js';
+import { pironmanRouter } from './routes/pironman.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -313,6 +315,12 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,
     loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig }));
+  // ---- Pironman 5 Mini case-controller (gated; localhost pm_dashboard by default) ----
+  let pironmanConfigCache = settings.rapisys?.pironman || null;
+  const refreshPironmanConfig = async () => { pironmanConfigCache = (await loadSettings()).rapisys?.pironman || null; };
+  const pironman = createPironmanClient({ getConfig: () => pironmanConfigCache });
+  app.use('/api/pironman', rc, pironmanRouter({ pironman, requireControl: auth.requireControl,
+    loadSettings, saveSettings, withFileLock, refreshPironmanConfig }));
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
