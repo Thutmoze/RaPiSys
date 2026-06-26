@@ -97,6 +97,14 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
     } catch (err) { res.status(502).json({ ok: false, error: err.message }); }
   });
 
+  // Reboot the host (needed after first install to load the device-tree overlay).
+  r.post('/reboot', requireControl, async (req, res) => {
+    try {
+      if (!agentConfigured()) return res.status(503).json({ error: 'host agent not configured' });
+      res.json(await agentCall('sys.reboot', { confirm: 'REBOOT' }, null, 10000));
+    } catch (err) { res.status(502).json({ ok: false, error: err.message }); }
+  });
+
   // ---- streamed (SSE) install / update ------------------------------------
 
   function sse(res) {

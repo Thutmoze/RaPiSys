@@ -2375,7 +2375,12 @@ pageRenderers.settings = (() => {
         </div>
         <div class="net-pi-warn">⚠ The Pironman dashboard (port 34001) has no authentication and listens on all interfaces. On a shared LAN, keep it firewalled or bound to localhost.</div>
         <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="install">${INSTALL_ICON}<span>Install Pironman</span></button><button class="set-btn set-btn-edit" data-pir="redetect">Re-detect</button><span data-pir="instmsg"></span></div>
-        <pre class="set-pi-log" data-pir="log" style="display:none"></pre>
+        <div class="pir-progress" data-pir="progress" style="display:none">
+          <div class="pir-progress-row"><span class="up-spinner"></span><span class="pir-progress-step" data-pir="step">Starting…</span><span class="pir-progress-pct" data-pir="pct">0%</span></div>
+          <div class="up-scanbar pir-progress-bar"><span data-pir="bar" style="width:0%"></span></div>
+          <button class="up-install-toggle" data-pir="logtoggle" style="display:none">▸ Show details</button>
+        </div>
+        <pre class="set-pi-log up-install-log" data-pir="log" hidden></pre>
         <div class="set-pi-manual" data-pir="manual" style="display:none"></div>
       </div>`;
     }
@@ -2497,18 +2502,81 @@ pageRenderers.settings = (() => {
                : 'Install Pironman 5 Mini (full — includes the pm_dashboard web UI on port 34001, unauthenticated on the LAN)? This runs the official installer as root and requires a reboot afterwards.',
           { confirmLabel: 'Install Pironman' });
         if (!confirmed) return;
-        const logEl = $('[data-pir=log]', box); logEl.style.display = ''; logEl.textContent = '';
+        const logEl = $('[data-pir=log]', box); logEl.textContent = '';
+        const logToggle = $('[data-pir=logtoggle]', box);
+        if (logToggle) {
+          logToggle.style.display = '';
+          logToggle.onclick = () => {
+            const show = logEl.hasAttribute('hidden');
+            if (show) { logEl.removeAttribute('hidden'); logToggle.textContent = '▾ Hide details'; }
+            else { logEl.setAttribute('hidden', ''); logToggle.textContent = '▸ Show details'; }
+          };
+        }
         installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Installing…';
         const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
         let finished = false;
         const es = new EventSource('/api/pironman/install/stream?slim=' + (slim ? '1' : '0'));
-        es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
-        es.addEventListener('done', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
-          appendLog('✓ Installed.' + (r.rebootRequired ? ' A reboot is required to finish setup.' : ''));
-          toast('success', 'Case', 'Pironman installed' + (r.rebootRequired ? ' — reboot required' : '')); setTimeout(() => loadPironman(host), 1500); });
+        // Progress UI: a wheel + a determinate bar that advances through the
+        // installer's known phases. Each marker maps to a milestone weight.
+        const progBox = $('[data-pir=progress]', box); if (progBox) progBox.style.display = '';
+        const stepEl = $('[data-pir=step]', box), pctEl = $('[data-pir=pct]', box), barEl = $('[data-pir=bar]', box);
+        const PHASES = [
+          [/Fetching .*source|Cloning/i, 5, 'Fetching source…'],
+          [/Update package list/i, 10, 'Updating package list…'],
+          [/Install influxdb/i, 18, 'Installing dependencies…'],
+          [/Create virtual environment/i, 28, 'Creating virtual environment…'],
+          [/Install build/i, 36, 'Preparing build tools…'],
+          [/Installing pironman5_mini/i, 46, 'Building Pironman package…'],
+          [/Building wheels for collected packages/i, 55, 'Building Python wheels (slow)…'],
+          [/Building wheel for ([\w.-]+)/i, 62, null],
+          [/Successfully built|Installing pm_auto/i, 72, 'Installing modules…'],
+          [/Installing pm_dashboard/i, 80, 'Installing dashboard…'],
+          [/Installing sf_rpi_status/i, 86, 'Installing status module…'],
+          [/Setup auto start|Copy service file/i, 92, 'Setting up service…'],
+          [/dtoverlay|config\.txt|Finished|Cleanup/i, 97, 'Finalising…'],
+        ];
+        let pct = 0;
+        const setProg = (p, label) => {
+          if (p > pct) pct = p;
+          if (barEl) barEl.style.width = pct + '%';
+          if (pctEl) pctEl.textContent = pct + '%';
+          if (label && stepEl) stepEl.textContent = label;
+        };
+        es.addEventListener('line', (ev) => {
+          let line = ''; try { line = JSON.parse(ev.data).line; } catch { return; }
+          appendLog(line);
+          for (const [re, weight, label] of PHASES) {
+            const m = line.match(re);
+            if (m) { setProg(weight, label || ('Building wheel: ' + (m[1] || '') + '…')); break; }
+          }
+        });
+        es.addEventListener('done', async (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+          setProg(100, 'Installed'); appendLog('✓ Installed.' + (r.rebootRequired ? ' A reboot is required to finish setup.' : ''));
+          toast('success', 'Case', 'Pironman installed' + (r.rebootRequired ? ' — reboot required' : ''));
+          installBtn.querySelector('span').textContent = 'Install Pironman';
+          if (r.rebootRequired) {
+            const go = await rapisysConfirm(
+              'Pironman 5 Mini installed successfully. A reboot is required to load the device-tree overlay for the fan & RGB. Reboot the Pi now?',
+              { confirmLabel: 'Reboot now' });
+            if (go) {
+              try {
+                await api('/pironman/reboot', { method: 'POST', body: {} });
+                appendLog('↻ Rebooting the Pi now… the dashboard will be unreachable for about a minute.');
+                if (stepEl) stepEl.textContent = 'Rebooting…';
+                toast('success', 'Case', 'Rebooting the Pi…');
+                installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Rebooting…';
+              } catch (e) { toast('error', 'Case', 'Reboot request failed: ' + e.message); installBtn.disabled = false; }
+            } else {
+              appendLog('Reboot postponed. Reboot the Pi yourself, then click Re-detect.');
+              installBtn.disabled = false; setTimeout(() => loadPironman(host), 1500);
+            }
+          } else { installBtn.disabled = false; setTimeout(() => loadPironman(host), 1500); }
+        });
         es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Install failed'; try { m = JSON.parse(ev.data).error || m; } catch {}
+          if (progBox) progBox.style.display = 'none';
+          logEl.removeAttribute('hidden'); if (logToggle) logToggle.textContent = '▾ Hide details';
           appendLog('✗ ' + m); toast('error', 'Case', m); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pironman'; });
-        es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pironman'; };
+        es.onerror = () => { if (finished) return; finished = true; es.close(); if (progBox) progBox.style.display = 'none'; logEl.removeAttribute('hidden'); if (logToggle) logToggle.textContent = '▾ Hide details'; appendLog('✗ Connection lost'); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pironman'; };
       };
     }
   }

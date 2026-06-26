@@ -5869,6 +5869,14 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   border-radius: 20px; padding: 1px 9px; font-size: 10.5px; font-weight: 700;
   letter-spacing: 0.03em; vertical-align: middle; margin-left: 2px; }
 
+/* Pironman install progress: spinner wheel + determinate bar */
+.pir-progress { margin: 10px 0 4px; }
+.pir-progress-row { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 7px; }
+.pir-progress-step { flex: 1; }
+.pir-progress-pct { font-variant-numeric: tabular-nums; color: var(--accent-cyan); font-weight: 600; }
+.pir-progress-bar { height: 5px; }
+.pir-progress-bar span { width: 0%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); transition: width 0.3s ease; }
+
 /* Alerts — active summary widget */
 .al-summary { display: flex; gap: 18px; align-items: stretch; margin-bottom: 18px; flex-wrap: wrap; }
 .al-sum-card { flex: 1; min-width: 240px; padding: 22px 26px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);

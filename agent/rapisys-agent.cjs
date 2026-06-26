@@ -63,7 +63,15 @@ function run(cmd, args, timeoutMs = 30000, opts = {}) {
 function runStreaming(cmd, args, env, send) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { env: { ...process.env, ...env } });
-    const onData = (buf) => buf.toString('utf-8').split('\n').forEach((l) => l && send(l));
+    // Strip ANSI/terminal control sequences (cursor hide/show, moves, colour)
+    // so streamed installer output is readable; drop lone spinner frames.
+    const clean = (l) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\r\b]/g, '');
+    const onData = (buf) => buf.toString('utf-8').split('\n').forEach((raw) => {
+      const l = clean(raw);
+      if (!l.trim()) return;
+      if (/^[-\\|/]$/.test(l.trim())) return;
+      send(l);
+    });
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     child.on('error', reject);
@@ -168,6 +176,29 @@ function pironmanInstallEnv() {
   };
 }
 const PIRONMAN_SERVICE = 'pironman5-mini.service';
+const PIRONMAN_OVERLAY = 'sunfounder-pironman5mini';
+const BOOT_CONFIG_TXT = '/boot/firmware/config.txt';
+// The SunFounder installer copies the .dtbo file but never adds the dtoverlay=
+// line to config.txt, so the fan/RGB overlay would not load on boot. Add it
+// idempotently after a successful install.
+function ensurePironmanOverlay(send) {
+  try {
+    let cfg = BOOT_CONFIG_TXT;
+    if (!fs.existsSync(cfg)) cfg = '/boot/config.txt';
+    if (!fs.existsSync(cfg)) { send && send('Note: config.txt not found; skipping dtoverlay wiring.'); return false; }
+    const txt = fs.readFileSync(cfg, 'utf-8');
+    if (new RegExp('^\\s*dtoverlay=' + PIRONMAN_OVERLAY + '\\b', 'm').test(txt)) {
+      send && send('Device-tree overlay already enabled in config.txt.');
+      return true;
+    }
+    fs.appendFileSync(cfg, (txt.endsWith('\n') ? '' : '\n') + 'dtoverlay=' + PIRONMAN_OVERLAY + '\n');
+    send && send('Enabled device-tree overlay in config.txt (takes effect after reboot).');
+    return true;
+  } catch (e) {
+    send && send('Warning: could not edit config.txt (' + e.message + '). Add "dtoverlay=' + PIRONMAN_OVERLAY + '" yourself.');
+    return false;
+  }
+}
 const PIRONMAN_API_PORT= 34001;
 const PIRONMAN_REMOTE_VERSION =
   'https://raw.githubusercontent.com/sunfounder/pironman5-mini/main/pironman5_mini/version.py';
@@ -268,9 +299,10 @@ const OPS = {
     assert(clone.code === 0, 'git clone failed');
     send(noDash ? 'Running installer (slim - no dashboard/InfluxDB)...'
                 : 'Running installer (this can take several minutes)...');
-    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py${noDash ? ' --disable-dashboard' : ''}`;
+    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py --skip-reboot${noDash ? ' --disable-dashboard' : ''}`;
     const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
+    ensurePironmanOverlay(send);
     send('Installed. A reboot is required to load the device-tree overlay.');
     const det = await OPS['pironman.detect']();
     return { ok: true, installed: det.installed, version: det.version,
@@ -298,7 +330,7 @@ const OPS = {
     const clone = await runStreaming('git', ['clone', '--depth', '1', PIRONMAN_REPO, PIRONMAN_SRC], {}, send);
     assert(clone.code === 0, 'git clone failed');
     send(noDash ? 'Reinstalling (slim - no dashboard)...' : 'Reinstalling latest...');
-    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py${noDash ? ' --disable-dashboard' : ''}`;
+    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py --skip-reboot${noDash ? ' --disable-dashboard' : ''}`;
     const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
     send('Restarting service...');
