@@ -114,9 +114,9 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
     const slim = String(req.query.slim || req.query.disableDashboard || '') === '1';
     try {
       if (!agentConfigured()) throw new Error('host agent not configured (run deploy.sh on the Pi)');
-      send('log', { line: `Starting Pironman 5 Mini install${slim ? ' (slim)' : ''}…` });
+      send('line', { line: `Starting Pironman 5 Mini install${slim ? ' (slim)' : ''}…` });
       const result = await agentCall('pironman.install', { disableDashboard: slim },
-        (line) => send('log', { line }), 1_800_000);
+        (line) => send('line', { line }), 1_800_000);
       await refreshPironmanConfig?.();
       send('done', result); // includes rebootRequired:true
     } catch (err) {
@@ -130,8 +130,8 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
     const send = sse(res);
     try {
       if (!agentConfigured()) throw new Error('host agent not configured');
-      send('log', { line: 'Updating Pironman 5 Mini…' });
-      const result = await agentCall('pironman.update', {}, (line) => send('log', { line }), 1_800_000);
+      send('line', { line: 'Updating Pironman 5 Mini…' });
+      const result = await agentCall('pironman.update', {}, (line) => send('line', { line }), 1_800_000);
       await refreshPironmanConfig?.();
       send('done', result);
     } catch (err) {

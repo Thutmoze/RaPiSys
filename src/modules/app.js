@@ -2217,6 +2217,235 @@ pageRenderers.settings = (() => {
     };
   }
 
+  // ---- Case (Pironman 5 Mini) settings pane ----
+  let editPironman = false;
+  const PIRON_FAN_MODES = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
+  const PIRON_RGB_STYLES = ['rainbow', 'breath', 'leap', 'flow', 'raise_up', 'colorful'];
+  async function loadPironman(host) {
+    const box = $('[data-set=pironman]', host);
+    if (!box) return;
+    box.innerHTML = '<p class="net-dns-note">Loading…</p>';
+    let cfg = {}, snap = {}, upd = {};
+    try { cfg = await api('/pironman/settings'); } catch { /* defaults */ }
+    const enabled = !!cfg.enabled;
+
+    if (enabled) {
+      try { snap = await api('/pironman/status'); } catch { /* agent/api maybe absent */ }
+      if (snap.installed) { try { upd = await api('/pironman/update-check'); } catch { /* */ } }
+    }
+
+    const masterSub = !enabled
+      ? 'SunFounder Pironman 5 Mini — case fan, RGB &amp; OLED. Enable to install &amp; control it from here.'
+      : (snap.installed
+          ? (snap.apiReachable ? '<span class="set-ok">● Connected</span> &nbsp;live via pm_dashboard' : '<span class="set-warn">● Installed</span> &nbsp;dashboard API not reachable')
+          : (snap.installed === false ? 'Enabled · not detected on this Pi' : 'Enabled'));
+
+    // ---- master toggle (always shown) ----
+    let html = `
+      <div class="set-kv set-kv-toggle pir-master">
+        <span><b>Pironman 5 Mini case controller</b><br><span class="net-dns-note" style="display:inline">${masterSub}</span></span>
+        <label class="set-switch" title="Enable Case controller">
+          <input type="checkbox" data-pir="enabled" ${enabled ? 'checked' : ''}>
+          <span class="set-switch-track"><span class="set-switch-thumb"></span></span>
+        </label>
+      </div>`;
+
+    if (!enabled) {
+      html += `<p class="net-dns-note">When enabled, RaPiSys can install the Pironman software on this Pi and show its controls here, plus gated cards on Overview and Hardware.</p>`;
+      box.innerHTML = html;
+      const cb = $('[data-pir=enabled]', box);
+      if (cb) cb.onchange = async () => {
+        try { await api('/pironman/settings', { method: 'POST', body: { enabled: cb.checked } });
+          toast(cb.checked ? 'success' : 'info', 'Case', cb.checked ? 'Enabled' : 'Disabled');
+          setTimeout(() => loadPironman(host), 300);
+        } catch (e) { toast('error', 'Case', e.message); cb.checked = !cb.checked; }
+      };
+      return;
+    }
+
+    const agentMissing = snap.agent === false;
+    const statusLine = snap.installed
+      ? `<b class="set-ok">● Installed &amp; running</b> <span class="net-dns-note" style="display:inline">${snap.serviceActive === false ? 'service stopped' : 'service active'}${snap.apiReachable ? ' · API on :' + (snap.apiPort || 34001) : ''}</span>`
+      : (agentMissing ? '<b class="set-err">○ Host agent unavailable</b>' : '<b class="set-err">○ Not installed on this Pi</b>');
+
+    // Web console link (native Pironman dashboard) when the API is up.
+    const consoleHost = (location.hostname && location.hostname !== '127.0.0.1') ? location.hostname : (cfg.host || '127.0.0.1');
+    const consoleUrl = `http://${consoleHost}:${snap.apiPort || cfg.port || 34001}`;
+    const consoleLine = (snap.installed && snap.hasDashboard) ?
+      `<div class="set-kv"><span>Dashboard</span><a class="net-toggle" href="${consoleUrl}" target="_blank" rel="noopener">Open Pironman dashboard ↗</a></div>` : '';
+
+    // Update row.
+    const updLine = snap.installed ? (() => {
+      if (upd.updateAvailable) {
+        const ver = upd.latestVersion ? `${esc(upd.currentVersion || '?')} → ${esc(upd.latestVersion)}` : 'a newer version';
+        return `<div class="set-kv"><span>Updates</span><b class="set-warn">● Update available</b> (${ver}) <button class="net-toggle" data-pir="update">Update</button></div>`;
+      }
+      return `<div class="set-kv"><span>Updates</span><b class="set-ok">● Up to date</b> <button class="net-toggle" data-pir="checkupd">Check now</button></div>`;
+    })() : '';
+
+    const restartLine = snap.installed ?
+      `<div class="set-kv"><span>Service</span><button class="net-toggle" data-pir="restart">Restart</button></div>` : '';
+
+    html += `
+      <div class="set-summary">
+        <div class="set-kv"><span>Status</span>${statusLine}</div>
+        ${updLine}
+        ${consoleLine}
+        ${restartLine}
+      </div>
+      <pre class="set-pi-log" data-pir="oplog" style="display:none"></pre>`;
+
+    // ---- install block (when not installed) ----
+    if (!snap.installed && !agentMissing) {
+      html += `
+      <div class="set-pi-install">
+        <h4 class="sess-h">Install Pironman 5 Mini</h4>
+        <p class="net-dns-note">Runs on the host through the RaPiSys agent. A reboot is required after the first install (loads the device-tree overlay for the fan &amp; RGB).</p>
+        <div class="set-pi-methods">
+          <label class="set-pi-method"><input type="radio" name="pirmethod" value="full" checked> <span><b>Full install</b> — case control plus the Pironman web dashboard. RaPiSys controls it live (no restart). Recommended.</span></label>
+          <label class="set-pi-method"><input type="radio" name="pirmethod" value="slim"> <span><b>Slim install</b> — case control only, no extra dashboard/InfluxDB. Lighter; changes apply via config + service restart.</span></label>
+          <label class="set-pi-method"><input type="radio" name="pirmethod" value="manual"> <span><b>Manual</b> — show me the commands to run myself.</span></label>
+        </div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="install">${SAVE_ICON}<span>Install Pironman</span></button><button class="set-btn set-btn-edit" data-pir="redetect">Re-detect</button><span data-pir="instmsg"></span></div>
+        <pre class="set-pi-log" data-pir="log" style="display:none"></pre>
+        <div class="set-pi-manual" data-pir="manual" style="display:none"></div>
+        <div class="net-pi-warn">⚠ The Pironman dashboard (port 34001) has no authentication and listens on all interfaces. On a shared LAN, keep it firewalled or bound to localhost.</div>
+      </div>`;
+    }
+
+    // ---- live controls (when installed) ----
+    if (snap.installed) {
+      const fan = snap.fan || {}, rgb = snap.rgb || {}, disp = snap.display || {};
+      const modeOpts = PIRON_FAN_MODES.map((m, i) => `<option value="${i}"${fan.mode === i ? ' selected' : ''}>${m}</option>`).join('');
+      const styleOpts = PIRON_RGB_STYLES.map((s) => `<option value="${s}"${rgb.style === s ? ' selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ')}</option>`).join('');
+      const ledSeg = ['off', 'follow', 'on'].map((v) => `<button data-v="${v}" class="${(fan.led || 'follow') === v ? 'on' : ''}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('');
+      const unitSeg = ['C', 'F'].map((v) => `<button data-v="${v}" class="${(disp.temperatureUnit || 'C') === v ? 'on' : ''}">°${v}</button>`).join('');
+
+      html += `
+      <h4 class="sess-h" style="margin-top:24px">Case fan</h4>
+      <div class="set-kv"><span>Fan mode</span><select data-pir="fanmode">${modeOpts}</select></div>
+      <div class="set-kv"><span>Fan LED</span><div class="pir-seg" data-pir-seg="fanled">${ledSeg}</div></div>
+
+      <h4 class="sess-h" style="margin-top:24px">RGB lighting</h4>
+      <div class="set-kv set-kv-toggle"><span>Enable RGB</span>
+        <label class="set-switch"><input type="checkbox" data-pir="rgbenable" ${rgb.enable ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+      <div class="set-kv"><span>Style</span><select data-pir="rgbstyle">${styleOpts}</select></div>
+      <div class="set-kv"><span>Colour</span><input type="color" data-pir="rgbcolor" value="${esc(rgb.color || '#e84393')}"></div>
+      <div class="set-kv"><span>Brightness</span><input type="range" min="0" max="100" value="${Number(rgb.brightness ?? 60)}" data-pir="rgbbright"></div>
+      <div class="set-kv"><span>Speed</span><input type="range" min="0" max="100" value="${Number(rgb.speed ?? 50)}" data-pir="rgbspeed"></div>
+
+      <h4 class="sess-h" style="margin-top:24px">Display</h4>
+      <div class="set-kv"><span>OLED temperature unit</span><div class="pir-seg" data-pir-seg="unit">${unitSeg}</div></div>`;
+    }
+
+    box.innerHTML = html;
+    enhanceSelects(box);
+
+    // ---- master toggle wiring ----
+    const mcb = $('[data-pir=enabled]', box);
+    if (mcb) mcb.onchange = async () => {
+      try { await api('/pironman/settings', { method: 'POST', body: { enabled: mcb.checked } });
+        toast(mcb.checked ? 'success' : 'info', 'Case', mcb.checked ? 'Enabled' : 'Disabled');
+        setTimeout(() => loadPironman(host), 300);
+      } catch (e) { toast('error', 'Case', e.message); mcb.checked = !mcb.checked; }
+    };
+
+    // ---- apply a config patch live ----
+    const applyCfg = async (patch, label) => {
+      try { await api('/pironman/config', { method: 'POST', body: patch });
+        toast('success', 'Case', label || 'Applied'); }
+      catch (e) { toast('error', 'Case', e.message); setTimeout(() => loadPironman(host), 400); }
+    };
+
+    // fan mode
+    const fanSel = $('[data-pir=fanmode]', box);
+    if (fanSel) fanSel.onchange = () => applyCfg({ gpio_fan_mode: Number(fanSel.value) }, 'Fan mode: ' + PIRON_FAN_MODES[Number(fanSel.value)]);
+    // segmented groups (fan led / unit)
+    box.querySelectorAll('[data-pir-seg]').forEach((seg) => {
+      seg.querySelectorAll('button').forEach((b) => b.onclick = () => {
+        seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+        const key = seg.dataset.pirSeg, v = b.dataset.v;
+        if (key === 'fanled') applyCfg({ gpio_fan_led: v }, 'Fan LED: ' + v);
+        if (key === 'unit') applyCfg({ temperature_unit: v }, 'Unit: °' + v);
+      });
+    });
+    // rgb enable / style / colour
+    const rgbEn = $('[data-pir=rgbenable]', box);
+    if (rgbEn) rgbEn.onchange = () => applyCfg({ rgb_enable: rgbEn.checked }, 'RGB ' + (rgbEn.checked ? 'on' : 'off'));
+    const rgbStyle = $('[data-pir=rgbstyle]', box);
+    if (rgbStyle) rgbStyle.onchange = () => applyCfg({ rgb_style: rgbStyle.value }, 'Style: ' + rgbStyle.value);
+    const rgbColor = $('[data-pir=rgbcolor]', box);
+    if (rgbColor) rgbColor.onchange = () => applyCfg({ rgb_color: rgbColor.value }, 'Colour set');
+    // sliders: apply on release (change), not every input tick
+    const rgbBright = $('[data-pir=rgbbright]', box);
+    if (rgbBright) rgbBright.onchange = () => applyCfg({ rgb_brightness: Number(rgbBright.value) }, 'Brightness ' + rgbBright.value + '%');
+    const rgbSpeed = $('[data-pir=rgbspeed]', box);
+    if (rgbSpeed) rgbSpeed.onchange = () => applyCfg({ rgb_speed: Number(rgbSpeed.value) }, 'Speed ' + rgbSpeed.value + '%');
+
+    // ---- status buttons ----
+    const reB = $('[data-pir=redetect]', box); if (reB) reB.onclick = () => loadPironman(host);
+    const ckB = $('[data-pir=checkupd]', box);
+    if (ckB) ckB.onclick = async () => { ckB.disabled = true; ckB.textContent = 'Checking…';
+      try { await api('/pironman/update-check'); } catch {} loadPironman(host); };
+    const rsB = $('[data-pir=restart]', box);
+    if (rsB) rsB.onclick = async () => { rsB.disabled = true; rsB.textContent = 'Restarting…';
+      try { await api('/pironman/restart', { method: 'POST' }); toast('success', 'Case', 'Service restarted'); }
+      catch (e) { toast('error', 'Case', e.message); } setTimeout(() => loadPironman(host), 1200); };
+
+    // ---- update stream ----
+    const updB = $('[data-pir=update]', box);
+    if (updB) updB.onclick = async () => {
+      const logEl = $('[data-pir=oplog]', box); logEl.style.display = ''; logEl.textContent = '';
+      updB.disabled = true; updB.textContent = 'Updating…';
+      const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+      let finished = false;
+      const es = new EventSource('/api/pironman/update/stream');
+      es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
+      es.addEventListener('done', () => { finished = true; es.close(); appendLog('✓ Updated.'); toast('success', 'Case', 'Updated'); setTimeout(() => loadPironman(host), 1500); });
+      es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Update failed'; try { m = JSON.parse(ev.data).error || m; } catch {} appendLog('✗ ' + m); toast('error', 'Case', m); updB.disabled = false; updB.textContent = 'Update'; });
+      es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); updB.disabled = false; updB.textContent = 'Update'; };
+    };
+
+    // ---- install flow ----
+    const installBtn = $('[data-pir=install]', box);
+    if (installBtn) {
+      const manualBox = $('[data-pir=manual]', box);
+      const methodOf = () => (box.querySelector('input[name=pirmethod]:checked') || {}).value || 'full';
+      box.querySelectorAll('input[name=pirmethod]').forEach((rb) => rb.addEventListener('change', () => {
+        installBtn.querySelector('span').textContent = methodOf() === 'manual' ? 'Show commands' : 'Install Pironman';
+      }));
+      installBtn.onclick = async () => {
+        const method = methodOf();
+        if (method === 'manual') {
+          manualBox.style.display = '';
+          manualBox.innerHTML = `<p class="net-dns-note">Run these on the Pi, then reboot and click “Re-detect”:</p>
+            <pre class="set-pi-log">git clone https://github.com/sunfounder/pironman5-mini\ncd pironman5-mini\nsudo python3 install.py</pre>
+            <div class="set-actions"><button class="set-btn set-btn-edit" data-pir="redetect2">Re-detect</button></div>`;
+          const rd = $('[data-pir=redetect2]', manualBox); if (rd) rd.onclick = () => loadPironman(host);
+          return;
+        }
+        const slim = method === 'slim';
+        const confirmed = await rapisysConfirm(
+          slim ? 'Install Pironman 5 Mini (slim — case control only, no dashboard)? This runs the official installer as root and requires a reboot afterwards.'
+               : 'Install Pironman 5 Mini (full — includes the pm_dashboard web UI on port 34001, unauthenticated on the LAN)? This runs the official installer as root and requires a reboot afterwards.',
+          { confirmLabel: 'Install Pironman' });
+        if (!confirmed) return;
+        const logEl = $('[data-pir=log]', box); logEl.style.display = ''; logEl.textContent = '';
+        installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Installing…';
+        const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+        let finished = false;
+        const es = new EventSource('/api/pironman/install/stream?slim=' + (slim ? '1' : '0'));
+        es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
+        es.addEventListener('done', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+          appendLog('✓ Installed.' + (r.rebootRequired ? ' A reboot is required to finish setup.' : ''));
+          toast('success', 'Case', 'Pironman installed' + (r.rebootRequired ? ' — reboot required' : '')); setTimeout(() => loadPironman(host), 1500); });
+        es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Install failed'; try { m = JSON.parse(ev.data).error || m; } catch {}
+          appendLog('✗ ' + m); toast('error', 'Case', m); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pironman'; });
+        es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); installBtn.disabled = false; installBtn.querySelector('span').textContent = 'Install Pironman'; };
+      };
+    }
+  }
+
   // ---- Remote Access settings pane ----
   let editRemote = false;
   async function loadRemote(host) {
@@ -2427,6 +2656,7 @@ pageRenderers.settings = (() => {
             { id: 'email', label: 'Notifications', icon: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>' },
             { id: 'remote', label: 'Remote Access', icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>' },
             { id: 'account', label: 'Account', icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>' },
+            { id: 'pironman', label: 'Case', icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h2M8 11h2M8 15h2"/><circle cx="15.5" cy="9" r="1.6"/>' },
           ])}
           <div class="card-body" data-pane="health">
             <div data-set="health"></div>
@@ -2459,11 +2689,16 @@ pageRenderers.settings = (() => {
             <h4 class="sess-h" style="margin-top:24px">Administrator Account</h4>
             <div data-set="account"></div>
           </div>
+          <div class="card-body" data-pane="pironman" style="display:none">
+            <h4 class="sess-h">Case Controller</h4>
+            <div data-set="pironman"></div>
+          </div>
         </div>
       </div>`;
       wirePageTabs(host, (tab) => {
         if (tab === 'remote') { loadTls(host); loadRemote(host); }
         if (tab === 'dns') loadPihole(host);
+        if (tab === 'pironman') loadPironman(host);
       });
       load(host);
       // Deep-link: #/settings?tab=dns opens a specific tab.
