@@ -1391,6 +1391,7 @@ pageRenderers.settings = (() => {
   const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
   const TRASH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
   const SAVE_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>';
+  const INSTALL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>';
   const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
   async function load(host) {
@@ -1998,7 +1999,7 @@ pageRenderers.settings = (() => {
           <label>Web/API password (optional) <input data-pi="webpw" type="password" placeholder="leave blank for none"></label>
         </div>
         <p class="net-dns-note">If the chosen port is already in use, RaPiSys automatically picks a free one and reports it (Pi-hole on host networking can\u2019t fall back on its own).</p>
-        <div class="set-actions"><button class="set-btn set-btn-primary" data-pi="install">${SAVE_ICON}<span>Install Pi-hole</span></button><span data-pi="instmsg"></span></div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-pi="install">${INSTALL_ICON}<span>Install Pi-hole</span></button><span data-pi="instmsg"></span></div>
         <pre class="set-pi-log" data-pi="log" style="display:none"></pre>
         <div class="set-pi-manual" data-pi="manual" style="display:none"></div>
       </div>` : ''}
@@ -2372,10 +2373,10 @@ pageRenderers.settings = (() => {
           <label class="set-pi-method"><input type="radio" name="pirmethod" value="slim"> <span><b>Slim install</b> — case control only, no extra dashboard/InfluxDB. Lighter; changes apply via config + service restart.</span></label>
           <label class="set-pi-method"><input type="radio" name="pirmethod" value="manual"> <span><b>Manual</b> — show me the commands to run myself.</span></label>
         </div>
-        <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="install">${SAVE_ICON}<span>Install Pironman</span></button><button class="set-btn set-btn-edit" data-pir="redetect">Re-detect</button><span data-pir="instmsg"></span></div>
+        <div class="net-pi-warn">⚠ The Pironman dashboard (port 34001) has no authentication and listens on all interfaces. On a shared LAN, keep it firewalled or bound to localhost.</div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="install">${INSTALL_ICON}<span>Install Pironman</span></button><button class="set-btn set-btn-edit" data-pir="redetect">Re-detect</button><span data-pir="instmsg"></span></div>
         <pre class="set-pi-log" data-pir="log" style="display:none"></pre>
         <div class="set-pi-manual" data-pir="manual" style="display:none"></div>
-        <div class="net-pi-warn">⚠ The Pironman dashboard (port 34001) has no authentication and listens on all interfaces. On a shared LAN, keep it firewalled or bound to localhost.</div>
       </div>`;
     }
 
