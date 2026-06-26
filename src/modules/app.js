@@ -661,6 +661,54 @@ pageRenderers.hardware = (() => {
     }
   }
 
+
+  // Gated Case (Pironman 5 Mini) card — hidden unless enabled + installed.
+  const PIR_FAN_MODES = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
+  let pirCardWired = false;
+  async function refreshPironmanCard(host) {
+    const card = $('[data-pir-hw]', host);
+    if (!card) return;
+    let d = null;
+    try { d = await api('/pironman/status'); } catch { card.style.display = 'none'; return; }
+    if (!d || d.installed !== true) { card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    const fan = d.fan || {}, rgb = d.rgb || {}, disp = d.display || {};
+    const set = (sel, val) => { const n = $(sel, card); if (n) n.textContent = val; };
+    const badge = $('[data-pir=badge]', card);
+    if (badge) badge.textContent = d.apiReachable ? 'live' : (d.serviceActive === false ? 'stopped' : 'file');
+    set('[data-pir=device]', 'Pironman 5 Mini' + (d.version ? ' · v' + d.version : ''));
+    set('[data-pir=rgb]', rgb.enable ? 'On' : 'Off');
+    set('[data-pir=rgbstyle]', rgb.enable ? `${String(rgb.style || '—').replace('_', ' ')} · ${rgb.color || '—'}` : '—');
+    set('[data-pir=rgbbs]', rgb.enable ? `${rgb.brightness ?? 0}% / ${rgb.speed ?? 0}%` : '—');
+    set('[data-pir=unit]', disp.temperatureUnit ? '°' + disp.temperatureUnit : '—');
+
+    // Fan-mode dropdown (only (re)build options when needed to avoid clobbering focus)
+    const sel = $('[data-pir=fanmode]', card);
+    if (sel && !sel.dataset.built) {
+      sel.innerHTML = PIR_FAN_MODES.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+      sel.dataset.built = '1';
+    }
+    if (sel && document.activeElement !== sel && Number.isInteger(fan.mode)) sel.value = String(fan.mode);
+
+    // Fan-LED segmented
+    const seg = $('[data-pir-seg=fanled]', card);
+    if (seg && !seg.dataset.built) {
+      seg.innerHTML = ['off', 'follow', 'on'].map((v) => `<button data-v="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('');
+      seg.dataset.built = '1';
+    }
+    if (seg) seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (fan.led || 'follow') === b.dataset.v));
+
+    if (pirCardWired) return;   // wire interactions once
+    pirCardWired = true;
+    const apply = async (patch, label) => {
+      try { await api('/pironman/config', { method: 'POST', body: patch }); toast('success', 'Case', label); refreshPironmanCard(host); }
+      catch (e) { toast('error', 'Case', e.message); }
+    };
+    if (sel) sel.addEventListener('change', () => apply({ gpio_fan_mode: Number(sel.value) }, 'Fan mode: ' + PIR_FAN_MODES[Number(sel.value)]));
+    if (seg) seg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) apply({ gpio_fan_led: b.dataset.v }, 'Fan LED: ' + b.dataset.v); });
+  }
+
   return {
     mount(host) {
       host.innerHTML = `
@@ -715,6 +763,23 @@ pageRenderers.hardware = (() => {
             <div class="hw-row"><span>Undervoltage</span><span data-hw="undervolt">—</span></div>
           </div>
         </div>
+        <div class="card" data-pir-hw style="display:none">
+          <div class="card-header">
+            <div class="card-icon" style="background:rgba(37,201,221,.12)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h2M8 11h2M8 15h2"/><circle cx="15.5" cy="9" r="1.6"/></svg></div>
+            <span class="card-title">Case</span>
+            <span class="hw-mode" data-pir="badge" style="margin-left:auto"></span>
+          </div>
+          <div class="card-body">
+            <div class="hw-row"><span>Device</span><span data-pir="device">—</span></div>
+            <div class="hw-row"><span>Fan mode</span><select class="hw-range" data-pir="fanmode" aria-label="Case fan mode"></select></div>
+            <div class="hw-row"><span>Fan LED</span><span class="pir-seg" data-pir-seg="fanled"></span></div>
+            <div class="hw-row"><span>RGB</span><span data-pir="rgb">—</span></div>
+            <div class="hw-row"><span>Style / colour</span><span data-pir="rgbstyle">—</span></div>
+            <div class="hw-row"><span>Brightness / speed</span><span data-pir="rgbbs">—</span></div>
+            <div class="hw-row"><span>OLED unit</span><span data-pir="unit">—</span></div>
+            <p class="hw-hint">Fan mode &amp; LED apply via the host agent. <a class="net-link" href="#/settings?tab=pironman">Adjust RGB &amp; display in Settings → Case ↗</a></p>
+          </div>
+        </div>
       </div>`;
 
       $('[data-hw=range]', host).value = range;
@@ -744,7 +809,8 @@ pageRenderers.hardware = (() => {
         setFan({ dutyPercent: Number(slider.value) }));
 
       refreshLive(host); refreshHistory(host);
-      timer = setInterval(() => { refreshLive(host); }, 3000);
+      refreshPironmanCard(host);
+      timer = setInterval(() => { refreshLive(host); refreshPironmanCard(host); }, 3000);
       this._histTimer = setInterval(() => refreshHistory(host), 30000);
     },
     unmount() {
