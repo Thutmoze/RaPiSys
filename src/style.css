@@ -5906,6 +5906,15 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .status-pill.off { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.22); color: #ef4444; animation: none; }
 .status-pill.off .status-pill-dot { background: #ef4444; animation: none; }
 
+/* Segmented pill control (Pironman fan LED / OLED unit): visible active state */
+.pir-seg { display: inline-flex; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 999px; padding: 2px; gap: 1px; }
+.pir-seg button { border: none; background: none; color: var(--text-muted); font: inherit; font-size: 11.5px;
+  font-weight: 600; padding: 5px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  transition: color 0.15s, background 0.15s; }
+.pir-seg button:hover:not(.on) { color: var(--text-primary); }
+.pir-seg button.on { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); color: #fff; }
+
 /* Alerts — active summary widget */
 .al-summary { display: flex; gap: 18px; align-items: stretch; margin-bottom: 18px; flex-wrap: wrap; }
 .al-sum-card { flex: 1; min-width: 240px; padding: 22px 26px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);

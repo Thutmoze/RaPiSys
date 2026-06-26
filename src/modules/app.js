@@ -2309,7 +2309,7 @@ pageRenderers.settings = (() => {
     }
 
     const masterSub = !enabled
-      ? 'SunFounder Pironman 5 Mini — case fan, RGB &amp; OLED. Enable to install &amp; control it from here.'
+      ? 'SunFounder Pironman 5 Mini — case fan &amp; RGB. Enable to install &amp; control it from here.'
       : (snap.installed
           ? (snap.apiReachable ? statusPill('live', 'Connected') + ' &nbsp;live via pm_dashboard' : statusPill('warn', 'Installed') + ' &nbsp;dashboard API not reachable')
           : (snap.installed === false ? 'Enabled · not detected on this Pi' : 'Enabled'));
@@ -2394,11 +2394,10 @@ pageRenderers.settings = (() => {
 
     // ---- live controls (when installed) ----
     if (snap.installed) {
-      const fan = snap.fan || {}, rgb = snap.rgb || {}, disp = snap.display || {};
+      const fan = snap.fan || {}, rgb = snap.rgb || {};
       const modeOpts = PIRON_FAN_MODES.map((m, i) => `<option value="${i}"${fan.mode === i ? ' selected' : ''}>${m}</option>`).join('');
       const styleOpts = PIRON_RGB_STYLES.map((s) => `<option value="${s}"${rgb.style === s ? ' selected' : ''}>${s.charAt(0).toUpperCase() + s.slice(1).replace('_', ' ')}</option>`).join('');
       const ledSeg = ['off', 'follow', 'on'].map((v) => `<button data-v="${v}" class="${(fan.led || 'follow') === v ? 'on' : ''}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('');
-      const unitSeg = ['C', 'F'].map((v) => `<button data-v="${v}" class="${(disp.temperatureUnit || 'C') === v ? 'on' : ''}">°${v}</button>`).join('');
 
       html += `
       <h4 class="sess-h" style="margin-top:24px">Case fan</h4>
@@ -2412,9 +2411,7 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Colour</span><input type="color" data-pir="rgbcolor" value="${esc(rgb.color || '#e84393')}"></div>
       <div class="set-kv"><span>Brightness</span><input type="range" min="0" max="100" value="${Number(rgb.brightness ?? 60)}" data-pir="rgbbright"></div>
       <div class="set-kv"><span>Speed</span><input type="range" min="0" max="100" value="${Number(rgb.speed ?? 50)}" data-pir="rgbspeed"></div>
-
-      <h4 class="sess-h" style="margin-top:24px">Display</h4>
-      <div class="set-kv"><span>OLED temperature unit</span><div class="pir-seg" data-pir-seg="unit">${unitSeg}</div></div>`;
+`;
     }
 
     box.innerHTML = html;
@@ -2445,7 +2442,6 @@ pageRenderers.settings = (() => {
         seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
         const key = seg.dataset.pirSeg, v = b.dataset.v;
         if (key === 'fanled') applyCfg({ gpio_fan_led: v }, 'Fan LED: ' + v);
-        if (key === 'unit') applyCfg({ temperature_unit: v }, 'Unit: °' + v);
       });
     });
     // rgb enable / style / colour
