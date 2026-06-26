@@ -152,6 +152,21 @@ const PIRONMAN_SRC     = '/opt/pironman5-mini-src';
 const PIRONMAN_DIR     = '/opt/pironman5-mini';
 const PIRONMAN_VENV_PY = '/opt/pironman5-mini/venv/bin/python3';
 const PIRONMAN_VENV_PIP= '/opt/pironman5-mini/venv/bin/pip3';
+// The SunFounder installer runs pip, which defaults its cache to $HOME/.cache.
+// The agent runs with systemd ProtectHome=read-only, so /root is read-only and
+// pip fails to build wheels ([Errno 30]). Point HOME/cache at the agent's
+// (writable, PrivateTmp) /tmp and disable the cache as a belt-and-suspenders.
+const PIRONMAN_BUILD_HOME = '/tmp/pironman-build';
+function pironmanInstallEnv() {
+  try { fs.mkdirSync(PIRONMAN_BUILD_HOME + '/.cache', { recursive: true }); } catch { /* */ }
+  return {
+    DEBIAN_FRONTEND: 'noninteractive',
+    HOME: PIRONMAN_BUILD_HOME,
+    XDG_CACHE_HOME: PIRONMAN_BUILD_HOME + '/.cache',
+    PIP_CACHE_DIR: PIRONMAN_BUILD_HOME + '/.cache/pip',
+    PIP_NO_CACHE_DIR: '1',
+  };
+}
 const PIRONMAN_SERVICE = 'pironman5-mini.service';
 const PIRONMAN_API_PORT= 34001;
 const PIRONMAN_REMOTE_VERSION =
@@ -254,7 +269,7 @@ const OPS = {
     send(noDash ? 'Running installer (slim - no dashboard/InfluxDB)...'
                 : 'Running installer (this can take several minutes)...');
     const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py${noDash ? ' --disable-dashboard' : ''}`;
-    const r = await runStreaming('sh', ['-c', cmd], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+    const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
     send('Installed. A reboot is required to load the device-tree overlay.');
     const det = await OPS['pironman.detect']();
@@ -284,7 +299,7 @@ const OPS = {
     assert(clone.code === 0, 'git clone failed');
     send(noDash ? 'Reinstalling (slim - no dashboard)...' : 'Reinstalling latest...');
     const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py${noDash ? ' --disable-dashboard' : ''}`;
-    const r = await runStreaming('sh', ['-c', cmd], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+    const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
     send('Restarting service...');
     await run('systemctl', ['restart', PIRONMAN_SERVICE], 30000).catch(() => {});
