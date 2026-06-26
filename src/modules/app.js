@@ -19,6 +19,12 @@ const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/ap
 // ---------------------------------------------------------------------------
 
 const $ = (sel, root = document) => root.querySelector(sel);
+// Reusable live/connection status capsule (matches the header indicator).
+// Module-scope so every renderer (Hardware Case, Settings Case, Remote Access) can use it.
+const statusPill = (state, label) => {
+  const cls = state === 'live' ? '' : (state === 'off' ? ' off' : ' warn');
+  return `<span class="status-pill${cls}"><span class="status-pill-dot"></span>${label}</span>`;
+};
 const el = (tag, cls, html) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -676,20 +682,22 @@ pageRenderers.hardware = (() => {
     const fan = d.fan || {}, rgb = d.rgb || {}, disp = d.display || {};
     const set = (sel, val) => { const n = $(sel, card); if (n) n.textContent = val; };
     const badge = $('[data-pir=badge]', card);
-    if (badge) badge.textContent = d.apiReachable ? 'live' : (d.serviceActive === false ? 'stopped' : 'file');
+    if (badge) badge.innerHTML = d.apiReachable ? statusPill('live', 'Live') : (d.serviceActive === false ? statusPill('off', 'Stopped') : statusPill('warn', 'File'));
     set('[data-pir=device]', 'Pironman 5 Mini' + (d.version ? ' · v' + d.version : ''));
     set('[data-pir=rgb]', rgb.enable ? 'On' : 'Off');
     set('[data-pir=rgbstyle]', rgb.enable ? `${String(rgb.style || '—').replace('_', ' ')} · ${rgb.color || '—'}` : '—');
-    set('[data-pir=rgbbs]', rgb.enable ? `${rgb.brightness ?? 0}% / ${rgb.speed ?? 0}%` : '—');
-    set('[data-pir=unit]', disp.temperatureUnit ? '°' + disp.temperatureUnit : '—');
-
-    // Fan-mode dropdown (only (re)build options when needed to avoid clobbering focus)
-    const sel = $('[data-pir=fanmode]', card);
-    if (sel && !sel.dataset.built) {
-      sel.innerHTML = PIR_FAN_MODES.map((m, i) => `<option value="${i}">${m}</option>`).join('');
-      sel.dataset.built = '1';
+    const swatch = $('[data-pir=rgbswatch]', card);
+    if (swatch) {
+      const col = rgb.enable && /^#?[0-9a-fA-F]{6}$/.test(String(rgb.color || '')) ? (String(rgb.color).startsWith('#') ? rgb.color : '#' + rgb.color) : null;
+      if (col) { swatch.style.background = col; swatch.style.display = ''; }
+      else { swatch.style.display = 'none'; }
     }
-    if (sel && document.activeElement !== sel && Number.isInteger(fan.mode)) sel.value = String(fan.mode);
+    set('[data-pir=rgbbs]', rgb.enable ? `${rgb.brightness ?? 0}% / ${rgb.speed ?? 0}%` : '—');
+
+    // Fan-mode cycle button: show current mode, click advances to the next.
+    const fanBtn = $('[data-pir=fanmode]', card);
+    const fanIdx = Number.isInteger(fan.mode) ? fan.mode : 0;
+    if (fanBtn) { fanBtn.dataset.idx = String(fanIdx); const v = $('[data-pir=fanmodev]', fanBtn); if (v) v.textContent = PIR_FAN_MODES[fanIdx] || '—'; }
 
     // Fan-LED segmented
     const seg = $('[data-pir-seg=fanled]', card);
@@ -705,7 +713,7 @@ pageRenderers.hardware = (() => {
       try { await api('/pironman/config', { method: 'POST', body: patch }); toast('success', 'Case', label); refreshPironmanCard(host); }
       catch (e) { toast('error', 'Case', e.message); }
     };
-    if (sel) sel.addEventListener('change', () => apply({ gpio_fan_mode: Number(sel.value) }, 'Fan mode: ' + PIR_FAN_MODES[Number(sel.value)]));
+    if (fanBtn) fanBtn.addEventListener('click', () => { const next = ((Number(fanBtn.dataset.idx) || 0) + 1) % PIR_FAN_MODES.length; apply({ gpio_fan_mode: next }, 'Fan mode: ' + PIR_FAN_MODES[next]); });
     if (seg) seg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) apply({ gpio_fan_led: b.dataset.v }, 'Fan LED: ' + b.dataset.v); });
   }
 
@@ -771,12 +779,11 @@ pageRenderers.hardware = (() => {
           </div>
           <div class="card-body">
             <div class="hw-row"><span>Device</span><span data-pir="device">—</span></div>
-            <div class="hw-row"><span>Fan mode</span><select class="hw-range" data-pir="fanmode" aria-label="Case fan mode"></select></div>
+            <div class="hw-row"><span>Fan mode</span><button class="pir-cycle" data-pir="fanmode" aria-label="Case fan mode (click to change)"><span class="pir-cycle-arr">‹</span><span class="pir-cycle-v" data-pir="fanmodev">—</span><span class="pir-cycle-arr">›</span></button></div>
             <div class="hw-row"><span>Fan LED</span><span class="pir-seg" data-pir-seg="fanled"></span></div>
             <div class="hw-row"><span>RGB</span><span data-pir="rgb">—</span></div>
-            <div class="hw-row"><span>Style / colour</span><span data-pir="rgbstyle">—</span></div>
+            <div class="hw-row"><span>Style / colour</span><span class="pir-style"><span class="pir-swatch" data-pir="rgbswatch"></span><span data-pir="rgbstyle">—</span></span></div>
             <div class="hw-row"><span>Brightness / speed</span><span data-pir="rgbbs">—</span></div>
-            <div class="hw-row"><span>OLED unit</span><span data-pir="unit">—</span></div>
             <p class="hw-hint">Fan mode &amp; LED apply via the host agent. <a class="net-link" href="#/settings?tab=pironman">Adjust RGB &amp; display in Settings → Case ↗</a></p>
           </div>
         </div>
@@ -1482,7 +1489,7 @@ pageRenderers.settings = (() => {
       <div class="set-health-grid">
         <div class="set-health-item">
           <span class="set-health-label">Host agent</span>
-          <b class="${st.agent ? 'set-ok' : 'set-err'}">${st.agent ? '● Connected' : '○ Unavailable'}</b>
+          ${st.agent ? statusPill('live', 'Connected') : statusPill('off', 'Unavailable')}
           <small>Privileged host operations (fan, NAS, updates)</small>
         </div>
         <div class="set-health-item">
@@ -2304,7 +2311,7 @@ pageRenderers.settings = (() => {
     const masterSub = !enabled
       ? 'SunFounder Pironman 5 Mini — case fan, RGB &amp; OLED. Enable to install &amp; control it from here.'
       : (snap.installed
-          ? (snap.apiReachable ? '<span class="set-ok">● Connected</span> &nbsp;live via pm_dashboard' : '<span class="set-warn">● Installed</span> &nbsp;dashboard API not reachable')
+          ? (snap.apiReachable ? statusPill('live', 'Connected') + ' &nbsp;live via pm_dashboard' : statusPill('warn', 'Installed') + ' &nbsp;dashboard API not reachable')
           : (snap.installed === false ? 'Enabled · not detected on this Pi' : 'Enabled'));
 
     // ---- master toggle (always shown) ----

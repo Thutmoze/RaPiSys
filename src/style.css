@@ -5877,6 +5877,35 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .pir-progress-bar { height: 5px; }
 .pir-progress-bar span { width: 0%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); transition: width 0.3s ease; }
 
+/* Pironman Case card: fan-mode cycle button + RGB colour swatch */
+.pir-cycle { display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--border-color);
+  background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 5px 12px; border-radius: 999px; cursor: pointer; transition: border-color 0.15s; }
+.pir-cycle:hover { border-color: var(--accent-cyan); }
+.pir-cycle-v { color: var(--accent-cyan); min-width: 64px; text-align: center; }
+.pir-cycle-arr { color: var(--text-muted); font-size: 12px; line-height: 1; }
+.pir-style { display: inline-flex; align-items: center; gap: 8px; }
+.pir-swatch { width: 13px; height: 13px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.25);
+  flex: 0 0 auto; box-shadow: 0 0 5px rgba(0,0,0,0.4) inset; }
+
+/* Reusable status capsule — same look as the header "Live" indicator, usable
+   anywhere a service/connection live state is shown. Variants: live/warn/off. */
+.status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+  border-radius: 100px; font-size: 12px; font-weight: 500; line-height: 1.6;
+  background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: var(--accent-green);
+  animation: statusPillPulse 2s ease-in-out infinite; }
+.status-pill .status-pill-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green);
+  animation: pulse 2s ease-in-out infinite; }
+/* Whole-capsule breathing for the live state (border + soft glow). */
+@keyframes statusPillPulse {
+  0%, 100% { border-color: rgba(16,185,129,0.25); box-shadow: 0 0 0 0 rgba(16,185,129,0.0); }
+  50%      { border-color: rgba(16,185,129,0.7);  box-shadow: 0 0 7px 0 rgba(16,185,129,0.35); }
+}
+.status-pill.warn { background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.25); color: #f59e0b; animation: none; }
+.status-pill.warn .status-pill-dot { background: #f59e0b; animation: none; }
+.status-pill.off { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.22); color: #ef4444; animation: none; }
+.status-pill.off .status-pill-dot { background: #ef4444; animation: none; }
+
 /* Alerts — active summary widget */
 .al-summary { display: flex; gap: 18px; align-items: stretch; margin-bottom: 18px; flex-wrap: wrap; }
 .al-sum-card { flex: 1; min-width: 240px; padding: 22px 26px; border-radius: var(--radius-sm); border: 1px solid var(--border-color);
