@@ -151,6 +151,32 @@ export const SUMMARY_WIDGETS = [
       setRow(elv, [['Per-domain', 'not logged']]);
     },
   },
+  {
+    id: 'sum-case', title: 'Case',
+    icon: () => svg('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h2M8 11h2M8 15h2"/><circle cx="15.5" cy="9" r="1.6"/>'),
+    nav: '#/settings?tab=pironman',
+    async load(elv) {
+      let d = {};
+      try { d = await getJSON('/api/pironman/status'); } catch { /* enabled but agent/api hiccup */ }
+      // Gated: only show live data when the controller is installed.
+      if (!d || d.installed !== true) {
+        setBig(elv, 'Off', d && d.installed === false ? 'not installed' : 'not set up');
+        setRow(elv, [['Setup', 'Settings → Case']]);
+        return;
+      }
+      const rgb = d.rgb || {}, fan = d.fan || {};
+      if (rgb.enable) {
+        setBig(elv, 'RGB on', String(rgb.style || 'rainbow').replace('_', ' '));
+      } else {
+        setBig(elv, 'RGB off', fan.modeLabel || '—');
+      }
+      setRow(elv, [
+        ['Fan', fan.modeLabel || '—'],
+        ['LED', fan.led || '—'],
+        [rgb.enable ? 'Bright' : 'API', rgb.enable ? (rgb.brightness ?? 0) + '%' : (d.apiReachable ? 'live' : 'file')],
+      ]);
+    },
+  },
 ];
 
 // --- helpers ---------------------------------------------------------------
