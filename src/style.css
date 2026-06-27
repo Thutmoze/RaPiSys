@@ -4966,6 +4966,7 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-toggle:disabled { opacity: 0.5; cursor: progress; }
 .net-toggle-danger { color: #ef4444; border-color: rgba(239,68,68,0.3); }
 .net-toggle-danger:hover { border-color: #ef4444; box-shadow: 0 0 0 1px rgba(239,68,68,0.25); }
+.set-kv .net-toggle span, .net-toggle span { color: inherit; }
 .net-dns-cta { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .net-dns-cta .net-dns-note { flex-basis: 100%; }
 .net-domain { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
