@@ -417,7 +417,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       listening: tls.isListening(), certPresent: tls.certsExist(),
       notAfter: cfg.notAfter || null, dnsName: cfg.dnsName || null, provisionedAt: cfg.provisionedAt || null });
   });
-  app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app }));
+  app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app, loadSettings }));
   app.use('/api/layouts', rc, layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,

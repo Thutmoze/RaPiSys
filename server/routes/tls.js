@@ -9,8 +9,22 @@
  */
 import express from 'express';
 
-export function tlsRouter({ tls, requireControl, getApp }) {
+export function tlsRouter({ tls, requireControl, getApp, loadSettings }) {
   const r = express.Router();
+
+  // During first-run setup (before completion) HTTPS must be enable-able so the
+  // wizard can switch to a secure connection BEFORE the admin account exists —
+  // otherwise the gates deadlock (no account without HTTPS, no HTTPS-via-
+  // requireControl without an authenticated full-control session, no session
+  // without an account). Mirrors the open bootstrap window in setup.js. Once
+  // setup is completed this reverts to the normal requireControl gate.
+  async function controlOrSetup(req, res, next) {
+    try {
+      const s = await loadSettings();
+      if (!s.rapisys?.setupCompleted) return next();
+    } catch { /* fall through to the strict gate */ }
+    return requireControl(req, res, next);
+  }
 
   r.get('/status', async (req, res) => {
     const cfg = await tls.getConfig();
@@ -26,7 +40,7 @@ export function tlsRouter({ tls, requireControl, getApp }) {
   });
 
   // Enable HTTPS in the given mode: provision the cert, persist, start listener.
-  r.post('/enable', requireControl, async (req, res) => {
+  r.post('/enable', controlOrSetup, async (req, res) => {
     const mode = req.body?.mode === 'tailscale' ? 'tailscale' : 'selfsigned';
     try {
       const prov = await tls.provision(mode, { dnsName: req.body?.dnsName || null });
