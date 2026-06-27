@@ -2443,8 +2443,11 @@ pageRenderers.settings = (() => {
       return `<div class="set-kv"><span>Updates</span><b class="set-ok">● Up to date</b> <button class="net-toggle" data-pir="checkupd">Check now</button></div>`;
     })() : '';
 
-    const restartLine = snap.installed ?
-      `<div class="set-kv"><span>Service</span><button class="net-toggle" data-pir="restart">${RESTART_ICON}<span>Restart</span></button> <button class="net-toggle net-toggle-danger" data-pir="uninstall">${TRASH_ICON}<span>Uninstall</span></button></div>` : '';
+    const restartActions = snap.installed ?
+      `<div class="set-actions">
+        <button class="set-btn set-btn-edit" data-pir="restart">${RESTART_ICON}<span>Restart</span></button>
+        <button class="set-btn set-btn-danger" data-pir="uninstall">${TRASH_ICON}<span>Uninstall</span></button>
+      </div>` : '';
 
     // EEPROM full power-off-on-shutdown status row (when installed + agent can read it).
     const eepromLine = (snap.installed && eeprom && eeprom.available !== false) ? (
@@ -2459,8 +2462,8 @@ pageRenderers.settings = (() => {
         ${updLine}
         ${eepromLine}
         ${consoleLine}
-        ${restartLine}
       </div>
+      ${restartActions}
       <div class="pir-progress" data-pir="unprogress" style="display:none">
         <div class="pir-progress-row"><span class="up-spinner"></span><span class="pir-progress-step" data-pir="unstep">Starting…</span><span class="pir-progress-pct" data-pir="unpct">0%</span></div>
         <div class="up-scanbar pir-progress-bar"><span data-pir="unbar" style="width:0%"></span></div>

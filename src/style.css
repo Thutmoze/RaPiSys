@@ -5101,7 +5101,6 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 /* The last row before the buttons shows its bottom border as a stray divider
    that the buttons butt against. Drop the trailing row border and give the
    action group some breathing room above it. */
-.set-card .set-kv:has(+ .set-actions) { border-bottom: none; }
 .set-card .set-actions { padding-top: 12px; }
 /* Pin buttons to the card bottom regardless of how deep they're nested. The
    chain below makes every wrapper between the card and the actions a flex
