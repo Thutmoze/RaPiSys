@@ -11,6 +11,11 @@ RestartSec=3
 # Hardening (the agent needs root for mounts/apt/fan, but we still confine it)
 NoNewPrivileges=no
 ProtectHome=read-only
+# The SunFounder Pironman installer resolves HOME from root's passwd entry
+# (/root) and clones into $HOME/pironman5; ProtectHome=read-only would block
+# that. Grant write access to /root specifically so the installer's clone
+# step works without relaxing home protection elsewhere.
+ReadWritePaths=/root
 PrivateTmp=yes
 RuntimeDirectory=rapisys
 RuntimeDirectoryMode=0755
