@@ -4812,6 +4812,11 @@ select, select option {
   cursor: pointer; transition: var(--transition);
 }
 .rsel-btn:hover, .rsel-btn.open { border-color: rgba(0, 212, 255, 0.45); }
+.rsel-label { color: var(--text-primary); }
+/* Small inline (i) info button row (e.g. SMTP "About setup"). */
+.set-info-row { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.set-info-row .pir-info-btn { gap: 5px; font-size: 12px; color: var(--text-muted); }
+.set-info-row .pir-info-btn span { font-size: 12px; }
 .rsel-btn.open svg { transform: rotate(180deg); }
 .rsel-btn svg { transition: transform 0.15s ease; color: var(--text-muted); flex: none; }
 .rsel-list {
@@ -5077,16 +5082,30 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .set-card .set-summary { background: transparent; border: none; border-radius: 0; padding: 0; margin-bottom: 8px; }
 /* Long description paragraphs inside wide cards shouldn't force the card wide;
    cap them so they wrap and the card can shrink to its content. */
-.set-card-wide > .net-dns-note, .set-card-wide .up-sec-hint { max-width: 560px; }
+.set-card .net-dns-note, .set-card .up-sec-hint, .set-card .hw-hint { max-width: 560px; }
 /* Push the action buttons to the bottom of the card so buttons on cards that
    sit side by side line up along the card's bottom edge. */
-.set-card > .set-actions { margin-top: auto; }
+.set-card .set-actions { margin-top: auto; border-top: none; padding-top: 0; }
+/* Pin buttons to the card bottom regardless of nesting depth (NAS nests actions
+   inside [data-set] > .set-summary; others one level up). Each wrapper between
+   card and actions is a growing flex column. Empty injected siblings (e.g. the
+   NAS edit-form slot) are hidden so they don't shove content upward. */
+.set-card > [data-set]:not(:empty) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.set-card > [data-set] > .set-summary { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.set-card > [data-set]:empty { display: none; }
 /* Section cards are flex columns; the grid stretches them to equal height. */
 .set-card { display: flex; flex-direction: column; }
 /* Wide section cards hug their content instead of stretching across the grid. */
 .set-card-wide { width: fit-content; max-width: 100%; }
 .set-card-wide > .set-summary, .set-card-wide > .set-kv { min-width: 460px; }
 .set-card-wide:has(.set-health-grid) { width: fit-content; }
+/* DNS and Case panes stack only wide cards; give them a single uniform width
+   so they line up (instead of each card hugging its own content width). */
+[data-set="pihole"] .set-card-wide,
+[data-pane="pironman"] .set-card-wide { width: 100%; max-width: 760px; }
+[data-set="pihole"] .set-card-wide > .set-summary,
+[data-set="pihole"] .set-card-wide > .net-pi-form,
+[data-pane="pironman"] .set-card-wide > .set-summary { min-width: 0; }
 /* Settings panel hugs its content but stays wide enough for the 2-up card grid. */
 .settings-card { width: fit-content; min-width: min(900px, 100%); max-width: 100%; }
 @media (max-width: 820px) { .set-grid { grid-template-columns: 1fr; } }

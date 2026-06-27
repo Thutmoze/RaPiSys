@@ -1419,7 +1419,7 @@ pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
-  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false;
+  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false, editTls = false;
   // shared glyphs hoisted to module scope (EDIT_ICON, TRASH_ICON, …)
 
   async function load(host) {
@@ -1544,7 +1544,10 @@ pageRenderers.settings = (() => {
     const smtp = st.smtp || {};
     const showSmtpForm = editSmtp || !st.smtpConfigured;
     $('[data-set=smtp]', host).innerHTML = `
-      <p class="hw-hint">Configure authenticated SMTP for alert email notifications. Recommended free providers: Brevo (300/day), SMTP2GO (1,000/month). Gmail works with an App Password (requires 2FA).</p>
+      <div class="set-info-row">
+        <button class="pir-info-btn" data-sm="infobtn" aria-label="About SMTP setup"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg><span>About SMTP setup</span></button>
+      </div>
+      <div class="pir-info" data-sm="infopanel" hidden><p class="pir-info-note" style="font-size:12.5px">Configure authenticated SMTP for alert email notifications. Recommended free providers: Brevo (300/day), SMTP2GO (1,000/month). Gmail works with an App Password (requires 2FA).</p></div>
       ${!st.encryption ? '<p class="set-warn">⚠ SECRET_KEY is not set — passwords cannot be stored securely. Run deploy.sh or set SECRET_KEY in .env first.</p>' : ''}
       ${!showSmtpForm ? `
         <div class="set-summary">
@@ -1677,6 +1680,11 @@ pageRenderers.settings = (() => {
     };
 
     // SMTP edit / cancel toggles
+    const smInfoBtn = $('[data-sm=infobtn]', host);
+    if (smInfoBtn) smInfoBtn.onclick = () => {
+      const panel = $('[data-sm=infopanel]', host);
+      if (panel) { panel.hidden = !panel.hidden; smInfoBtn.classList.toggle('open', !panel.hidden); }
+    };
     const smEdit = $('[data-sm=edit]', host);
     if (smEdit) smEdit.onclick = () => { editSmtp = true; load(host); };
     const smCancel = $('[data-sm=cancel]', host);
@@ -1878,31 +1886,41 @@ pageRenderers.settings = (() => {
       ? `Tailscale detected — node <b>${esc(ts.dnsName || '')}</b>. Trusted certs require HTTPS enabled in your tailnet admin console.`
       : `Tailscale not available${ts.reason ? ` (${esc(ts.reason)})` : ''} — self-signed is the zero-config option.`;
 
-    el2.innerHTML = `
-      <p class="up-sec-hint">Serve the dashboard over encrypted HTTPS. Required before creating or changing the administrator password, so credentials are never sent in clear text. Certificates are provisioned on the Pi by the host agent.</p>
+    if (!editTls) {
+      el2.innerHTML = `
       <div class="set-summary">
         <div class="set-kv"><span>HTTPS</span><b class="${st.enabled ? 'set-ok' : ''}">${st.enabled ? '● Enabled' : '○ Disabled'}</b></div>
         <div class="set-kv"><span>Mode</span><b>${st.mode === 'tailscale' ? 'Tailscale (trusted)' : 'Self-signed'}</b></div>
         <div class="set-kv"><span>Listening</span><b class="${st.listening ? 'set-ok' : ''}">${st.listening ? `● yes, port ${st.port}` : '○ no'}</b></div>
         ${st.dnsName ? `<div class="set-kv"><span>Cert name</span><b>${esc(st.dnsName)}</b></div>` : ''}
         ${expiry}
+        ${st.enabled ? `<div class="set-kv"><span>Redirect HTTP→HTTPS</span><b class="${st.redirect ? 'set-ok' : ''}">${st.redirect ? '● On' : '○ Off'}</b></div>` : ''}
       </div>
-      <p class="up-sec-hint" style="margin-top:10px">${tsLine}</p>
-      <div class="set-actions" style="margin-top:12px">
-        <label class="rsel-wrap" style="min-width:200px"><select data-tls="mode">
+      ${st.enabled && st.listening && !onHttps ? `<p class="hw-hint">HTTPS is active. <a href="${httpsUrl(st.port)}" style="color:var(--accent-cyan)">Open the secure URL →</a> (self-signed shows a one-time browser warning you can accept.)</p>` : ''}
+      <div class="set-actions"><button class="set-btn set-btn-edit" data-tls="edit">${EDIT_ICON}<span>Edit</span></button></div>`;
+      $('[data-tls=edit]', el2)?.addEventListener('click', () => { editTls = true; loadTls(host); });
+      return;
+    }
+    el2.innerHTML = `
+      <p class="hw-hint">Serve the dashboard over encrypted HTTPS. Required before creating or changing the administrator password, so credentials are never sent in clear text. Certificates are provisioned on the Pi by the host agent.</p>
+      <div class="set-kv"><span>Mode</span><label class="rsel-wrap" style="min-width:200px"><select data-tls="mode">
           <option value="selfsigned" ${st.mode !== 'tailscale' ? 'selected' : ''}>Self-signed (no setup)</option>
           <option value="tailscale" ${st.mode === 'tailscale' ? 'selected' : ''} ${ts.available ? '' : 'disabled'}>Tailscale (trusted, *.ts.net)</option>
-        </select></label>
+      </select></label></div>
+      ${st.enabled ? `<div class="set-kv set-kv-toggle"><span>Redirect HTTP→HTTPS</span><label class="set-switch"><input type="checkbox" data-tls="redirect" ${st.redirect ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+      <p class="hw-hint">Forces all traffic onto the secure port.</p>` : ''}
+      <p class="hw-hint">${tsLine}</p>
+      <div class="set-actions">
         ${st.enabled
           ? `<button class="set-btn set-btn-primary" data-tls="provision">${SAVE_ICON}<span>Renew now</span></button>
              <button class="set-btn set-btn-cancel" data-tls="disable">${CANCEL_ICON}<span>Disable HTTPS</span></button>`
           : `<button class="set-btn set-btn-primary" data-tls="enable">${SAVE_ICON}<span>Enable HTTPS</span></button>`}
+        <button class="set-btn set-btn-edit" data-tls="done">Done</button>
         <span data-tls="msg"></span>
-      </div>
-      ${st.enabled ? `<label class="wz-inline" style="margin-top:10px"><input type="checkbox" data-tls="redirect" ${st.redirect ? 'checked' : ''}> Redirect plain HTTP to HTTPS (forces all traffic onto the secure port)</label>` : ''}
-      ${st.enabled && st.listening && !onHttps ? `<p class="up-sec-hint" style="margin-top:8px">HTTPS is active. <a href="${httpsUrl(st.port)}" style="color:var(--accent-cyan)">Open the secure URL →</a> (self-signed shows a one-time browser warning you can accept.)</p>` : ''}`;
+      </div>`;
 
     enhanceSelects(el2);
+    $('[data-tls=done]', el2)?.addEventListener('click', () => { editTls = false; loadTls(host); });
     const msg = $('[data-tls=msg]', el2);
 
     $('[data-tls=enable]', el2)?.addEventListener('click', async (e) => {
