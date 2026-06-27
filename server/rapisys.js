@@ -342,6 +342,64 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       lastPironmanState = state;
     }
   });
+  // Night light scheduler: during the configured off-window, switch off the
+  // selected Pironman lights (HAT RGB and/or RGB fan), then restore them with
+  // their previous style/colour when the window ends. State entering the window
+  // is snapshotted to settings so a restart mid-window still restores correctly.
+  let nightInWindow = null;       // null until first evaluation
+  const inOffWindow = (sched, now = new Date()) => {
+    if (!sched?.enabled) return false;
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+    const off = toMin(sched.offAt || '22:00'), on = toMin(sched.onAt || '08:00');
+    return off <= on ? (cur >= off && cur < on) : (cur >= off || cur < on);
+  };
+  scheduler.register('pironman-night-scheduler', 60e3, async () => {
+    const cfg = pironmanConfigCache;
+    if (!cfg?.enabled) return;
+    const sched = cfg.nightSchedule;
+    if (!sched?.enabled) { nightInWindow = null; return; }
+    const want = inOffWindow(sched);
+    if (want === nightInWindow) return;   // no transition
+    const snap = await pironman.snapshot({ withDetect: false }).catch(() => null);
+    if (!snap || snap.installed !== true) return;
+    const t = sched.targets || { rgb: true, fanLed: true };
+
+    if (want) {
+      // Entering the window: snapshot current light state, then switch off.
+      const saved = {
+        rgb_enable: snap.rgb?.enable ?? null,
+        rgb_style: snap.rgb?.style ?? null,
+        rgb_color: snap.rgb?.color ?? null,
+        gpio_fan_led: snap.fan?.led ?? null,
+      };
+      await withFileLock(async () => {
+        const st = await loadSettings();
+        st.rapisys.pironman.nightSchedule = { ...st.rapisys.pironman.nightSchedule, _saved: saved };
+        await saveSettings(st);
+      });
+      await refreshPironmanConfig();
+      const patch = {};
+      if (t.rgb) patch.rgb_enable = false;
+      if (t.fanLed) patch.gpio_fan_led = 'off';
+      if (Object.keys(patch).length) await pironman.setConfig(patch).catch(() => {});
+      eventsFacade.add('case.night_lights_off', 'info', { targets: t, saved });
+    } else {
+      // Leaving the window: restore the saved state (style/colour included).
+      const saved = sched._saved || {};
+      const patch = {};
+      if (t.rgb) {
+        if (saved.rgb_style) patch.rgb_style = saved.rgb_style;
+        if (saved.rgb_color) patch.rgb_color = saved.rgb_color;
+        patch.rgb_enable = saved.rgb_enable != null ? saved.rgb_enable : true;
+      }
+      if (t.fanLed) patch.gpio_fan_led = saved.gpio_fan_led || 'follow';
+      if (Object.keys(patch).length) await pironman.setConfig(patch).catch(() => {});
+      eventsFacade.add('case.night_lights_on', 'info', { targets: t, restored: saved });
+    }
+    nightInWindow = want;
+  });
+
   app.use('/api/pironman', rc, pironmanRouter({ pironman, requireControl: auth.requireControl,
     loadSettings, saveSettings, withFileLock, refreshPironmanConfig }));
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));

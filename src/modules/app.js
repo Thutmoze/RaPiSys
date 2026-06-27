@@ -2316,17 +2316,39 @@ pageRenderers.settings = (() => {
   let editPironman = false;
   const PIRON_FAN_MODES = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
   const PIRON_RGB_STYLES = ['rainbow', 'breath', 'leap', 'flow', 'raise_up', 'colorful'];
+  const PIR_FANMODE_INFO = [
+    ['Always On', 'RGB side fan runs constantly, regardless of temperature.'],
+    ['Performance', 'Fan kicks in early — at 50°C. Coolest, most active.'],
+    ['Cool', 'Fan activates at 60°C. Good balance for warm rooms.'],
+    ['Balanced', 'Fan activates at 67.5°C. Quieter; lets the Pi run warmer.'],
+    ['Quiet', 'Fan only at 70°C. Quietest; rarely spins at idle.'],
+  ];
+  const PIR_FANMODE_NOTE = 'Applies to the Mini\u2019s RGB side fan. The main active-cooling fan is firmware-controlled by the Pi 5 and always runs on its own thermal curve.';
+  const PIR_RGBSTYLE_INFO = [
+    ['Rainbow', 'Smooth cycle through the full colour spectrum across all LEDs.'],
+    ['Breath', 'Single colour fading gently in and out, like breathing.'],
+    ['Leap', 'Colour jumps between LEDs in discrete hops.'],
+    ['Flow', 'Colour streams smoothly along the strip in one direction.'],
+    ['Raise up', 'Light builds upward across the LEDs, then repeats.'],
+    ['Colorful', 'Each LED shows a different fixed colour at once.'],
+  ];
+  const PIR_RGBSTYLE_NOTE = 'Rainbow & Colorful set their own colours (your colour is ignored); Breath, Leap, Flow & Raise up use the colour you pick. Speed & brightness apply to all styles.';
+  const infoIcon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>';
+  const infoPanel = (id, rows, note) => `<div class="pir-info" data-pir-info="${id}" hidden><table class="pir-info-t">` +
+    rows.map(([o, d]) => `<tr><td class="pir-info-o">${o}</td><td class="pir-info-d">${d}</td></tr>`).join('') +
+    `</table><p class="pir-info-note">${note}</p></div>`;
   async function loadPironman(host) {
     const box = $('[data-set=pironman]', host);
     if (!box) return;
     box.innerHTML = '<p class="net-dns-note">Loading…</p>';
-    let cfg = {}, snap = {}, upd = {}, eeprom = {};
+    let cfg = {}, snap = {}, upd = {}, eeprom = {}, sched = { enabled: false, offAt: '22:00', onAt: '08:00', targets: { rgb: true, fanLed: true } };
     try { cfg = await api('/pironman/settings'); } catch { /* defaults */ }
     const enabled = !!cfg.enabled;
 
     if (enabled) {
       try { snap = await api('/pironman/status'); } catch { /* agent/api maybe absent */ }
       if (snap.installed) { try { upd = await api('/pironman/update-check'); } catch { /* */ } }
+      if (snap.installed) { try { sched = await api('/pironman/schedule'); } catch { /* */ } }
     }
 
     const masterSub = !enabled
@@ -2443,21 +2465,71 @@ pageRenderers.settings = (() => {
 
       html += `
       <h4 class="sess-h" style="margin-top:24px">Case fan</h4>
-      <div class="set-kv"><span>Fan mode</span><select data-pir="fanmode">${modeOpts}</select></div>
+      <div class="set-kv"><span class="pir-lbl">Fan mode <button class="pir-info-btn" data-pir-infobtn="fanmode" aria-label="About fan modes">${infoIcon}</button></span><select data-pir="fanmode">${modeOpts}</select></div>
+      ${infoPanel('fanmode', PIR_FANMODE_INFO, PIR_FANMODE_NOTE)}
       <div class="set-kv"><span>Fan LED</span><div class="pir-seg" data-pir-seg="fanled">${ledSeg}</div></div>
 
       <h4 class="sess-h" style="margin-top:24px">RGB lighting</h4>
       <div class="set-kv set-kv-toggle"><span>Enable RGB</span>
         <label class="set-switch"><input type="checkbox" data-pir="rgbenable" ${rgb.enable ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
-      <div class="set-kv"><span>Style</span><select data-pir="rgbstyle">${styleOpts}</select></div>
+      <div class="set-kv"><span class="pir-lbl">Style <button class="pir-info-btn" data-pir-infobtn="rgbstyle" aria-label="About RGB styles">${infoIcon}</button></span><select data-pir="rgbstyle">${styleOpts}</select></div>
+      ${infoPanel('rgbstyle', PIR_RGBSTYLE_INFO, PIR_RGBSTYLE_NOTE)}
       <div class="set-kv"><span>Colour</span><input type="color" data-pir="rgbcolor" value="${esc(rgb.color || '#e84393')}"></div>
       <div class="set-kv"><span>Brightness</span><input type="range" min="0" max="100" value="${Number(rgb.brightness ?? 60)}" data-pir="rgbbright"></div>
       <div class="set-kv"><span>Speed</span><input type="range" min="0" max="100" value="${Number(rgb.speed ?? 50)}" data-pir="rgbspeed"></div>
+
+      <h4 class="sess-h" style="margin-top:24px">Night light schedule</h4>
+      <div class="set-kv set-kv-toggle"><span>Schedule lights off
+        <span class="pir-sched-pill" data-pir="schedpill" hidden></span></span>
+        <label class="set-switch"><input type="checkbox" data-pir="schedenable" ${sched.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+      <div class="pir-sched-body" data-pir="schedbody" ${sched.enabled ? '' : 'hidden'}>
+        <div class="set-kv"><span>Turn off at</span><input type="time" data-pir="schedoff" value="${esc(sched.offAt || '22:00')}" class="pir-time"></div>
+        <div class="set-kv"><span>Turn back on at</span><input type="time" data-pir="schedon" value="${esc(sched.onAt || '08:00')}" class="pir-time"></div>
+        <div class="set-kv"><span>What to switch off</span><span class="pir-sched-targets">
+          <label class="pir-ck"><input type="checkbox" data-pir="schedrgb" ${sched.targets?.rgb !== false ? 'checked' : ''}> HAT RGB</label>
+          <label class="pir-ck"><input type="checkbox" data-pir="schedfan" ${sched.targets?.fanLed !== false ? 'checked' : ''}> Fan light</label>
+        </span></div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="schedsave">${SAVE_ICON}<span>Save schedule</span></button></div>
+      </div>
+      <p class="hw-hint">Lights are restored with their previous style &amp; colour when the window ends. Cooling is never affected. Times use the Pi\u2019s local timezone.</p>
 `;
     }
 
     box.innerHTML = html;
     enhanceSelects(box);
+
+    // ---- info panels: toggle the matching panel under each ⓘ button ----
+    box.querySelectorAll('[data-pir-infobtn]').forEach((btn) => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const panel = $(`[data-pir-info="${btn.dataset.pirInfobtn}"]`, box);
+        if (panel) { panel.hidden = !panel.hidden; btn.classList.toggle('open', !panel.hidden); }
+      };
+    });
+
+    // ---- night schedule wiring ----
+    const schedPill = $('[data-pir=schedpill]', box);
+    if (sched && sched.active) { if (schedPill) { schedPill.hidden = false; schedPill.textContent = '● Active now'; } }
+    const schedEn = $('[data-pir=schedenable]', box);
+    const schedBody = $('[data-pir=schedbody]', box);
+    if (schedEn) schedEn.onchange = () => { if (schedBody) schedBody.hidden = !schedEn.checked; };
+    const saveSched = $('[data-pir=schedsave]', box);
+    if (saveSched) saveSched.onclick = async () => {
+      const body = {
+        enabled: !!(schedEn && schedEn.checked),
+        offAt: ($('[data-pir=schedoff]', box) || {}).value || '22:00',
+        onAt: ($('[data-pir=schedon]', box) || {}).value || '08:00',
+        targets: {
+          rgb: !!($('[data-pir=schedrgb]', box) || {}).checked,
+          fanLed: !!($('[data-pir=schedfan]', box) || {}).checked,
+        },
+      };
+      saveSched.disabled = true;
+      try { await api('/pironman/schedule', { method: 'POST', body });
+        toast('success', 'Case', 'Night schedule saved');
+        setTimeout(() => loadPironman(host), 500);
+      } catch (e) { toast('error', 'Case', e.message); saveSched.disabled = false; }
+    };
 
     // ---- master toggle wiring ----
     const mcb = $('[data-pir=enabled]', box);

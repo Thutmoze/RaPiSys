@@ -65,6 +65,51 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
   });
 
+  // ---- night light schedule -----------------------------------------------
+  // Config shape: { enabled, offAt:'HH:MM', onAt:'HH:MM', targets:{rgb,fanLed} }.
+  const DEF_SCHED = { enabled: false, offAt: '22:00', onAt: '08:00', targets: { rgb: true, fanLed: true } };
+  const validTime = (t) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+
+  r.get('/schedule', async (req, res) => {
+    try {
+      const s = await loadSettings();
+      const cfg = { ...DEF_SCHED, ...(s.rapisys?.pironman?.nightSchedule || {}) };
+      // Compute whether we're currently inside the off-window (local time).
+      const now = new Date();
+      const cur = now.getHours() * 60 + now.getMinutes();
+      const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+      const off = toMin(cfg.offAt), on = toMin(cfg.onAt);
+      // Window may wrap past midnight (off=22:00, on=08:00).
+      const inWindow = off <= on ? (cur >= off && cur < on) : (cur >= off || cur < on);
+      res.json({ ...cfg, active: cfg.enabled && inWindow });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  r.post('/schedule', requireControl, async (req, res) => {
+    try {
+      const b = req.body || {};
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        s.rapisys.pironman = s.rapisys.pironman || { enabled: false, host: '127.0.0.1', port: 34001 };
+        const cur = s.rapisys.pironman.nightSchedule || DEF_SCHED;
+        s.rapisys.pironman.nightSchedule = {
+          enabled: typeof b.enabled === 'boolean' ? b.enabled : cur.enabled,
+          offAt: validTime(b.offAt) ? b.offAt : cur.offAt,
+          onAt: validTime(b.onAt) ? b.onAt : cur.onAt,
+          targets: {
+            rgb: typeof b?.targets?.rgb === 'boolean' ? b.targets.rgb : (cur.targets?.rgb ?? true),
+            fanLed: typeof b?.targets?.fanLed === 'boolean' ? b.targets.fanLed : (cur.targets?.fanLed ?? true),
+          },
+        };
+        await saveSettings(s);
+      });
+      await refreshPironmanConfig?.();
+      const s = await loadSettings();
+      res.json({ ok: true, nightSchedule: s.rapisys?.pironman?.nightSchedule });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+  });
+
   // Apply a device-config patch (fan/rgb/display). Live via pm_dashboard
   // setters, or the agent file write + restart when the API is down.
   r.post('/config', requireControl, async (req, res) => {

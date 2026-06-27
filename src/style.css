@@ -5054,6 +5054,27 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .set-pi-methods { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
 .set-pi-picker { margin: 12px 0 14px; }
 .set-pi-picker label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500; }
+/* Pironman info panels (ⓘ next to Fan mode / RGB style) + night schedule */
+.pir-lbl { display: inline-flex; align-items: center; gap: 7px; }
+.pir-info-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px;
+  background: none; border: none; color: var(--text-muted); cursor: pointer; border-radius: 5px; }
+.pir-info-btn:hover, .pir-info-btn.open { color: var(--accent-cyan); }
+.pir-info { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px;
+  padding: 6px 14px; margin: 2px 0 6px; }
+.pir-info-t { width: 100%; border-collapse: collapse; }
+.pir-info-t td { padding: 7px 6px; border-top: 1px solid var(--border-color); font-size: 12.5px; vertical-align: top; }
+.pir-info-t tr:first-child td { border-top: none; }
+.pir-info-o { color: var(--accent-cyan); font-weight: 600; white-space: nowrap; width: 110px; }
+.pir-info-d { color: var(--text-secondary); line-height: 1.5; }
+.pir-info-note { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; margin: 4px 6px 8px; }
+.pir-sched-pill { font-size: 10.5px; font-weight: 600; color: var(--accent-green);
+  background: rgba(16,185,129,0.12); padding: 2px 8px; border-radius: 100px; margin-left: 8px; }
+.pir-sched-body { margin-top: 2px; }
+.pir-time { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px;
+  color: var(--text-primary); font: inherit; font-size: 13px; padding: 6px 10px; }
+.pir-sched-targets { display: flex; gap: 16px; }
+.pir-ck { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-secondary); cursor: pointer; }
+
 .set-pi-picker select { width: 100%; background: var(--bg-card); border: 1px solid var(--border-color);
   border-radius: 9px; color: var(--text-primary); font: inherit; font-size: 13.5px; padding: 9px 12px; cursor: pointer; }
 .set-pi-method { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--text-secondary); cursor: pointer; line-height: 1.5; }
