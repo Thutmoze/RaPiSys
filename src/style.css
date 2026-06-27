@@ -5062,7 +5062,7 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
    status values keep their semantic colour (green/amber/red).
    ============================================================ */
 .set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 16px; align-items: start; width: 100%; }
+  gap: 16px; align-items: stretch; width: 100%; }
 .set-grid .set-card-wide { grid-column: 1 / -1; }
 .set-card { background: var(--bg-secondary); border: 1px solid var(--border-color);
   border-radius: 14px; padding: 18px 20px; min-width: 0; }
@@ -5072,6 +5072,11 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .set-card .set-kv b, .set-card .set-summary b { color: #fff; font-weight: 400; }
 .set-card .set-ok { color: var(--accent-green) !important; font-weight: 600; }
 .sess-span > .card-body { padding-top: 16px; }
+/* A set-summary inside a section card shouldn't draw its own box — the card is
+   the box. Strip its border/background to avoid a border-inside-a-border. */
+.set-card .set-summary { background: transparent; border: none; border-radius: 0; padding: 0; margin-bottom: 8px; }
+/* Section cards are flex columns; the grid stretches them to equal height. */
+.set-card { display: flex; flex-direction: column; }
 /* Wide section cards hug their content instead of stretching across the grid. */
 .set-card-wide { width: fit-content; max-width: 100%; }
 .set-card-wide > .set-summary, .set-card-wide > .set-kv { min-width: 460px; }

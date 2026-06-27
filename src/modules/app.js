@@ -2002,6 +2002,8 @@ pageRenderers.settings = (() => {
     })() : '';
 
     box.innerHTML = `
+      <div class="set-card set-card-wide">
+      <h4 class="sess-h">Pi-hole DNS</h4>
       <div class="set-summary">
         <div class="set-kv"><span>Status</span>${statusLine}</div>
         ${autoLine}
@@ -2012,7 +2014,9 @@ pageRenderers.settings = (() => {
         <div class="set-kv"><span>Connection</span><b>${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}</b></div>
       </div>
       <pre class="set-pi-log" data-pi="updlog" style="display:none"></pre>
+      </div>
       ${!detect.installed && detect.agent !== false ? `
+      <div class="set-card set-card-wide">
       <div class="set-pi-install">
         <h4 class="sess-h">Install Pi-hole</h4>
         <p class="net-dns-note">Pi-hole isn\u2019t installed on this Pi. Choose how to install it — all run on the host through the RaPiSys agent.</p>
@@ -2030,8 +2034,10 @@ pageRenderers.settings = (() => {
         <div class="set-actions"><button class="set-btn set-btn-primary" data-pi="install">${INSTALL_ICON}<span>Install Pi-hole</span></button><span data-pi="instmsg"></span></div>
         <pre class="set-pi-log" data-pi="log" style="display:none"></pre>
         <div class="set-pi-manual" data-pi="manual" style="display:none"></div>
+      </div>
       </div>` : ''}
-      <h4 class="sess-h" style="margin-top:24px">Connection</h4>
+      <div class="set-card set-card-wide">
+      <h4 class="sess-h">Connection</h4>
       ${(() => {
         const showForm = editPihole || !cfg.enabled;
         const schemeHost = `${esc(cfg.scheme || 'http')}://${esc(cfg.host || '127.0.0.1')}:${cfg.port || 80}`;
@@ -2082,7 +2088,8 @@ pageRenderers.settings = (() => {
             <span class="net-pi-testresult" data-pi="result"></span>
           </div>
         </div>`;
-      })()}`;
+      })()}
+      </div>`;
     enhanceSelects(box);
 
     const val = (k) => { const e = $(`[data-pi=${k}]`, box); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
@@ -2122,8 +2129,8 @@ pageRenderers.settings = (() => {
 
     // ---- Back up Pi-hole logs to NAS ----
     if (detect.installed) {
-      const bwrap = el('div', 'net-pi-backup');
-      bwrap.innerHTML = `<h4 class="sess-h" style="margin-top:24px">Back up logs to NAS</h4><div data-pi="backupbody"><p class="net-dns-note">Loading…</p></div>`;
+      const bwrap = el('div', 'net-pi-backup set-card set-card-wide');
+      bwrap.innerHTML = `<h4 class="sess-h">Back up logs to NAS</h4><div data-pi="backupbody"><p class="net-dns-note">Loading…</p></div>`;
       box.appendChild(bwrap);
       const bbody = $('[data-pi=backupbody]', bwrap);
       let bk = {};
@@ -3017,7 +3024,7 @@ pageRenderers.settings = (() => {
           </div>
           <div class="card-body" data-pane="dns" style="display:none">
             <div class="set-grid">
-              <div class="set-card set-card-wide"><h4 class="sess-h">Pi-hole DNS</h4><div data-set="pihole"></div></div>
+              <div class="set-grid" data-set="pihole"></div>
             </div>
           </div>
           <div class="card-body" data-pane="email" style="display:none">
