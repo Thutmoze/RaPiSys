@@ -68,11 +68,42 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   /** Relocate the database live (used by the setup wizard). */
   function reopenDb(newPath) {
+    const curPath = path.resolve(handle.meta.path);
+    const dstPath = path.resolve(newPath);
+
+    // Copy-on-relocate: carry the current DB's contents (admin account,
+    // sessions, history, settings-backed state) across to the new file so a
+    // relocation never strands data in the old DB and boots an empty one.
+    // Only when moving to a genuinely different path that doesn't already hold
+    // a database — an existing DB at the destination is adopted as-is, never
+    // clobbered.
+    if (dstNeedsSeed(curPath, dstPath)) {
+      try {
+        // Flush WAL into the main file so a plain file copy is consistent.
+        try { handle.db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* TRUNCATE-mode DBs have no WAL */ }
+        try { handle.db.close(); } catch { /* */ }
+        fs.mkdirSync(path.dirname(dstPath), { recursive: true });
+        fs.copyFileSync(curPath, dstPath);
+      } catch (err) {
+        // Copy failed — re-open the original so we never end up with no DB.
+        handle = openDatabase({ dbPath: curPath, fallbackPath });
+        rebuildRepos();
+        throw new Error(`could not copy database to new location: ${err.message}`);
+      }
+    }
+
     const next = openDatabase({ dbPath: newPath, fallbackPath });
-    try { handle.db.close(); } catch { /* old handle */ }
+    try { handle.db.close(); } catch { /* old handle (may already be closed) */ }
     handle = next;
     rebuildRepos();
     return handle.meta;
+  }
+
+  /** True when relocating to a different, empty/absent destination file. */
+  function dstNeedsSeed(curPath, dstPath) {
+    if (dstPath === curPath) return false;
+    try { return !(fs.existsSync(dstPath) && fs.statSync(dstPath).size > 0); }
+    catch { return true; }
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
