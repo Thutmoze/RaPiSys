@@ -2360,6 +2360,7 @@ pageRenderers.settings = (() => {
 
     // ---- master toggle (always shown) ----
     let html = `
+      <div class="set-card set-card-wide">
       <div class="set-kv set-kv-toggle pir-master">
         <span><b>Pironman Case Controller</b><br><span class="net-dns-note" style="display:inline">${masterSub}</span></span>
         <label class="set-switch" title="Enable Case controller">
@@ -2369,7 +2370,7 @@ pageRenderers.settings = (() => {
       </div>`;
 
     if (!enabled) {
-      html += `<p class="net-dns-note">When enabled, RaPiSys can install the Pironman software on this Pi and show its controls here, plus gated cards on Overview and Hardware.</p>`;
+      html += `<p class="net-dns-note">When enabled, RaPiSys can install the Pironman software on this Pi and show its controls here, plus gated cards on Overview and Hardware.</p></div>`;
       box.innerHTML = html;
       const cb = $('[data-pir=enabled]', box);
       if (cb) cb.onchange = async () => {
@@ -2423,11 +2424,13 @@ pageRenderers.settings = (() => {
         <div class="pir-progress-row"><span class="up-spinner"></span><span class="pir-progress-step" data-pir="unstep">Starting…</span><span class="pir-progress-pct" data-pir="unpct">0%</span></div>
         <div class="up-scanbar pir-progress-bar"><span data-pir="unbar" style="width:0%"></span></div>
       </div>
-      <pre class="set-pi-log" data-pir="oplog" style="display:none"></pre>`;
+      <pre class="set-pi-log" data-pir="oplog" style="display:none"></pre>
+      </div>`;
 
     // ---- install block (when not installed) ----
     if (!snap.installed && !agentMissing) {
       html += `
+      <div class="set-card set-card-wide">
       <div class="set-pi-install">
         <h4 class="sess-h">Install Pironman</h4>
         <p class="net-dns-note">Runs on the host through the RaPiSys agent using SunFounder\u2019s official installer. The first install loads a device-tree overlay for the fan &amp; RGB and sets the Pi to fully power off on shutdown.</p>
@@ -2454,6 +2457,7 @@ pageRenderers.settings = (() => {
         </div>
         <pre class="set-pi-log up-install-log" data-pir="log" hidden></pre>
         <div class="set-pi-manual" data-pir="manual" style="display:none"></div>
+      </div>
       </div>`;
     }
 
@@ -2465,12 +2469,15 @@ pageRenderers.settings = (() => {
       const ledSeg = ['off', 'follow', 'on'].map((v) => `<button data-v="${v}" class="${(fan.led || 'follow') === v ? 'on' : ''}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('');
 
       html += `
-      <h4 class="sess-h" style="margin-top:24px">Case fan</h4>
+      <div class="set-card">
+      <h4 class="sess-h">Case fan</h4>
       <div class="set-kv"><span class="pir-lbl">Fan mode <button class="pir-info-btn" data-pir-infobtn="fanmode" aria-label="About fan modes">${infoIcon}</button></span><select data-pir="fanmode">${modeOpts}</select></div>
       ${infoPanel('fanmode', PIR_FANMODE_INFO, PIR_FANMODE_NOTE)}
       <div class="set-kv"><span>Fan LED</span><div class="pir-seg" data-pir-seg="fanled">${ledSeg}</div></div>
+      </div>
 
-      <h4 class="sess-h" style="margin-top:24px">RGB lighting</h4>
+      <div class="set-card">
+      <h4 class="sess-h">RGB lighting</h4>
       <div class="set-kv set-kv-toggle"><span>Enable RGB</span>
         <label class="set-switch"><input type="checkbox" data-pir="rgbenable" ${rgb.enable ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
       <div class="set-kv"><span class="pir-lbl">Style <button class="pir-info-btn" data-pir-infobtn="rgbstyle" aria-label="About RGB styles">${infoIcon}</button></span><select data-pir="rgbstyle">${styleOpts}</select></div>
@@ -2478,8 +2485,10 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Colour</span><input type="color" data-pir="rgbcolor" value="${esc(rgb.color || '#e84393')}"></div>
       <div class="set-kv"><span>Brightness</span><input type="range" min="0" max="100" value="${Number(rgb.brightness ?? 60)}" data-pir="rgbbright"></div>
       <div class="set-kv"><span>Speed</span><input type="range" min="0" max="100" value="${Number(rgb.speed ?? 50)}" data-pir="rgbspeed"></div>
+      </div>
 
-      <h4 class="sess-h" style="margin-top:24px">Night light schedule</h4>`;
+      <div class="set-card">
+      <h4 class="sess-h">Night light schedule</h4>`;
       // Collapse-when-configured: show a summary + Edit once a schedule is saved
       // (enabled), unless the user is actively editing.
       const schedConfigured = !!sched.enabled;
@@ -2508,6 +2517,7 @@ pageRenderers.settings = (() => {
       }
       html += `
       <p class="hw-hint">Lights are restored with their previous style &amp; colour when the window ends. Cooling is never affected. Times use the Pi\u2019s local timezone.</p>
+      </div>
 `;
     }
 
@@ -2995,39 +3005,41 @@ pageRenderers.settings = (() => {
             { id: 'pironman', label: 'Case', icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h2M8 11h2M8 15h2"/><circle cx="15.5" cy="9" r="1.6"/>' },
           ])}
           <div class="card-body" data-pane="health">
-            <div data-set="health"></div>
+            <div class="set-grid">
+              <div class="set-card set-card-wide"><div data-set="health"></div></div>
+            </div>
           </div>
           <div class="card-body" data-pane="storage" style="display:none">
-            <h4 class="sess-h">Network Storage (NAS)</h4>
-            <div data-set="nas"></div><div data-set="nasform"></div>
-            <h4 class="sess-h" style="margin-top:24px">Database Storage</h4>
-            <div data-set="storage"></div>
+            <div class="set-grid">
+              <div class="set-card"><h4 class="sess-h">Network Storage (NAS)</h4><div data-set="nas"></div><div data-set="nasform"></div></div>
+              <div class="set-card"><h4 class="sess-h">Database Storage</h4><div data-set="storage"></div></div>
+            </div>
           </div>
           <div class="card-body" data-pane="dns" style="display:none">
-            <h4 class="sess-h">Pi-hole DNS</h4>
-            <div data-set="pihole"></div>
+            <div class="set-grid">
+              <div class="set-card set-card-wide"><h4 class="sess-h">Pi-hole DNS</h4><div data-set="pihole"></div></div>
+            </div>
           </div>
           <div class="card-body" data-pane="email" style="display:none">
-            <h4 class="sess-h">Email (SMTP)</h4>
-            <div data-set="smtp"></div>
-            <h4 class="sess-h" style="margin-top:24px">Telegram</h4>
-            <div data-set="telegram"></div>
+            <div class="set-grid">
+              <div class="set-card"><h4 class="sess-h">Email (SMTP)</h4><div data-set="smtp"></div></div>
+              <div class="set-card"><h4 class="sess-h">Telegram</h4><div data-set="telegram"></div></div>
+            </div>
           </div>
           <div class="card-body" data-pane="remote" style="display:none">
-            <h4 class="sess-h">HTTPS / TLS</h4>
-            <div data-set="tls"></div>
-            <h4 class="sess-h" style="margin-top:24px">In-Browser Remote Access</h4>
-            <div data-set="remote"></div>
+            <div class="set-grid">
+              <div class="set-card"><h4 class="sess-h">HTTPS / TLS</h4><div data-set="tls"></div></div>
+              <div class="set-card"><h4 class="sess-h">In-Browser Remote Access</h4><div data-set="remote"></div></div>
+            </div>
           </div>
           <div class="card-body" data-pane="account" style="display:none">
-            <h4 class="sess-h">Display Preferences</h4>
-            <div data-set="prefs"></div>
-            <h4 class="sess-h" style="margin-top:24px">Administrator Account</h4>
-            <div data-set="account"></div>
+            <div class="set-grid">
+              <div class="set-card"><h4 class="sess-h">Display Preferences</h4><div data-set="prefs"></div></div>
+              <div class="set-card"><h4 class="sess-h">Administrator Account</h4><div data-set="account"></div></div>
+            </div>
           </div>
           <div class="card-body" data-pane="pironman" style="display:none">
-            <h4 class="sess-h">Case Controller</h4>
-            <div data-set="pironman"></div>
+            <div class="set-grid" data-set="pironman"></div>
           </div>
         </div>
       </div>`;
