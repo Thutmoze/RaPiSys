@@ -1895,8 +1895,8 @@ pageRenderers.settings = (() => {
         ${st.dnsName ? `<div class="set-kv"><span>Cert name</span><b>${esc(st.dnsName)}</b></div>` : ''}
         ${expiry}
         ${st.enabled ? `<div class="set-kv"><span>Redirect HTTP→HTTPS</span><b class="${st.redirect ? 'set-ok' : ''}">${st.redirect ? '● On' : '○ Off'}</b></div>` : ''}
+        ${st.enabled && st.listening && !onHttps ? `<p class="hw-hint" style="margin-top:8px">HTTPS is active. <a href="${httpsUrl(st.port)}" style="color:var(--accent-cyan)">Open the secure URL →</a> (self-signed shows a one-time browser warning you can accept.)</p>` : ''}
       </div>
-      ${st.enabled && st.listening && !onHttps ? `<p class="hw-hint">HTTPS is active. <a href="${httpsUrl(st.port)}" style="color:var(--accent-cyan)">Open the secure URL →</a> (self-signed shows a one-time browser warning you can accept.)</p>` : ''}
       <div class="set-actions"><button class="set-btn set-btn-edit" data-tls="edit">${EDIT_ICON}<span>Edit</span></button></div>`;
       $('[data-tls=edit]', el2)?.addEventListener('click', () => { editTls = true; loadTls(host); });
       return;
@@ -2173,8 +2173,10 @@ pageRenderers.settings = (() => {
             <span class="net-pi-testresult" data-pi="bkresult"></span>
           </div>`;
         const lastBk = (bk.backups || [])[0];
+        const histCount = (bk.backups || []).length;
+        const histLink = histCount ? ` <button class="set-bk-historylink" data-pi="bkhistory" style="color:var(--accent-cyan)">History (${histCount})</button>` : '';
         const lastBkLine = lastBk
-          ? `<div class="set-kv"><span>Last backup</span><b class="set-ok">● ${esc(new Date(lastBk.mtime).toLocaleString())}</b></div>`
+          ? `<div class="set-kv"><span>Last backup</span><b><span class="set-ok set-ok-check">${CHECK_ICON}${esc(new Date(lastBk.mtime).toLocaleString())}</span>${histLink}</b></div>`
           : `<div class="set-kv"><span>Last backup</span><b>None yet</b></div>`;
         const summaryHtml = `
           <div class="set-summary">
@@ -2193,7 +2195,7 @@ pageRenderers.settings = (() => {
             <label class="set-switch"><input type="checkbox" data-pi="bkenabled" ${c.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
           <div data-pi="bkparams">${showParams ? paramsHtml : (c.enabled ? summaryHtml : '')}</div>
           <pre class="set-pi-log" data-pi="bklog" style="display:none"></pre>
-          ${(bk.backups || []).length ? `<div class="set-bk-historyrow"><button class="net-link" data-pi="bkhistory">Show backup history (${(bk.backups || []).length})</button></div>` : ''}`;
+          `;
         // Stash the full list for the history popup.
         bbody._bkAll = bk.backups || [];
         enhanceSelects(bbody);
@@ -2399,8 +2401,9 @@ pageRenderers.settings = (() => {
     // ---- master toggle (always shown) ----
     let html = `
       <div class="set-card set-card-wide">
+      <h4 class="sess-h">Pironman Case Controller</h4>
       <div class="set-kv set-kv-toggle pir-master">
-        <span><b>Pironman Case Controller</b><br><span class="net-dns-note" style="display:inline">${masterSub}</span></span>
+        <span>${masterSub}</span>
         <label class="set-switch" title="Enable Case controller">
           <input type="checkbox" data-pir="enabled" ${enabled ? 'checked' : ''}>
           <span class="set-switch-track"><span class="set-switch-thumb"></span></span>

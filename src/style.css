@@ -4820,6 +4820,12 @@ select, select option {
 /* Backup history "Show history" link row + scrollable list inside the modal. */
 .set-bk-historyrow { margin-top: 10px; }
 .net-bk-list-modal { max-height: 320px; overflow-y: auto; margin-top: 4px; }
+/* "History (n)" link sits inline on the Last backup row, matching the TLS
+   "Open the secure URL" link: a small, underlined cyan inline button. */
+.set-ok-check { display: inline-flex; align-items: center; gap: 4px; }
+.set-ok-check svg { width: 14px; height: 14px; }
+.set-bk-historylink { background: none; border: 0; padding: 0; margin-left: 10px; font-family: inherit;
+   font-size: 12px; font-weight: 400; text-decoration: underline; cursor: pointer; }
 .rsel-btn.open svg { transform: rotate(180deg); }
 .rsel-btn svg { transition: transform 0.15s ease; color: var(--text-muted); flex: none; }
 .rsel-list {
@@ -5091,7 +5097,12 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .set-card .net-dns-note, .set-card .up-sec-hint, .set-card .hw-hint { max-width: 560px; }
 /* Push the action buttons to the bottom of the card so buttons on cards that
    sit side by side line up along the card's bottom edge. */
-.set-card .set-actions { border-top: none; padding-top: 0; }
+.set-card .set-actions { border-top: none; padding-top: 0; margin-top: auto; }
+/* The last row before the buttons shows its bottom border as a stray divider
+   that the buttons butt against. Drop the trailing row border and give the
+   action group some breathing room above it. */
+.set-card .set-kv:has(+ .set-actions) { border-bottom: none; }
+.set-card .set-actions { padding-top: 12px; }
 /* Pin buttons to the card bottom regardless of how deep they're nested. The
    chain below makes every wrapper between the card and the actions a flex
    column, and the actions themselves take margin-top:auto to drop to the
@@ -5101,6 +5112,7 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
    so they don't occupy space and shove the buttons up. */
 .set-card > [data-set] { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .set-card > [data-set] > .set-summary { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.set-card > [data-set] > .set-summary { margin-bottom: 0; }
 .set-card > [data-set] > .set-summary > .set-actions,
 .set-card > [data-set] > .set-actions { margin-top: auto; }
 /* Hide empty trailing wrappers (data-set, data-acc, nasform, etc.) that would
