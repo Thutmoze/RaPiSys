@@ -2994,7 +2994,7 @@ pageRenderers.settings = (() => {
       host.innerHTML = `
       <div class="page-lead">${pageHeader('settings', 'Settings')}</div>
       <div class="rapisys-grid">
-        <div class="card sess-span">
+        <div class="card sess-span settings-card">
           ${pageTabs([
             { id: 'health', label: 'Services Health', icon: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>' },
             { id: 'storage', label: 'Storage', icon: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>' },
