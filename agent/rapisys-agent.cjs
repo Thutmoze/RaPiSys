@@ -191,6 +191,9 @@ function pironmanInstallEnv() {
     XDG_CACHE_HOME: PIRONMAN_BUILD_HOME + '/.cache',
     PIP_CACHE_DIR: PIRONMAN_BUILD_HOME + '/.cache/pip',
     PIP_NO_CACHE_DIR: '1',
+    // Give the installer a real terminal type so its `tput` colour calls work
+    // instead of spamming "tput: No value for \$TERM and no -T specified".
+    TERM: 'xterm-256color',
   };
 }
 const PIRONMAN_SERVICE = 'pironman5.service';
