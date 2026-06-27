@@ -370,9 +370,13 @@ const OPS = {
     send(`Running official installer (variant: ${variant}${noDash ? ', slim' : ''}) — this can take several minutes…`);
     // --plain-text keeps the streamed output clean; --variant skips the menu;
     // --disable-dashboard maps to the slim install.
+    // Force HOME to a writable dir inline: the agent runs ProtectHome=read-only,
+    // so /root is read-only, but the installer clones into ${HOME}/pironman5.
+    try { fs.mkdirSync(PIRONMAN_BUILD_HOME, { recursive: true }); } catch { /* */ }
     const args = ['bash', tmp, '--variant', variant, '--plain-text'];
     if (noDash) args.push('--disable-dashboard');
-    const r = await runStreaming('sh', ['-c', args.map(shq).join(' ')], pironmanInstallEnv(), send);
+    const inner = `export HOME=${shq(PIRONMAN_BUILD_HOME)}; cd ${shq(PIRONMAN_BUILD_HOME)} && ` + args.map(shq).join(' ');
+    const r = await runStreaming('sh', ['-c', inner], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
     ensurePironmanOverlay(send, PIRONMAN_OVERLAY_BY_VARIANT[variant]);
     await pironmanEepromPowerOff(send);
@@ -431,9 +435,11 @@ const OPS = {
     const dl = await run('curl', ['-sSL', PIRONMAN_INSTALLER_URL, '-o', tmp], 30000);
     assert(dl.code === 0 && fs.existsSync(tmp), 'failed to download the installer');
     send(noDash ? `Reinstalling latest (variant: ${variant}, slim)…` : `Reinstalling latest (variant: ${variant})…`);
+    try { fs.mkdirSync(PIRONMAN_BUILD_HOME, { recursive: true }); } catch { /* */ }
     const args = ['bash', tmp, '--variant', variant, '--plain-text'];
     if (noDash) args.push('--disable-dashboard');
-    const r = await runStreaming('sh', ['-c', args.map(shq).join(' ')], pironmanInstallEnv(), send);
+    const inner = `export HOME=${shq(PIRONMAN_BUILD_HOME)}; cd ${shq(PIRONMAN_BUILD_HOME)} && ` + args.map(shq).join(' ');
+    const r = await runStreaming('sh', ['-c', inner], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
     send('Restarting service...');
     await run('systemctl', ['restart', PIRONMAN_SERVICE], 30000).catch(() => {});
