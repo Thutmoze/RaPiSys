@@ -25,6 +25,16 @@ const statusPill = (state, label) => {
   const cls = state === 'live' ? '' : (state === 'off' ? ' off' : ' warn');
   return `<span class="status-pill${cls}"><span class="status-pill-dot"></span>${label}</span>`;
 };
+
+// Shared inline glyphs (module scope so rapisysConfirm + all renderers can use them).
+const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+const TRASH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+const SAVE_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>';
+const INSTALL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>';
+const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const RESTART_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+const CHECK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const el = (tag, cls, html) => {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -91,7 +101,7 @@ async function api(path, opts = {}, retried = false) {
 // App-native confirm dialog (replaces window.confirm's browser chrome)
 // ---------------------------------------------------------------------------
 
-function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', html = false } = {}) {
+function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', html = false, confirmIcon = null } = {}) {
   return new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay rconfirm-overlay');
     ov.innerHTML = `
@@ -99,14 +109,14 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', htm
         <p class="rconfirm-msg"></p>
         <div class="wz-row rconfirm-row">
           <button class="action-btn ${danger ? 'rconfirm-danger' : 'wz-primary'}" data-rc="ok"></button>
-          <button class="action-btn set-btn-cancel" data-rc="cancel">Cancel</button>
+          <button class="action-btn set-btn-cancel" data-rc="cancel">${CANCEL_ICON}<span>Cancel</span></button>
         </div>
       </div>`;
     // html:true is only ever passed our own escaped strings (names run
     // through esc()); never raw user input.
     if (html) ov.querySelector('.rconfirm-msg').innerHTML = message;
     else ov.querySelector('.rconfirm-msg').textContent = message;
-    ov.querySelector('[data-rc=ok]').textContent = confirmLabel;
+    ov.querySelector('[data-rc=ok]').innerHTML = (confirmIcon || (danger ? TRASH_ICON : CHECK_ICON)) + '<span>' + confirmLabel + '</span>';
     document.body.appendChild(ov);
     const done = (v) => { ov.remove(); resolve(v); };
     ov.querySelector('[data-rc=ok]').onclick = () => done(true);
@@ -1393,13 +1403,7 @@ pageRenderers.settings = (() => {
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
   let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false;
-  // shared glyphs for the colored edit / test buttons
-  const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
-  const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
-  const TRASH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
-  const SAVE_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>';
-  const INSTALL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>';
-  const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  // shared glyphs hoisted to module scope (EDIT_ICON, TRASH_ICON, …)
 
   async function load(host) {
     let st;
@@ -2358,7 +2362,7 @@ pageRenderers.settings = (() => {
     })() : '';
 
     const restartLine = snap.installed ?
-      `<div class="set-kv"><span>Service</span><button class="net-toggle" data-pir="restart">Restart</button></div>` : '';
+      `<div class="set-kv"><span>Service</span><button class="net-toggle" data-pir="restart">${RESTART_ICON}<span>Restart</span></button> <button class="net-toggle net-toggle-danger" data-pir="uninstall">${TRASH_ICON}<span>Uninstall</span></button></div>` : '';
 
     html += `
       <div class="set-summary">
@@ -2366,6 +2370,10 @@ pageRenderers.settings = (() => {
         ${updLine}
         ${consoleLine}
         ${restartLine}
+      </div>
+      <div class="pir-progress" data-pir="unprogress" style="display:none">
+        <div class="pir-progress-row"><span class="up-spinner"></span><span class="pir-progress-step" data-pir="unstep">Starting…</span><span class="pir-progress-pct" data-pir="unpct">0%</span></div>
+        <div class="up-scanbar pir-progress-bar"><span data-pir="unbar" style="width:0%"></span></div>
       </div>
       <pre class="set-pi-log" data-pir="oplog" style="display:none"></pre>`;
 
@@ -2466,6 +2474,48 @@ pageRenderers.settings = (() => {
     if (rsB) rsB.onclick = async () => { rsB.disabled = true; rsB.textContent = 'Restarting…';
       try { await api('/pironman/restart', { method: 'POST' }); toast('success', 'Case', 'Service restarted'); }
       catch (e) { toast('error', 'Case', e.message); } setTimeout(() => loadPironman(host), 1200); };
+
+    // ---- uninstall stream ----
+    const unB = $('[data-pir=uninstall]', box);
+    if (unB) unB.onclick = async () => {
+      const ok = await rapisysConfirm(
+        'Uninstall the Pironman software from this Pi? This stops and removes the Pironman service, package, and device-tree overlay. Your RaPiSys data is not affected. A reboot is recommended afterwards.',
+        { danger: true, confirmLabel: 'Uninstall' });
+      if (!ok) return;
+      const logEl = $('[data-pir=oplog]', box); logEl.style.display = ''; logEl.textContent = '';
+      unB.disabled = true; unB.innerHTML = TRASH_ICON + '<span>Uninstalling…</span>';
+      const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+      const unProg = $('[data-pir=unprogress]', box); if (unProg) unProg.style.display = '';
+      const unStep = $('[data-pir=unstep]', box), unPct = $('[data-pir=unpct]', box), unBar = $('[data-pir=unbar]', box);
+      const UN_PHASES = [
+        [/Running SunFounder uninstaller|Starting Pironman uninstall/i, 15, 'Running uninstaller…'],
+        [/Remove binary|Stop service/i, 35, 'Removing service…'],
+        [/Disable service|Remove service file/i, 55, 'Disabling service…'],
+        [/Remove work directory/i, 70, 'Removing files…'],
+        [/Remove dtoverlay|config\.txt|overlay/i, 85, 'Removing overlay…'],
+        [/Reloading systemd|daemon-reload|Uninstalled/i, 96, 'Finalising…'],
+      ];
+      let unp = 0;
+      const setUn = (p, label) => { if (p > unp) unp = p; if (unBar) unBar.style.width = unp + '%'; if (unPct) unPct.textContent = unp + '%'; if (label && unStep) unStep.textContent = label; };
+      let finished = false;
+      const es = new EventSource('/api/pironman/uninstall/stream');
+      es.addEventListener('line', (ev) => { let line=''; try { line = JSON.parse(ev.data).line; } catch { return; } appendLog(line);
+        for (const [re, w, label] of UN_PHASES) { if (re.test(line)) { setUn(w, label); break; } } });
+      es.addEventListener('done', async (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+        setUn(100, 'Uninstalled'); appendLog('✓ Uninstalled.' + (r.rebootRecommended ? ' A reboot is recommended to finish.' : ''));
+        toast('success', 'Case', 'Pironman uninstalled');
+        if (r.rebootRecommended) {
+          const go = await rapisysConfirm('Pironman has been uninstalled. A reboot is recommended to unload the device-tree overlay. Reboot the Pi now?', { confirmLabel: 'Reboot now' });
+          if (go) { try { await api('/pironman/reboot', { method: 'POST', body: {} }); appendLog('↻ Rebooting…'); toast('success', 'Case', 'Rebooting the Pi…'); }
+            catch (e) { toast('error', 'Case', 'Reboot request failed: ' + e.message); } }
+          else { setTimeout(() => loadPironman(host), 1500); }
+        } else { setTimeout(() => loadPironman(host), 1500); }
+      });
+      es.addEventListener('failed', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+        appendLog('✗ ' + (r.error || 'Uninstall failed.')); toast('error', 'Case', r.error || 'Uninstall failed');
+        unB.disabled = false; unB.innerHTML = TRASH_ICON + '<span>Uninstall</span>'; });
+      es.onerror = () => { if (!finished) { es.close(); appendLog('✗ Connection lost.'); unB.disabled = false; unB.innerHTML = TRASH_ICON + '<span>Uninstall</span>'; } };
+    };
 
     // ---- update stream ----
     const updB = $('[data-pir=update]', box);

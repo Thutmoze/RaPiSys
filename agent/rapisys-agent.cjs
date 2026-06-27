@@ -199,6 +199,24 @@ function ensurePironmanOverlay(send) {
     return false;
   }
 }
+// Remove the dtoverlay= line from config.txt on uninstall (idempotent; the
+// SunFounder uninstall removes the .dtbo file but may leave the config line).
+function removePironmanOverlay(send) {
+  try {
+    let cfg = BOOT_CONFIG_TXT;
+    if (!fs.existsSync(cfg)) cfg = '/boot/config.txt';
+    if (!fs.existsSync(cfg)) return false;
+    const txt = fs.readFileSync(cfg, 'utf-8');
+    const re = new RegExp('^\\s*dtoverlay=' + PIRONMAN_OVERLAY + '\\b.*$\\n?', 'm');
+    if (!re.test(txt)) { send && send('No device-tree overlay line to remove from config.txt.'); return true; }
+    fs.writeFileSync(cfg, txt.replace(re, ''));
+    send && send('Removed device-tree overlay line from config.txt.');
+    return true;
+  } catch (e) {
+    send && send('Warning: could not edit config.txt (' + e.message + ').');
+    return false;
+  }
+}
 const PIRONMAN_API_PORT= 34001;
 const PIRONMAN_REMOTE_VERSION =
   'https://raw.githubusercontent.com/sunfounder/pironman5-mini/main/pironman5_mini/version.py';
@@ -307,6 +325,28 @@ const OPS = {
     const det = await OPS['pironman.detect']();
     return { ok: true, installed: det.installed, version: det.version,
       hasDashboard: det.hasDashboard, apiReachable: det.apiReachable, rebootRequired: true };
+  },
+
+  // Remove the Pironman software from the host. Requires an explicit typed
+  // confirmation token. Runs the SunFounder uninstall (install.py --uninstall)
+  // from the source dir, then strips the dtoverlay line from config.txt.
+  async 'pironman.uninstall'({ confirm } = {}, send) {
+    assert(confirm === 'UNINSTALL', 'confirmation token required');
+    if (!fs.existsSync(PIRONMAN_SRC)) {
+      send('Pironman source not found at ' + PIRONMAN_SRC + '; stopping the service directly.');
+      await run('sh', ['-c', `systemctl stop ${shq(PIRONMAN_SERVICE)} 2>/dev/null; systemctl disable ${shq(PIRONMAN_SERVICE)} 2>/dev/null; true`], 20000).catch(() => {});
+    } else {
+      send('Running SunFounder uninstaller...');
+      const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py --uninstall --skip-reboot`;
+      const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
+      assert(r.code === 0, `uninstaller exited with code ${r.code}`);
+    }
+    removePironmanOverlay(send);
+    send('Reloading systemd...');
+    await run('systemctl', ['daemon-reload'], 10000).catch(() => {});
+    send('Uninstalled. A reboot is recommended to fully unload the device-tree overlay.');
+    const det = await OPS['pironman.detect']();
+    return { ok: true, installed: det.installed, rebootRecommended: true };
   },
 
   async 'pironman.checkUpdate'() {

@@ -4964,6 +4964,8 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-toggle svg { width: 15px; height: 15px; flex-shrink: 0; }
 .net-toggle:hover { border-color: var(--accent-cyan); box-shadow: var(--glow-cyan); }
 .net-toggle:disabled { opacity: 0.5; cursor: progress; }
+.net-toggle-danger { color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.net-toggle-danger:hover { border-color: #ef4444; box-shadow: 0 0 0 1px rgba(239,68,68,0.25); }
 .net-dns-cta { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .net-dns-cta .net-dns-note { flex-basis: 100%; }
 .net-domain { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5822,7 +5824,9 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   width: auto; height: auto; min-height: 38px;
   padding: 9px 18px; font-size: 13px; font-weight: 600;
   font-family: inherit; gap: 8px; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center;
 }
+.rconfirm-row .action-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
 
 /* Inventory filter bar — clearer labels and an obvious clear control */
 .inv-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
@@ -5875,7 +5879,10 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .pir-progress-step { flex: 1; }
 .pir-progress-pct { font-variant-numeric: tabular-nums; color: var(--accent-cyan); font-weight: 600; }
 .pir-progress-bar { height: 5px; }
-.pir-progress-bar span { width: 0%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); transition: width 0.3s ease; }
+/* Unified determinate progress fill: cyan→purple shimmer (matches .up-progbar). */
+.pir-progress-bar span { width: 0%; height: 100%; display: block; border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple), var(--accent-cyan));
+  background-size: 200% 100%; animation: up-bar-shimmer 1.6s linear infinite; transition: width 0.3s ease; }
 
 /* Pironman Case card: fan-mode cycle button + RGB colour swatch */
 .pir-cycle { display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--border-color);

@@ -133,6 +133,23 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
     res.end();
   });
 
+  // Uninstall the Pironman software from the host (SSE). Requires a typed
+  // confirmation token ('UNINSTALL') passed through to the agent.
+  r.get('/uninstall/stream', requireControl, async (req, res) => {
+    const send = sse(res);
+    try {
+      if (!agentConfigured()) throw new Error('host agent not configured (run deploy.sh on the Pi)');
+      send('line', { line: 'Starting Pironman uninstall…' });
+      const result = await agentCall('pironman.uninstall', { confirm: 'UNINSTALL' },
+        (line) => send('line', { line }), 600_000);
+      await refreshPironmanConfig?.();
+      send('done', result); // includes rebootRecommended:true
+    } catch (err) {
+      send('failed', { error: err.message });
+    }
+    res.end();
+  });
+
   // Apply an update, streamed. Admin-token gated. 'failed' event on error.
   r.get('/update/stream', requireControl, async (req, res) => {
     const send = sse(res);
