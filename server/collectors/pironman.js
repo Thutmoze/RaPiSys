@@ -146,6 +146,8 @@ export function createPironmanClient({ getConfig }) {
       installed: det?.installed ?? reachable,
       serviceActive: det?.serviceActive ?? null,
       version: det?.version ?? null,
+      variant: det?.variant ?? null,
+      model: det?.model || deviceInfo?.name || null,
       apiReachable: reachable,
       apiPort: det?.apiPort ?? (getConfig()?.port || 34001),
       hasDashboard: det?.hasDashboard ?? reachable,

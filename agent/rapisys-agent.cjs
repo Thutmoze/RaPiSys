@@ -154,12 +154,30 @@ function findCpuThermalZone() {
   return null;
 }
 
-// ---- Pironman 5 Mini -------------------------------------------------------
-const PIRONMAN_REPO    = 'https://github.com/sunfounder/pironman5-mini.git';
-const PIRONMAN_SRC     = '/opt/pironman5-mini-src';
-const PIRONMAN_DIR     = '/opt/pironman5-mini';
-const PIRONMAN_VENV_PY = '/opt/pironman5-mini/venv/bin/python3';
-const PIRONMAN_VENV_PIP= '/opt/pironman5-mini/venv/bin/pip3';
+// ---- Pironman case controller (multi-variant) ------------------------------
+// The official SunFounder installer (install.sh) supports all models via a
+// --variant flag and installs to a single shared layout regardless of model:
+//   /opt/pironman5  ·  pironman5.service  ·  /opt/pironman5/.variant marker.
+const PIRONMAN_INSTALLER_URL =
+  'https://raw.githubusercontent.com/sunfounder/sunfounder-installer-scripts/main/pironman5/install.sh';
+const PIRONMAN_VARIANTS = ['base', 'mini', 'max', 'pro-max'];
+const PIRONMAN_MODEL_NAMES = {
+  'base': 'Pironman 5', 'mini': 'Pironman 5 Mini',
+  'max': 'Pironman 5 Max', 'pro-max': 'Pironman 5 Pro Max',
+};
+// Per-variant device-tree overlay (matches the installer's PM5_OVERLAYS map).
+const PIRONMAN_OVERLAY_BY_VARIANT = {
+  'base': 'sunfounder-pironman5', 'mini': 'sunfounder-pironman5mini',
+  'max': 'sunfounder-pironman5', 'pro-max': 'sunfounder-pironman5promax',
+};
+const PIRONMAN_DIR     = '/opt/pironman5';
+const PIRONMAN_SRC     = '/opt/pironman5'; // installer clones into the work dir
+const PIRONMAN_VENV_PY = '/opt/pironman5/venv/bin/python3';
+const PIRONMAN_VENV_PIP= '/opt/pironman5/venv/bin/pip3';
+const PIRONMAN_VARIANT_FILE = '/opt/pironman5/.variant';
+function pironmanInstalledVariant() {
+  try { return fs.readFileSync(PIRONMAN_VARIANT_FILE, 'utf-8').trim() || null; } catch { return null; }
+}
 // The SunFounder installer runs pip, which defaults its cache to $HOME/.cache.
 // The agent runs with systemd ProtectHome=read-only, so /root is read-only and
 // pip fails to build wheels ([Errno 30]). Point HOME/cache at the agent's
@@ -175,39 +193,45 @@ function pironmanInstallEnv() {
     PIP_NO_CACHE_DIR: '1',
   };
 }
-const PIRONMAN_SERVICE = 'pironman5-mini.service';
-const PIRONMAN_OVERLAY = 'sunfounder-pironman5mini';
+const PIRONMAN_SERVICE = 'pironman5.service';
+// Overlay depends on the installed variant; default to base if unknown.
+function pironmanOverlay() {
+  const v = pironmanInstalledVariant();
+  return PIRONMAN_OVERLAY_BY_VARIANT[v] || 'sunfounder-pironman5';
+}
 const BOOT_CONFIG_TXT = '/boot/firmware/config.txt';
 // The SunFounder installer copies the .dtbo file but never adds the dtoverlay=
 // line to config.txt, so the fan/RGB overlay would not load on boot. Add it
 // idempotently after a successful install.
-function ensurePironmanOverlay(send) {
+function ensurePironmanOverlay(send, overlay) {
+  overlay = overlay || pironmanOverlay();
   try {
     let cfg = BOOT_CONFIG_TXT;
     if (!fs.existsSync(cfg)) cfg = '/boot/config.txt';
     if (!fs.existsSync(cfg)) { send && send('Note: config.txt not found; skipping dtoverlay wiring.'); return false; }
     const txt = fs.readFileSync(cfg, 'utf-8');
-    if (new RegExp('^\\s*dtoverlay=' + PIRONMAN_OVERLAY + '\\b', 'm').test(txt)) {
+    if (new RegExp('^\\s*dtoverlay=' + overlay + '\\b', 'm').test(txt)) {
       send && send('Device-tree overlay already enabled in config.txt.');
       return true;
     }
-    fs.appendFileSync(cfg, (txt.endsWith('\n') ? '' : '\n') + 'dtoverlay=' + PIRONMAN_OVERLAY + '\n');
+    fs.appendFileSync(cfg, (txt.endsWith('\n') ? '' : '\n') + 'dtoverlay=' + overlay + '\n');
     send && send('Enabled device-tree overlay in config.txt (takes effect after reboot).');
     return true;
   } catch (e) {
-    send && send('Warning: could not edit config.txt (' + e.message + '). Add "dtoverlay=' + PIRONMAN_OVERLAY + '" yourself.');
+    send && send('Warning: could not edit config.txt (' + e.message + '). Add "dtoverlay=' + overlay + '" yourself.');
     return false;
   }
 }
 // Remove the dtoverlay= line from config.txt on uninstall (idempotent; the
 // SunFounder uninstall removes the .dtbo file but may leave the config line).
-function removePironmanOverlay(send) {
+function removePironmanOverlay(send, overlay) {
+  overlay = overlay || pironmanOverlay();
   try {
     let cfg = BOOT_CONFIG_TXT;
     if (!fs.existsSync(cfg)) cfg = '/boot/config.txt';
     if (!fs.existsSync(cfg)) return false;
     const txt = fs.readFileSync(cfg, 'utf-8');
-    const re = new RegExp('^\\s*dtoverlay=' + PIRONMAN_OVERLAY + '\\b.*$\\n?', 'm');
+    const re = new RegExp('^\\s*dtoverlay=' + overlay + '\\b.*$\\n?', 'm');
     if (!re.test(txt)) { send && send('No device-tree overlay line to remove from config.txt.'); return true; }
     fs.writeFileSync(cfg, txt.replace(re, ''));
     send && send('Removed device-tree overlay line from config.txt.');
@@ -217,9 +241,31 @@ function removePironmanOverlay(send) {
     return false;
   }
 }
+// Configure the Pi to fully power off on shutdown (POWER_OFF_ON_HALT=1) so the
+// GPIO-powered RGB fan does not keep running after halt. SunFounder requires
+// this for the Mini/Max/Pro variants. Idempotent: skip if already set.
+async function pironmanEepromPowerOff(send) {
+  const have = await run('sh', ['-c', 'command -v rpi-eeprom-config >/dev/null && echo OK'], 5000).catch(() => ({ stdout: '' }));
+  if (!/OK/.test(have.stdout)) { send && send('rpi-eeprom-config not available; skipping shutdown power-off config.'); return false; }
+  const cur = await run('rpi-eeprom-config', [], 8000).catch(() => ({ stdout: '' }));
+  if (/^\s*POWER_OFF_ON_HALT=1\s*$/m.test(cur.stdout || '')) {
+    send && send('EEPROM already set to full power-off on shutdown.');
+    return true;
+  }
+  send && send('Configuring EEPROM: full power-off on shutdown (POWER_OFF_ON_HALT=1)…');
+  // Build the new config: keep existing lines, set/replace POWER_OFF_ON_HALT.
+  let cfg = (cur.stdout || '').replace(/^\s*POWER_OFF_ON_HALT=.*$/m, '').replace(/\n+$/,'\n');
+  cfg = (cfg.endsWith('\n') ? cfg : cfg + '\n') + 'POWER_OFF_ON_HALT=1\n';
+  const tmp = '/tmp/rapisys-eeprom.conf';
+  fs.writeFileSync(tmp, cfg);
+  const r = await run('rpi-eeprom-config', ['--apply', tmp], 30000).catch((e) => ({ code: 1, stderr: String(e) }));
+  if (r.code === 0) { send && send('EEPROM updated (applies on next reboot).'); return true; }
+  send && send('Warning: EEPROM update failed (' + (r.stderr || '').slice(0,120) + '). You can set it via raspi-config → Advanced → Shutdown Behaviour.');
+  return false;
+}
 const PIRONMAN_API_PORT= 34001;
 const PIRONMAN_REMOTE_VERSION =
-  'https://raw.githubusercontent.com/sunfounder/pironman5-mini/main/pironman5_mini/version.py';
+  'https://raw.githubusercontent.com/sunfounder/pironman5/main/pironman5/version.py';
 
 // Real fan profiles from pm_auto (index 0..4); used to validate gpio_fan_mode.
 const PIRONMAN_FAN_MODES  = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
@@ -288,10 +334,14 @@ const OPS = {
       .catch(() => ({ stdout: '' }));
     out.installed = /YES/.test(unit.stdout) || fs.existsSync(PIRONMAN_VENV_PY);
     if (!out.installed) return out;
+    out.variant = pironmanInstalledVariant();
+    out.model = PIRONMAN_MODEL_NAMES[out.variant] || 'Pironman';
     out.serviceActive = (await run('systemctl', ['is-active', PIRONMAN_SERVICE], 5000)
       .catch(() => ({ stdout: '' }))).stdout.trim() === 'active';
+    // The official installer uses the `pironman5` package for every variant;
+    // fall back to the legacy mini package import if present.
     const v = await run(PIRONMAN_VENV_PY,
-      ['-c', 'from pironman5_mini.version import __version__; print(__version__)'], 8000)
+      ['-c', 'try:\n from pironman5.version import __version__\nexcept Exception:\n from pironman5_mini.version import __version__\nprint(__version__)'], 8000)
       .catch(() => ({ stdout: '' }));
     out.version = (v.stdout || '').trim() || null;
     const dash = await run('sh', ['-c', `${shq(PIRONMAN_VENV_PIP)} show pm_dashboard >/dev/null 2>&1 && echo YES`], 8000)
@@ -305,44 +355,55 @@ const OPS = {
     return out;
   },
 
-  async 'pironman.install'({ disableDashboard = false } = {}, send) {
+  async 'pironman.install'({ variant = 'mini', disableDashboard = false } = {}, send) {
     const noDash = !!disableDashboard;
-    send('Checking prerequisites (git, python3)...');
-    const have = await run('sh', ['-c', 'command -v git >/dev/null && command -v python3 >/dev/null && echo OK'], 6000);
-    assert(/OK/.test(have.stdout), 'git and python3 are required on the host');
-    send('Fetching Pironman 5 Mini source...');
-    await run('rm', ['-rf', PIRONMAN_SRC], 10000).catch(() => {});
-    fs.mkdirSync(path.dirname(PIRONMAN_SRC), { recursive: true });
-    const clone = await runStreaming('git', ['clone', '--depth', '1', PIRONMAN_REPO, PIRONMAN_SRC], {}, send);
-    assert(clone.code === 0, 'git clone failed');
-    send(noDash ? 'Running installer (slim - no dashboard/InfluxDB)...'
-                : 'Running installer (this can take several minutes)...');
-    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py --skip-reboot${noDash ? ' --disable-dashboard' : ''}`;
-    const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
+    assert(PIRONMAN_VARIANTS.includes(variant), `unknown variant: ${variant}`);
+    send('Checking prerequisites (curl, bash)...');
+    const have = await run('sh', ['-c', 'command -v curl >/dev/null && command -v bash >/dev/null && echo OK'], 6000);
+    assert(/OK/.test(have.stdout), 'curl and bash are required on the host');
+    // Fetch the official installer to a temp file (not curl|bash) so we can run
+    // it non-interactively with --variant and capture output for the stream.
+    send('Fetching SunFounder installer…');
+    const tmp = '/tmp/pironman-install.sh';
+    const dl = await run('curl', ['-sSL', PIRONMAN_INSTALLER_URL, '-o', tmp], 30000);
+    assert(dl.code === 0 && fs.existsSync(tmp), 'failed to download the installer');
+    send(`Running official installer (variant: ${variant}${noDash ? ', slim' : ''}) — this can take several minutes…`);
+    // --plain-text keeps the streamed output clean; --variant skips the menu;
+    // --disable-dashboard maps to the slim install.
+    const args = ['bash', tmp, '--variant', variant, '--plain-text'];
+    if (noDash) args.push('--disable-dashboard');
+    const r = await runStreaming('sh', ['-c', args.map(shq).join(' ')], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
-    ensurePironmanOverlay(send);
+    ensurePironmanOverlay(send, PIRONMAN_OVERLAY_BY_VARIANT[variant]);
+    await pironmanEepromPowerOff(send);
     send('Installed. A reboot is required to load the device-tree overlay.');
     const det = await OPS['pironman.detect']();
-    return { ok: true, installed: det.installed, version: det.version,
+    return { ok: true, installed: det.installed, version: det.version, variant,
       hasDashboard: det.hasDashboard, apiReachable: det.apiReachable, rebootRequired: true };
   },
 
   // Remove the Pironman software from the host. Requires an explicit typed
-  // confirmation token. Runs the SunFounder uninstall (install.py --uninstall)
+  // confirmation token. Manually tears down the /opt/pironman5 layout
   // from the source dir, then strips the dtoverlay line from config.txt.
   async 'pironman.uninstall'({ confirm } = {}, send) {
     assert(confirm === 'UNINSTALL', 'confirmation token required');
-    if (!fs.existsSync(PIRONMAN_SRC)) {
-      send('Pironman source not found at ' + PIRONMAN_SRC + '; stopping the service directly.');
-      await run('sh', ['-c', `systemctl stop ${shq(PIRONMAN_SERVICE)} 2>/dev/null; systemctl disable ${shq(PIRONMAN_SERVICE)} 2>/dev/null; true`], 20000).catch(() => {});
-    } else {
-      send('Running SunFounder uninstaller...');
-      const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py --uninstall --skip-reboot`;
-      const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
-      assert(r.code === 0, `uninstaller exited with code ${r.code}`);
-    }
-    removePironmanOverlay(send);
-    send('Reloading systemd...');
+    // The official installer ships no uninstaller, so tear down manually:
+    // capture the variant first (for the right overlay), then stop/disable the
+    // service, remove the work dir, the symlink, the unit file, and the overlay.
+    const variant = pironmanInstalledVariant();
+    const overlay = PIRONMAN_OVERLAY_BY_VARIANT[variant] || 'sunfounder-pironman5';
+    send('Stopping and disabling the Pironman service…');
+    await run('sh', ['-c', `systemctl stop ${shq(PIRONMAN_SERVICE)} 2>/dev/null; systemctl disable ${shq(PIRONMAN_SERVICE)} 2>/dev/null; true`], 30000).catch(() => {});
+    send('Removing the service unit file…');
+    await run('sh', ['-c', `rm -f /etc/systemd/system/${shq(PIRONMAN_SERVICE)} 2>/dev/null; true`], 10000).catch(() => {});
+    send('Removing the pironman5 binary symlink…');
+    await run('sh', ['-c', 'rm -f /usr/local/bin/pironman5 /usr/local/bin/pipower5 2>/dev/null; true'], 10000).catch(() => {});
+    send('Removing the work directory (/opt/pironman5)…');
+    await run('rm', ['-rf', PIRONMAN_DIR], 30000).catch(() => {});
+    send('Removing the bash-completion entry…');
+    await run('sh', ['-c', 'rm -f /etc/bash_completion.d/pironman5 2>/dev/null; true'], 10000).catch(() => {});
+    removePironmanOverlay(send, overlay);
+    send('Reloading systemd…');
     await run('systemctl', ['daemon-reload'], 10000).catch(() => {});
     send('Uninstalled. A reboot is recommended to fully unload the device-tree overlay.');
     const det = await OPS['pironman.detect']();
@@ -364,19 +425,34 @@ const OPS = {
     const det = await OPS['pironman.detect']();
     assert(det.installed, 'Pironman is not installed');
     const noDash = !det.hasDashboard;
-    send('Fetching latest Pironman 5 Mini source...');
-    await run('rm', ['-rf', PIRONMAN_SRC], 10000).catch(() => {});
-    fs.mkdirSync(path.dirname(PIRONMAN_SRC), { recursive: true });
-    const clone = await runStreaming('git', ['clone', '--depth', '1', PIRONMAN_REPO, PIRONMAN_SRC], {}, send);
-    assert(clone.code === 0, 'git clone failed');
-    send(noDash ? 'Reinstalling (slim - no dashboard)...' : 'Reinstalling latest...');
-    const cmd = `cd ${shq(PIRONMAN_SRC)} && python3 install.py --skip-reboot${noDash ? ' --disable-dashboard' : ''}`;
-    const r = await runStreaming('sh', ['-c', cmd], pironmanInstallEnv(), send);
+    const variant = pironmanInstalledVariant() || 'mini';
+    send('Fetching SunFounder installer…');
+    const tmp = '/tmp/pironman-install.sh';
+    const dl = await run('curl', ['-sSL', PIRONMAN_INSTALLER_URL, '-o', tmp], 30000);
+    assert(dl.code === 0 && fs.existsSync(tmp), 'failed to download the installer');
+    send(noDash ? `Reinstalling latest (variant: ${variant}, slim)…` : `Reinstalling latest (variant: ${variant})…`);
+    const args = ['bash', tmp, '--variant', variant, '--plain-text'];
+    if (noDash) args.push('--disable-dashboard');
+    const r = await runStreaming('sh', ['-c', args.map(shq).join(' ')], pironmanInstallEnv(), send);
     assert(r.code === 0, `installer exited with code ${r.code}`);
     send('Restarting service...');
     await run('systemctl', ['restart', PIRONMAN_SERVICE], 30000).catch(() => {});
     const after = await OPS['pironman.detect']();
     return { ok: true, version: after.version, hasDashboard: after.hasDashboard };
+  },
+
+  // Read whether the EEPROM is set to full power-off on shutdown.
+  async 'pironman.eepromStatus'() {
+    const have = await run('sh', ['-c', 'command -v rpi-eeprom-config >/dev/null && echo OK'], 5000).catch(() => ({ stdout: '' }));
+    if (!/OK/.test(have.stdout)) return { available: false, configured: null };
+    const cur = await run('rpi-eeprom-config', [], 8000).catch(() => ({ stdout: '' }));
+    return { available: true, configured: /^\s*POWER_OFF_ON_HALT=1\s*$/m.test(cur.stdout || '') };
+  },
+
+  // Configure full power-off on shutdown on demand (same as during install).
+  async 'pironman.eepromConfigure'(_, send) {
+    const ok = await pironmanEepromPowerOff(send);
+    return { ok, rebootRecommended: ok };
   },
 
   async 'pironman.restart'() {

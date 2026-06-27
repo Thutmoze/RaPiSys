@@ -5052,6 +5052,10 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 /* Pi-hole install panel (Settings → DNS) */
 .set-pi-install { margin: 16px 0; padding: 16px; background: var(--bg-secondary); border-radius: 12px; border: 1px solid var(--border-color); }
 .set-pi-methods { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.set-pi-picker { margin: 12px 0 14px; }
+.set-pi-picker label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500; }
+.set-pi-picker select { width: 100%; background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 9px; color: var(--text-primary); font: inherit; font-size: 13.5px; padding: 9px 12px; cursor: pointer; }
 .set-pi-method { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--text-secondary); cursor: pointer; line-height: 1.5; }
 .set-pi-method input { margin-top: 3px; flex-shrink: 0; }
 .set-pi-method b { color: var(--text-primary); }

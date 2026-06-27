@@ -97,6 +97,20 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
     } catch (err) { res.status(502).json({ ok: false, error: err.message }); }
   });
 
+  // EEPROM full power-off-on-shutdown: read status (any caller) + configure (control).
+  r.get('/eeprom/status', async (req, res) => {
+    try {
+      if (!agentConfigured()) return res.json({ available: false, configured: null });
+      res.json(await agentCall('pironman.eepromStatus', {}, null, 15000));
+    } catch (err) { res.status(502).json({ available: false, configured: null, error: err.message }); }
+  });
+  r.post('/eeprom/configure', requireControl, async (req, res) => {
+    try {
+      if (!agentConfigured()) return res.status(503).json({ error: 'host agent not configured' });
+      res.json(await agentCall('pironman.eepromConfigure', {}, null, 60000));
+    } catch (err) { res.status(502).json({ ok: false, error: err.message }); }
+  });
+
   // Reboot the host (needed after first install to load the device-tree overlay).
   r.post('/reboot', requireControl, async (req, res) => {
     try {
@@ -120,10 +134,13 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
   r.get('/install/stream', requireControl, async (req, res) => {
     const send = sse(res);
     const slim = String(req.query.slim || req.query.disableDashboard || '') === '1';
+    const VALID = ['base', 'mini', 'max', 'pro-max'];
+    const variant = VALID.includes(String(req.query.variant)) ? String(req.query.variant) : 'mini';
+    const MODEL = { base: 'Pironman 5', mini: 'Pironman 5 Mini', max: 'Pironman 5 Max', 'pro-max': 'Pironman 5 Pro Max' };
     try {
       if (!agentConfigured()) throw new Error('host agent not configured (run deploy.sh on the Pi)');
-      send('line', { line: `Starting Pironman 5 Mini install${slim ? ' (slim)' : ''}…` });
-      const result = await agentCall('pironman.install', { disableDashboard: slim },
+      send('line', { line: `Starting ${MODEL[variant]} install${slim ? ' (slim)' : ''}…` });
+      const result = await agentCall('pironman.install', { variant, disableDashboard: slim },
         (line) => send('line', { line }), 1_800_000);
       await refreshPironmanConfig?.();
       send('done', result); // includes rebootRequired:true

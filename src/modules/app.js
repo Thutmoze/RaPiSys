@@ -678,7 +678,7 @@ pageRenderers.hardware = (() => {
   }
 
 
-  // Gated Case (Pironman 5 Mini) card — hidden unless enabled + installed.
+  // Gated Case (Pironman) card — hidden unless enabled + installed.
   const PIR_FAN_MODES = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
   let pirCardWired = false;
   async function refreshPironmanCard(host) {
@@ -693,7 +693,7 @@ pageRenderers.hardware = (() => {
     const set = (sel, val) => { const n = $(sel, card); if (n) n.textContent = val; };
     const badge = $('[data-pir=badge]', card);
     if (badge) badge.innerHTML = d.apiReachable ? statusPill('live', 'Live') : (d.serviceActive === false ? statusPill('off', 'Stopped') : statusPill('warn', 'File'));
-    set('[data-pir=device]', 'Pironman 5 Mini' + (d.version ? ' · v' + d.version : ''));
+    set('[data-pir=device]', (d.model || 'Pironman') + (d.version ? ' · v' + d.version : ''));
     set('[data-pir=rgb]', rgb.enable ? 'On' : 'Off');
     set('[data-pir=rgbstyle]', rgb.enable ? `${String(rgb.style || '—').replace('_', ' ')} · ${rgb.color || '—'}` : '—');
     const swatch = $('[data-pir=rgbswatch]', card);
@@ -2295,7 +2295,7 @@ pageRenderers.settings = (() => {
     };
   }
 
-  // ---- Case (Pironman 5 Mini) settings pane ----
+  // ---- Case (Pironman) settings pane ----
   let editPironman = false;
   const PIRON_FAN_MODES = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
   const PIRON_RGB_STYLES = ['rainbow', 'breath', 'leap', 'flow', 'raise_up', 'colorful'];
@@ -2303,7 +2303,7 @@ pageRenderers.settings = (() => {
     const box = $('[data-set=pironman]', host);
     if (!box) return;
     box.innerHTML = '<p class="net-dns-note">Loading…</p>';
-    let cfg = {}, snap = {}, upd = {};
+    let cfg = {}, snap = {}, upd = {}, eeprom = {};
     try { cfg = await api('/pironman/settings'); } catch { /* defaults */ }
     const enabled = !!cfg.enabled;
 
@@ -2313,7 +2313,7 @@ pageRenderers.settings = (() => {
     }
 
     const masterSub = !enabled
-      ? 'SunFounder Pironman 5 Mini — case fan &amp; RGB. Enable to install &amp; control it from here.'
+      ? 'SunFounder Pironman case controller — case fan &amp; RGB. Enable to install &amp; control it from here.'
       : (snap.installed
           ? (snap.apiReachable ? statusPill('live', 'Connected') + ' &nbsp;live via pm_dashboard' : statusPill('warn', 'Installed') + ' &nbsp;dashboard API not reachable')
           : (snap.installed === false ? 'Enabled · not detected on this Pi' : 'Enabled'));
@@ -2321,7 +2321,7 @@ pageRenderers.settings = (() => {
     // ---- master toggle (always shown) ----
     let html = `
       <div class="set-kv set-kv-toggle pir-master">
-        <span><b>Pironman 5 Mini case controller</b><br><span class="net-dns-note" style="display:inline">${masterSub}</span></span>
+        <span><b>Pironman Case Controller</b><br><span class="net-dns-note" style="display:inline">${masterSub}</span></span>
         <label class="set-switch" title="Enable Case controller">
           <input type="checkbox" data-pir="enabled" ${enabled ? 'checked' : ''}>
           <span class="set-switch-track"><span class="set-switch-thumb"></span></span>
@@ -2364,10 +2364,18 @@ pageRenderers.settings = (() => {
     const restartLine = snap.installed ?
       `<div class="set-kv"><span>Service</span><button class="net-toggle" data-pir="restart">${RESTART_ICON}<span>Restart</span></button> <button class="net-toggle net-toggle-danger" data-pir="uninstall">${TRASH_ICON}<span>Uninstall</span></button></div>` : '';
 
+    // EEPROM full power-off-on-shutdown status row (when installed + agent can read it).
+    const eepromLine = (snap.installed && eeprom && eeprom.available !== false) ? (
+      eeprom.configured
+        ? `<div class="set-kv"><span>Shutdown power-off (EEPROM)</span><b class="set-ok">● Configured</b></div>`
+        : `<div class="set-kv"><span>Shutdown power-off (EEPROM)</span><span><b class="set-warn">● Not configured</b> <button class="net-toggle" data-pir="eeprom">Configure</button></span></div>`
+    ) : '';
+
     html += `
       <div class="set-summary">
         <div class="set-kv"><span>Status</span>${statusLine}</div>
         ${updLine}
+        ${eepromLine}
         ${consoleLine}
         ${restartLine}
       </div>
@@ -2381,8 +2389,17 @@ pageRenderers.settings = (() => {
     if (!snap.installed && !agentMissing) {
       html += `
       <div class="set-pi-install">
-        <h4 class="sess-h">Install Pironman 5 Mini</h4>
-        <p class="net-dns-note">Runs on the host through the RaPiSys agent. The first install loads a device-tree overlay for the fan &amp; RGB.</p>
+        <h4 class="sess-h">Install Pironman</h4>
+        <p class="net-dns-note">Runs on the host through the RaPiSys agent using SunFounder\u2019s official installer. The first install loads a device-tree overlay for the fan &amp; RGB and sets the Pi to fully power off on shutdown.</p>
+        <div class="set-pi-picker">
+          <label>Pironman model</label>
+          <select data-pir="variant">
+            <option value="base">Pironman 5</option>
+            <option value="mini" selected>Pironman 5 Mini</option>
+            <option value="max">Pironman 5 Max</option>
+            <option value="pro-max">Pironman 5 Pro Max</option>
+          </select>
+        </div>
         <div class="set-pi-methods">
           <label class="set-pi-method"><input type="radio" name="pirmethod" value="full" checked> <span><b>Full Install:</b> case control plus the Pironman web dashboard. RaPiSys controls it live (no per-change restart). <span class="set-pi-reboot">Reboot required after the first install.</span> <span class="set-pi-rec">Recommended</span></span></label>
           <label class="set-pi-method"><input type="radio" name="pirmethod" value="slim"> <span><b>Slim Install:</b> case control only, no extra dashboard/InfluxDB. Lighter; changes apply via config + service restart. <span class="set-pi-reboot">Reboot required after the first install.</span></span></label>
@@ -2475,6 +2492,23 @@ pageRenderers.settings = (() => {
       try { await api('/pironman/restart', { method: 'POST' }); toast('success', 'Case', 'Service restarted'); }
       catch (e) { toast('error', 'Case', e.message); } setTimeout(() => loadPironman(host), 1200); };
 
+    // ---- EEPROM configure ----
+    const eeB = $('[data-pir=eeprom]', box);
+    if (eeB) eeB.onclick = async () => {
+      eeB.disabled = true; eeB.textContent = 'Configuring…';
+      try {
+        const r = await api('/pironman/eeprom/configure', { method: 'POST', body: {} });
+        if (r.ok) {
+          toast('success', 'Case', 'Shutdown power-off configured' + (r.rebootRecommended ? ' — reboot recommended' : ''));
+          if (r.rebootRecommended) {
+            const go = await rapisysConfirm('EEPROM updated to fully power off on shutdown. A reboot is needed for it to take effect. Reboot the Pi now?', { confirmLabel: 'Reboot now' });
+            if (go) { try { await api('/pironman/reboot', { method: 'POST', body: {} }); toast('success', 'Case', 'Rebooting the Pi…'); } catch (e) { toast('error', 'Case', e.message); } }
+          }
+        } else { toast('error', 'Case', 'Could not configure EEPROM'); }
+      } catch (e) { toast('error', 'Case', e.message); }
+      setTimeout(() => loadPironman(host), 1200);
+    };
+
     // ---- uninstall stream ----
     const unB = $('[data-pir=uninstall]', box);
     if (unB) unB.onclick = async () => {
@@ -2543,16 +2577,19 @@ pageRenderers.settings = (() => {
         const method = methodOf();
         if (method === 'manual') {
           manualBox.style.display = '';
-          manualBox.innerHTML = `<p class="net-dns-note">Run these on the Pi, then reboot and click “Re-detect”:</p>
-            <pre class="set-pi-log">git clone https://github.com/sunfounder/pironman5-mini\ncd pironman5-mini\nsudo python3 install.py</pre>
+          const mv = ($('[data-pir=variant]', box) || {}).value || 'mini';
+          manualBox.innerHTML = `<p class="net-dns-note">Run this on the Pi, then reboot and click “Re-detect”:</p>
+            <pre class="set-pi-log">curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-installer-scripts/main/pironman5/install.sh -o install.sh\nsudo bash install.sh --variant ${mv}</pre>
             <div class="set-actions"><button class="set-btn set-btn-edit" data-pir="redetect2">Re-detect</button></div>`;
           const rd = $('[data-pir=redetect2]', manualBox); if (rd) rd.onclick = () => loadPironman(host);
           return;
         }
         const slim = method === 'slim';
+        const variant = ($('[data-pir=variant]', box) || {}).value || 'mini';
+        const MODEL = { base: 'Pironman 5', mini: 'Pironman 5 Mini', max: 'Pironman 5 Max', 'pro-max': 'Pironman 5 Pro Max' };
         const confirmed = await rapisysConfirm(
-          slim ? 'Install Pironman 5 Mini (slim — case control only, no dashboard)? This runs the official installer as root and requires a reboot afterwards.'
-               : 'Install Pironman 5 Mini (full — includes the pm_dashboard web UI on port 34001, unauthenticated on the LAN)? This runs the official installer as root and requires a reboot afterwards.',
+          slim ? `Install ${MODEL[variant]} (slim — case control only, no dashboard)? This runs the official installer as root and requires a reboot afterwards.`
+               : `Install ${MODEL[variant]} (full — includes the pm_dashboard web UI on port 34001, unauthenticated on the LAN)? This runs the official installer as root and requires a reboot afterwards.`,
           { confirmLabel: 'Install Pironman' });
         if (!confirmed) return;
         const logEl = $('[data-pir=log]', box); logEl.textContent = '';
@@ -2568,7 +2605,7 @@ pageRenderers.settings = (() => {
         installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Installing…';
         const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
         let finished = false;
-        const es = new EventSource('/api/pironman/install/stream?slim=' + (slim ? '1' : '0'));
+        const es = new EventSource('/api/pironman/install/stream?slim=' + (slim ? '1' : '0') + '&variant=' + encodeURIComponent(variant));
         // Progress UI: a wheel + a determinate bar that advances through the
         // installer's known phases. Each marker maps to a milestone weight.
         const progBox = $('[data-pir=progress]', box); if (progBox) progBox.style.display = '';
@@ -2586,7 +2623,8 @@ pageRenderers.settings = (() => {
           [/Installing pm_dashboard/i, 80, 'Installing dashboard…'],
           [/Installing sf_rpi_status/i, 86, 'Installing status module…'],
           [/Setup auto start|Copy service file/i, 92, 'Setting up service…'],
-          [/dtoverlay|config\.txt|Finished|Cleanup/i, 97, 'Finalising…'],
+          [/EEPROM|POWER_OFF_ON_HALT/i, 95, 'Configuring shutdown power-off…'],
+        [/dtoverlay|config\.txt|Finished|Cleanup/i, 97, 'Finalising…'],
         ];
         let pct = 0;
         const setProg = (p, label) => {
@@ -2609,7 +2647,7 @@ pageRenderers.settings = (() => {
           installBtn.querySelector('span').textContent = 'Install Pironman';
           if (r.rebootRequired) {
             const go = await rapisysConfirm(
-              'Pironman 5 Mini installed successfully. A reboot is required to load the device-tree overlay for the fan & RGB. Reboot the Pi now?',
+              (MODEL[variant] || 'Pironman') + ' installed successfully. A reboot is required to load the device-tree overlay for the fan & RGB. Reboot the Pi now?',
               { confirmLabel: 'Reboot now' });
             if (go) {
               try {
