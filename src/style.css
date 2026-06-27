@@ -5075,6 +5075,12 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 /* A set-summary inside a section card shouldn't draw its own box — the card is
    the box. Strip its border/background to avoid a border-inside-a-border. */
 .set-card .set-summary { background: transparent; border: none; border-radius: 0; padding: 0; margin-bottom: 8px; }
+/* Long description paragraphs inside wide cards shouldn't force the card wide;
+   cap them so they wrap and the card can shrink to its content. */
+.set-card-wide > .net-dns-note, .set-card-wide .up-sec-hint { max-width: 560px; }
+/* Push the action buttons to the bottom of the card so buttons on cards that
+   sit side by side line up along the card's bottom edge. */
+.set-card > .set-actions { margin-top: auto; }
 /* Section cards are flex columns; the grid stretches them to equal height. */
 .set-card { display: flex; flex-direction: column; }
 /* Wide section cards hug their content instead of stretching across the grid. */

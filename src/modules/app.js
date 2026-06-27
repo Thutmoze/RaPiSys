@@ -1419,7 +1419,7 @@ pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
-  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false;
+  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false;
   // shared glyphs hoisted to module scope (EDIT_ICON, TRASH_ICON, …)
 
   async function load(host) {
@@ -2476,14 +2476,14 @@ pageRenderers.settings = (() => {
       const ledSeg = ['off', 'follow', 'on'].map((v) => `<button data-v="${v}" class="${(fan.led || 'follow') === v ? 'on' : ''}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('');
 
       html += `
-      <div class="set-card">
+      <div class="set-card set-card-wide">
       <h4 class="sess-h">Case fan</h4>
       <div class="set-kv"><span class="pir-lbl">Fan mode <button class="pir-info-btn" data-pir-infobtn="fanmode" aria-label="About fan modes">${infoIcon}</button></span><select data-pir="fanmode">${modeOpts}</select></div>
       ${infoPanel('fanmode', PIR_FANMODE_INFO, PIR_FANMODE_NOTE)}
       <div class="set-kv"><span>Fan LED</span><div class="pir-seg" data-pir-seg="fanled">${ledSeg}</div></div>
       </div>
 
-      <div class="set-card">
+      <div class="set-card set-card-wide">
       <h4 class="sess-h">RGB lighting</h4>
       <div class="set-kv set-kv-toggle"><span>Enable RGB</span>
         <label class="set-switch"><input type="checkbox" data-pir="rgbenable" ${rgb.enable ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
@@ -2494,7 +2494,7 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Speed</span><input type="range" min="0" max="100" value="${Number(rgb.speed ?? 50)}" data-pir="rgbspeed"></div>
       </div>
 
-      <div class="set-card">
+      <div class="set-card set-card-wide">
       <h4 class="sess-h">Night light schedule</h4>`;
       // Collapse-when-configured: show a summary + Edit once a schedule is saved
       // (enabled), unless the user is actively editing.
@@ -2961,6 +2961,22 @@ pageRenderers.settings = (() => {
     const pref = rapisysDateFmtPref();
     const sample = Date.now();
     const preview = () => rapisysFmtTime(sample);
+    const DATE_LABELS = { auto: 'Auto (locale)', iso: 'ISO (2026-06-19)', us: 'US (06/19/2026)', eu: 'EU (19/06/2026)', long: 'Long (Jun 19, 2026)' };
+    const TIME_LABELS = { auto: 'Auto (locale)', '24': '24-hour', '12': '12-hour' };
+    if (!editPrefs) {
+      // Configured view: summary + Edit.
+      el2.innerHTML = `
+      <p class="up-sec-hint">How dates and times appear across the dashboard. Saved on this device.</p>
+      <div class="set-summary">
+        <div class="set-kv"><span>Date format</span><b>${esc(DATE_LABELS[pref.date] || pref.date)}</b></div>
+        <div class="set-kv"><span>Time format</span><b>${esc(TIME_LABELS[pref.time] || pref.time)}</b></div>
+        <div class="set-kv"><span>Preview</span><b data-pref="preview">${esc(preview())}</b></div>
+      </div>
+      <div class="set-actions"><button class="set-btn set-btn-edit" data-pref="edit">${EDIT_ICON}<span>Edit</span></button></div>`;
+      const eb = $('[data-pref=edit]', host); if (eb) eb.onclick = () => { editPrefs = true; renderPrefs(host); };
+      return;
+    }
+    // Edit view: form + Save / Cancel.
     el2.innerHTML = `
       <p class="up-sec-hint">Choose how dates and times appear across the dashboard (logs, history, inventory). Saved on this device.</p>
       <div class="wz-row">
@@ -2983,17 +2999,29 @@ pageRenderers.settings = (() => {
       </div>
       <div class="set-summary" style="margin-top:8px">
         <div class="set-kv"><span>Preview</span><b data-pref="preview">${esc(preview())}</b></div>
+      </div>
+      <div class="set-actions">
+        <button class="set-btn set-btn-primary" data-pref="save">${SAVE_ICON}<span>Save</span></button>
+        <button class="set-btn set-btn-edit" data-pref="cancel">Cancel</button>
       </div>`;
     enhanceSelects(host);
-    const apply = () => {
-      const dv = $('[data-pref=date]', host).value;
-      const tv = $('[data-pref=time]', host).value;
-      localStorage.setItem(RAPISYS_DATEFMT_KEY, dv);
-      localStorage.setItem(RAPISYS_TIMEFMT_KEY, tv);
+    // Live preview as the user changes selects (not persisted until Save).
+    const livePreview = () => {
+      const dv = $('[data-pref=date]', host).value, tv = $('[data-pref=time]', host).value;
+      const prev = { date: localStorage.getItem(RAPISYS_DATEFMT_KEY), time: localStorage.getItem(RAPISYS_TIMEFMT_KEY) };
+      localStorage.setItem(RAPISYS_DATEFMT_KEY, dv); localStorage.setItem(RAPISYS_TIMEFMT_KEY, tv);
       const pv = $('[data-pref=preview]', host); if (pv) pv.textContent = preview();
-      toast('success', 'Preferences', 'Date/time format updated');
+      if (prev.date != null) localStorage.setItem(RAPISYS_DATEFMT_KEY, prev.date); else localStorage.removeItem(RAPISYS_DATEFMT_KEY);
+      if (prev.time != null) localStorage.setItem(RAPISYS_TIMEFMT_KEY, prev.time); else localStorage.removeItem(RAPISYS_TIMEFMT_KEY);
     };
-    ['date', 'time'].forEach((f) => { const s = $(`[data-pref=${f}]`, host); if (s) s.addEventListener('change', apply); });
+    ['date', 'time'].forEach((f) => { const sel = $(`[data-pref=${f}]`, host); if (sel) sel.addEventListener('change', livePreview); });
+    const sv = $('[data-pref=save]', host);
+    if (sv) sv.onclick = () => {
+      localStorage.setItem(RAPISYS_DATEFMT_KEY, $('[data-pref=date]', host).value);
+      localStorage.setItem(RAPISYS_TIMEFMT_KEY, $('[data-pref=time]', host).value);
+      editPrefs = false; toast('success', 'Preferences', 'Date/time format saved'); renderPrefs(host);
+    };
+    const cn = $('[data-pref=cancel]', host); if (cn) cn.onclick = () => { editPrefs = false; renderPrefs(host); };
   }
 
   return {
