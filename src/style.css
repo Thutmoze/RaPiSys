@@ -4812,11 +4812,14 @@ select, select option {
   cursor: pointer; transition: var(--transition);
 }
 .rsel-btn:hover, .rsel-btn.open { border-color: rgba(0, 212, 255, 0.45); }
-.rsel-label { color: var(--text-primary); }
+.rsel-btn .rsel-label, .set-kv .rsel-label { color: var(--text-primary); }
 /* Small inline (i) info button row (e.g. SMTP "About setup"). */
 .set-info-row { display: flex; justify-content: flex-end; margin-bottom: 4px; }
 .set-info-row .pir-info-btn { gap: 5px; font-size: 12px; color: var(--text-muted); }
 .set-info-row .pir-info-btn span { font-size: 12px; }
+/* Backup history "Show history" link row + scrollable list inside the modal. */
+.set-bk-historyrow { margin-top: 10px; }
+.net-bk-list-modal { max-height: 320px; overflow-y: auto; margin-top: 4px; }
 .rsel-btn.open svg { transform: rotate(180deg); }
 .rsel-btn svg { transition: transform 0.15s ease; color: var(--text-muted); flex: none; }
 .rsel-list {
@@ -5048,6 +5051,9 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .net-bk-size { color: var(--text-primary); font-weight: 600; }
 .net-bk-date { color: var(--text-muted); }
 .net-link { color: var(--accent-cyan); text-decoration: none; }
+/* When .net-link is applied to a <button>, strip native button chrome so it
+   reads as a plain inline link. */
+button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; }
 .net-link:hover { text-decoration: underline; }
 @media (max-width: 640px) {
   .net-ph-stats { grid-template-columns: repeat(2, 1fr); }
@@ -5085,14 +5091,23 @@ body.ultra .net-iface { font-size: 11px; padding: 5px 0; }
 .set-card .net-dns-note, .set-card .up-sec-hint, .set-card .hw-hint { max-width: 560px; }
 /* Push the action buttons to the bottom of the card so buttons on cards that
    sit side by side line up along the card's bottom edge. */
-.set-card .set-actions { margin-top: auto; border-top: none; padding-top: 0; }
-/* Pin buttons to the card bottom regardless of nesting depth (NAS nests actions
-   inside [data-set] > .set-summary; others one level up). Each wrapper between
-   card and actions is a growing flex column. Empty injected siblings (e.g. the
-   NAS edit-form slot) are hidden so they don't shove content upward. */
-.set-card > [data-set]:not(:empty) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.set-card .set-actions { border-top: none; padding-top: 0; }
+/* Pin buttons to the card bottom regardless of how deep they're nested. The
+   chain below makes every wrapper between the card and the actions a flex
+   column, and the actions themselves take margin-top:auto to drop to the
+   bottom. Handles actions placed directly in [data-set] (Display Prefs), or
+   nested inside a [data-set] > .set-summary (Administrator Account, NAS).
+   Empty injected siblings (NAS edit-form slot, account 2FA zone) are hidden
+   so they don't occupy space and shove the buttons up. */
+.set-card > [data-set] { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .set-card > [data-set] > .set-summary { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
-.set-card > [data-set]:empty { display: none; }
+.set-card > [data-set] > .set-summary > .set-actions,
+.set-card > [data-set] > .set-actions { margin-top: auto; }
+/* Hide empty trailing wrappers (data-set, data-acc, nasform, etc.) that would
+   otherwise take layout space below the content. */
+.set-card [data-set]:empty,
+.set-card [data-acc]:empty,
+.set-card [data-pi]:empty { display: none; }
 /* Section cards are flex columns; the grid stretches them to equal height. */
 .set-card { display: flex; flex-direction: column; }
 /* Wide section cards hug their content instead of stretching across the grid. */
@@ -5937,7 +5952,7 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 @media (max-width: 900px) { .set-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .set-health-grid { grid-template-columns: 1fr; } }
 .set-health-item { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);
-  padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .set-health-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
 .set-health-item b { font-size: 15px; }
 .set-health-item small { color: var(--text-muted); font-size: 11px; }
@@ -5986,7 +6001,8 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: var(--accent-green);
   animation: statusPillPulse 2s ease-in-out infinite; }
 .status-pill .status-pill-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green);
-  animation: pulse 2s ease-in-out infinite; }
+  animation: pulse 2s ease-in-out infinite; animation-delay: 0s; }
+.status-pill { animation-delay: 0s; }
 /* Whole-capsule breathing for the live state (border + soft glow). */
 @keyframes statusPillPulse {
   0%, 100% { border-color: rgba(16,185,129,0.25); box-shadow: 0 0 0 0 rgba(16,185,129,0.0); }

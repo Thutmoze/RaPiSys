@@ -1491,7 +1491,7 @@ pageRenderers.settings = (() => {
       ${nasLine ? `<div class="set-kv"><span>NAS space</span><b>${esc(nasLine)}</b></div>` : ''}
       <div class="set-kv"><span>Health</span><b class="${s.degraded ? 'set-err' : 'set-ok'}">${s.degraded ? '○ Degraded (local fallback)' : '● Healthy'}</b></div>
       ${!editDb ? `
-        <div class="set-actions"><button class="set-btn set-btn-edit" data-set="dbedit">${EDIT_ICON}<span>Edit location</span></button></div>` : `
+        <div class="set-actions"><button class="set-btn set-btn-edit" data-set="dbedit">${EDIT_ICON}<span>Edit</span></button></div>` : `
         <div class="wz-form">
           <label>Database directory <input data-set="dbdir" value="${esc(dbDirVal)}" placeholder="/mnt/rapisys/mybook"></label>
           <div class="set-actions"><button class="set-btn set-btn-primary" data-set="relocate">${SAVE_ICON}<span>Relocate database</span></button><button class="set-btn set-btn-cancel" data-set="dbcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-set="stmsg"></span></div>
@@ -1915,7 +1915,7 @@ pageRenderers.settings = (() => {
           ? `<button class="set-btn set-btn-primary" data-tls="provision">${SAVE_ICON}<span>Renew now</span></button>
              <button class="set-btn set-btn-cancel" data-tls="disable">${CANCEL_ICON}<span>Disable HTTPS</span></button>`
           : `<button class="set-btn set-btn-primary" data-tls="enable">${SAVE_ICON}<span>Enable HTTPS</span></button>`}
-        <button class="set-btn set-btn-edit" data-tls="done">Done</button>
+        <button class="set-btn set-btn-edit" data-tls="done">${SAVE_ICON}<span>Save</span></button>
         <span data-tls="msg"></span>
       </div>`;
 
@@ -2168,18 +2168,23 @@ pageRenderers.settings = (() => {
           <div class="set-kv"><span>Keep last</span><input type="number" data-pi="bkretain" value="${c.retain || 14}" min="1" max="365" style="max-width:90px"> <span class="net-dns-note" style="display:inline">backups</span></div>
           <div class="set-actions">
             <button class="set-btn set-btn-primary" data-pi="bksave">${SAVE_ICON}<span>Save</span></button>
-            <button class="set-btn set-btn-edit" data-pi="bknow">Backup Now</button>
+            <button class="set-btn set-btn-test" data-pi="bknow">${RESTART_ICON}<span>Backup Now</span></button>
             ${(c.enabled && editBackup) ? `<button class="set-btn set-btn-cancel" data-pi="bkcancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
             <span class="net-pi-testresult" data-pi="bkresult"></span>
           </div>`;
+        const lastBk = (bk.backups || [])[0];
+        const lastBkLine = lastBk
+          ? `<div class="set-kv"><span>Last backup</span><b class="set-ok">● ${esc(new Date(lastBk.mtime).toLocaleString())}</b></div>`
+          : `<div class="set-kv"><span>Last backup</span><b>None yet</b></div>`;
         const summaryHtml = `
           <div class="set-summary">
             <div class="set-kv"><span>Frequency</span><b>${freqLabel}</b></div>
             <div class="set-kv"><span>Keep last</span><b>${c.retain || 14} backups</b></div>
+            ${lastBkLine}
           </div>
           <div class="set-actions">
             <button class="set-btn set-btn-edit" data-pi="bkedit">${EDIT_ICON}<span>Edit</span></button>
-            <button class="set-btn set-btn-edit" data-pi="bknow">Backup Now</button>
+            <button class="set-btn set-btn-test" data-pi="bknow">${RESTART_ICON}<span>Backup Now</span></button>
             <span class="net-pi-testresult" data-pi="bkresult"></span>
           </div>`;
         bbody.innerHTML = `
@@ -2188,7 +2193,9 @@ pageRenderers.settings = (() => {
             <label class="set-switch"><input type="checkbox" data-pi="bkenabled" ${c.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
           <div data-pi="bkparams">${showParams ? paramsHtml : (c.enabled ? summaryHtml : '')}</div>
           <pre class="set-pi-log" data-pi="bklog" style="display:none"></pre>
-          ${list.length ? `<div class="net-bk-list"><div class="net-ph-h">Recent backups on NAS</div>${list.map((f) => `<div class="net-bk-row"><span class="net-bk-name">${esc(f.name)}</span><span class="net-bk-size">${fmtMB(f.size)}</span><span class="net-bk-date">${new Date(f.mtime).toLocaleString()}</span></div>`).join('')}</div>` : '<p class="net-dns-note">No backups yet.</p>'}`;
+          ${(bk.backups || []).length ? `<div class="set-bk-historyrow"><button class="net-link" data-pi="bkhistory">Show backup history (${(bk.backups || []).length})</button></div>` : ''}`;
+        // Stash the full list for the history popup.
+        bbody._bkAll = bk.backups || [];
         enhanceSelects(bbody);
         const bval = (k) => { const e = $(`[data-pi=${k}]`, bbody); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
 
@@ -2229,6 +2236,12 @@ pageRenderers.settings = (() => {
             es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Backup failed'; try { m = JSON.parse(ev.data).message || m; } catch {}
               appendLog('✗ ' + m); toast('error', 'Pi-hole', m); btn.disabled = false; btn.textContent = 'Backup Now'; });
             es.onerror = () => { if (finished) return; finished = true; es.close(); appendLog('✗ Connection lost'); btn.disabled = false; btn.textContent = 'Backup Now'; };
+          };
+          const histB = $('[data-pi=bkhistory]', bbody);
+          if (histB) histB.onclick = () => {
+            const all = bbody._bkAll || [];
+            const rows = all.map((f) => `<div class="net-bk-row"><span class="net-bk-name">${esc(f.name)}</span><span class="net-bk-size">${fmtMB(f.size)}</span><span class="net-bk-date">${esc(new Date(f.mtime).toLocaleString())}</span></div>`).join('');
+            rapisysConfirm(`<div class="net-ph-h" style="margin-bottom:8px">Backup history on NAS (${all.length})</div><div class="net-bk-list net-bk-list-modal">${rows}</div>`, { html: true, confirmLabel: 'Close' });
           };
         };
         wireBackupBtns();
