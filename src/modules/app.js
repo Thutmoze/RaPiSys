@@ -2314,6 +2314,7 @@ pageRenderers.settings = (() => {
 
   // ---- Case (Pironman) settings pane ----
   let editPironman = false;
+  let editSched = false;
   const PIRON_FAN_MODES = ['Always On', 'Performance', 'Cool', 'Balanced', 'Quiet'];
   const PIRON_RGB_STYLES = ['rainbow', 'breath', 'leap', 'flow', 'raise_up', 'colorful'];
   const PIR_FANMODE_INFO = [
@@ -2478,9 +2479,22 @@ pageRenderers.settings = (() => {
       <div class="set-kv"><span>Brightness</span><input type="range" min="0" max="100" value="${Number(rgb.brightness ?? 60)}" data-pir="rgbbright"></div>
       <div class="set-kv"><span>Speed</span><input type="range" min="0" max="100" value="${Number(rgb.speed ?? 50)}" data-pir="rgbspeed"></div>
 
-      <h4 class="sess-h" style="margin-top:24px">Night light schedule</h4>
-      <div class="set-kv set-kv-toggle"><span>Schedule lights off
-        <span class="pir-sched-pill" data-pir="schedpill" hidden></span></span>
+      <h4 class="sess-h" style="margin-top:24px">Night light schedule</h4>`;
+      // Collapse-when-configured: show a summary + Edit once a schedule is saved
+      // (enabled), unless the user is actively editing.
+      const schedConfigured = !!sched.enabled;
+      if (schedConfigured && !editSched) {
+        const tg = [sched.targets?.rgb !== false ? 'HAT RGB' : null, sched.targets?.fanLed !== false ? 'Fan light' : null].filter(Boolean).join(', ') || 'nothing';
+        html += `
+      <div class="set-summary">
+        <div class="set-kv"><span>Lights off</span><b>${esc(sched.offAt || '22:00')} &rarr; ${esc(sched.onAt || '08:00')}</b></div>
+        <div class="set-kv"><span>Switches off</span><b>${esc(tg)}</b></div>
+        <div class="set-kv"><span>Status</span>${sched.active ? statusPill('live', 'Active now') : statusPill('off', 'Idle')}</div>
+      </div>
+      <div class="set-actions"><button class="set-btn set-btn-edit" data-pir="schededit">${EDIT_ICON}<span>Edit schedule</span></button></div>`;
+      } else {
+        html += `
+      <div class="set-kv set-kv-toggle"><span>Schedule lights off</span>
         <label class="set-switch"><input type="checkbox" data-pir="schedenable" ${sched.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
       <div class="pir-sched-body" data-pir="schedbody" ${sched.enabled ? '' : 'hidden'}>
         <div class="set-kv"><span>Turn off at</span><input type="time" data-pir="schedoff" value="${esc(sched.offAt || '22:00')}" class="pir-time"></div>
@@ -2489,8 +2503,10 @@ pageRenderers.settings = (() => {
           <label class="pir-ck"><input type="checkbox" data-pir="schedrgb" ${sched.targets?.rgb !== false ? 'checked' : ''}> HAT RGB</label>
           <label class="pir-ck"><input type="checkbox" data-pir="schedfan" ${sched.targets?.fanLed !== false ? 'checked' : ''}> Fan light</label>
         </span></div>
-        <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="schedsave">${SAVE_ICON}<span>Save schedule</span></button></div>
-      </div>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-pir="schedsave">${SAVE_ICON}<span>Save schedule</span></button>${editSched ? `<button class="set-btn set-btn-edit" data-pir="schedcancel">Cancel</button>` : ''}</div>
+      </div>`;
+      }
+      html += `
       <p class="hw-hint">Lights are restored with their previous style &amp; colour when the window ends. Cooling is never affected. Times use the Pi\u2019s local timezone.</p>
 `;
     }
@@ -2508,8 +2524,10 @@ pageRenderers.settings = (() => {
     });
 
     // ---- night schedule wiring ----
-    const schedPill = $('[data-pir=schedpill]', box);
-    if (sched && sched.active) { if (schedPill) { schedPill.hidden = false; schedPill.textContent = '● Active now'; } }
+    const schedEdit = $('[data-pir=schededit]', box);
+    if (schedEdit) schedEdit.onclick = () => { editSched = true; loadPironman(host); };
+    const schedCancel = $('[data-pir=schedcancel]', box);
+    if (schedCancel) schedCancel.onclick = () => { editSched = false; loadPironman(host); };
     const schedEn = $('[data-pir=schedenable]', box);
     const schedBody = $('[data-pir=schedbody]', box);
     if (schedEn) schedEn.onchange = () => { if (schedBody) schedBody.hidden = !schedEn.checked; };
@@ -2527,6 +2545,7 @@ pageRenderers.settings = (() => {
       saveSched.disabled = true;
       try { await api('/pironman/schedule', { method: 'POST', body });
         toast('success', 'Case', 'Night schedule saved');
+        editSched = false;
         setTimeout(() => loadPironman(host), 500);
       } catch (e) { toast('error', 'Case', e.message); saveSched.disabled = false; }
     };

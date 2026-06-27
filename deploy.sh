@@ -126,6 +126,13 @@ EOF
   sed -i "/^DOCKER_GID=/d" "${APP_DIR}/.env"
   echo "DOCKER_GID=${dgid}" >> "${APP_DIR}/.env"
   ok "rapisys group GID ${gid} recorded in .env"
+  # Capture the host timezone so the container's time-of-day logic (e.g. the
+  # night light scheduler) matches local time instead of UTC.
+  local tz
+  tz=$(cat /etc/timezone 2>/dev/null || timedatectl show -p Timezone --value 2>/dev/null || echo UTC)
+  sed -i "/^TZ=/d" "${APP_DIR}/.env"
+  echo "TZ=${tz}" >> "${APP_DIR}/.env"
+  ok "host timezone ${tz} recorded in .env"
 
   install -m 0644 "${APP_DIR}/agent/rapisys-agent.service" /etc/systemd/system/rapisys-agent.service
   systemctl daemon-reload

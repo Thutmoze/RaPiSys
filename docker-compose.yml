@@ -23,6 +23,10 @@ services:
       - DATA_DIR=/app/data
       - AGENT_SOCKET=/run/rapisys/agent.sock
       - SAMPLE_INTERVAL_S=10
+      # Share the Pi's timezone so time-of-day logic (e.g. the night light
+      # scheduler) matches local time. TZ is captured into .env by deploy.sh;
+      # the /etc/localtime mount below is a fallback.
+      - TZ=${TZ:-UTC}
 
     volumes:
       # Persistent settings + local/fallback database
@@ -32,6 +36,9 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/host/root:ro
+
+      # Host timezone (so local-time scheduling matches the Pi)
+      - /etc/localtime:/etc/localtime:ro
 
       # Docker container monitoring
       - /var/run/docker.sock:/var/run/docker.sock:ro
