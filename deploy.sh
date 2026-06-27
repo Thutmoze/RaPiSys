@@ -32,6 +32,31 @@ require_root() { [[ $EUID -eq 0 ]] || die "run with sudo"; }
 # -----------------------------------------------------------------------------
 # Checks
 # -----------------------------------------------------------------------------
+ensure_docker() {
+  if ! command -v docker >/dev/null; then
+    warn "Docker is not installed."
+    local reply="n"
+    if [[ -t 0 ]]; then
+      read -r -p "  Install Docker Engine + Compose now via the official script? [y/N] " reply
+    fi
+    case "${reply}" in
+      [Yy]*)
+        log "Installing Docker (https://get.docker.com)…"
+        curl -fsSL https://get.docker.com | sh \
+          || die "Docker installation failed — see https://docs.docker.com/engine/install/debian/"
+        systemctl enable --now docker >/dev/null 2>&1 || true
+        ok "Docker installed"
+        ;;
+      *)
+        die "Docker is required: https://docs.docker.com/engine/install/debian/"
+        ;;
+    esac
+  fi
+  command -v docker >/dev/null || die "Docker still unavailable after install attempt"
+  docker compose version >/dev/null 2>&1 \
+    || die "Docker Compose v2 plugin is required (the official install script includes it)"
+}
+
 check_platform() {
   log "Checking platform…"
   if grep -q "Raspberry Pi 5" /proc/device-tree/model 2>/dev/null; then
@@ -44,8 +69,7 @@ check_platform() {
   else
     warn "OS is not Bookworm/Trixie — untested configuration"
   fi
-  command -v docker >/dev/null || die "Docker is required: https://docs.docker.com/engine/install/debian/"
-  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 plugin is required"
+  ensure_docker
   ok "Docker $(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1) + Compose"
   command -v node >/dev/null || {
     log "Installing Node.js for the host agent…"
@@ -167,6 +191,13 @@ start_app() {
   health_gate "$DEEP_URL" 60 || warn "deep health not green yet (agent/scheduler still settling)"
 }
 
+prune_build_cache() {
+  log "Pruning Docker build cache…"
+  local reclaimed
+  reclaimed=$(docker builder prune -f 2>/dev/null | grep -iE "reclaimed" || true)
+  ok "${reclaimed:-build cache pruned}"
+}
+
 snapshot() {
   log "Taking snapshot…"
   mkdir -p "$SNAP_DIR"
@@ -196,6 +227,7 @@ cmd_install() {
   gen_env
   install_agent
   start_app
+  prune_build_cache
   local ip; ip=$(hostname -I | awk '{print $1}')
   echo
   log "RaPiSys is up:  http://${ip}:3001"
