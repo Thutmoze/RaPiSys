@@ -26,6 +26,23 @@ const statusPill = (state, label) => {
   return `<span class="status-pill${cls}"><span class="status-pill-dot"></span>${label}</span>`;
 };
 
+// Append a line to a streamed-log <pre>, capping the DOM to the last LOG_CAP
+// lines so very chatty installers (hundreds of lines) don't grow the node
+// unboundedly and freeze the tab. Keeps the newest output and autoscrolls.
+const LOG_CAP = 300;
+function appendCappedLog(logEl, line) {
+  if (!logEl) return;
+  logEl.textContent += line + '\n';
+  // Trim from the front only occasionally (every ~50 lines over cap) to avoid
+  // doing a split/slice on every single append.
+  const nl = logEl.textContent.length - logEl.textContent.replace(/\n/g, '').length;
+  if (nl > LOG_CAP + 50) {
+    const lines = logEl.textContent.split('\n');
+    logEl.textContent = lines.slice(lines.length - LOG_CAP).join('\n');
+  }
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
 // Shared inline glyphs (module scope so rapisysConfirm + all renderers can use them).
 const EDIT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 const TEST_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
@@ -2518,7 +2535,7 @@ pageRenderers.settings = (() => {
       if (!ok) return;
       const logEl = $('[data-pir=oplog]', box); logEl.style.display = ''; logEl.textContent = '';
       unB.disabled = true; unB.innerHTML = TRASH_ICON + '<span>Uninstalling…</span>';
-      const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+      const appendLog = (l) => appendCappedLog(logEl, l);
       const unProg = $('[data-pir=unprogress]', box); if (unProg) unProg.style.display = '';
       const unStep = $('[data-pir=unstep]', box), unPct = $('[data-pir=unpct]', box), unBar = $('[data-pir=unbar]', box);
       const UN_PHASES = [
@@ -2556,7 +2573,7 @@ pageRenderers.settings = (() => {
     if (updB) updB.onclick = async () => {
       const logEl = $('[data-pir=oplog]', box); logEl.style.display = ''; logEl.textContent = '';
       updB.disabled = true; updB.textContent = 'Updating…';
-      const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+      const appendLog = (l) => appendCappedLog(logEl, l);
       let finished = false;
       const es = new EventSource('/api/pironman/update/stream');
       es.addEventListener('line', (ev) => { try { appendLog(JSON.parse(ev.data).line); } catch {} });
@@ -2603,28 +2620,30 @@ pageRenderers.settings = (() => {
           };
         }
         installBtn.disabled = true; installBtn.querySelector('span').textContent = 'Installing…';
-        const appendLog = (l) => { logEl.textContent += l + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+        const appendLog = (l) => appendCappedLog(logEl, l);
         let finished = false;
         const es = new EventSource('/api/pironman/install/stream?slim=' + (slim ? '1' : '0') + '&variant=' + encodeURIComponent(variant));
         // Progress UI: a wheel + a determinate bar that advances through the
         // installer's known phases. Each marker maps to a milestone weight.
         const progBox = $('[data-pir=progress]', box); if (progBox) progBox.style.display = '';
         const stepEl = $('[data-pir=step]', box), pctEl = $('[data-pir=pct]', box), barEl = $('[data-pir=bar]', box);
+        // Phases track the official SunFounder installer's step output (✓ <step>).
         const PHASES = [
-          [/Fetching .*source|Cloning/i, 5, 'Fetching source…'],
-          [/Update package list/i, 10, 'Updating package list…'],
-          [/Install influxdb/i, 18, 'Installing dependencies…'],
-          [/Create virtual environment/i, 28, 'Creating virtual environment…'],
-          [/Install build/i, 36, 'Preparing build tools…'],
-          [/Installing pironman5_mini/i, 46, 'Building Pironman package…'],
-          [/Building wheels for collected packages/i, 55, 'Building Python wheels (slow)…'],
-          [/Building wheel for ([\w.-]+)/i, 62, null],
-          [/Successfully built|Installing pm_auto/i, 72, 'Installing modules…'],
-          [/Installing pm_dashboard/i, 80, 'Installing dashboard…'],
-          [/Installing sf_rpi_status/i, 86, 'Installing status module…'],
-          [/Setup auto start|Copy service file/i, 92, 'Setting up service…'],
-          [/EEPROM|POWER_OFF_ON_HALT/i, 95, 'Configuring shutdown power-off…'],
-        [/dtoverlay|config\.txt|Finished|Cleanup/i, 97, 'Finalising…'],
+          [/Update package list/i, 8, 'Updating package list…'],
+          [/Install build dependencies/i, 14, 'Installing build dependencies…'],
+          [/Cloning pironman5|Clone pironman5/i, 22, 'Cloning Pironman source…'],
+          [/Install APT dependencies/i, 30, 'Installing APT dependencies…'],
+          [/Create virtual environment/i, 40, 'Creating virtual environment…'],
+          [/Install Python packages|Install Python dependencies/i, 50, 'Installing Python packages…'],
+          [/Install pironman5\b/i, 60, 'Building Pironman package…'],
+          [/Install pm_auto/i, 66, 'Installing pm_auto…'],
+          [/Install sf_rpi_status/i, 72, 'Installing status module…'],
+          [/Install pm_dashboard/i, 78, 'Installing dashboard…'],
+          [/Create pironman5 symlink|Register bash completion/i, 84, 'Setting up CLI…'],
+          [/Install service file|Enable pironman5 service/i, 90, 'Setting up service…'],
+          [/Copy sunfounder-.*dtbo|dtoverlay|config\.txt/i, 94, 'Installing device-tree overlay…'],
+          [/EEPROM|POWER_OFF_ON_HALT|power-off/i, 97, 'Configuring shutdown power-off…'],
+          [/Write variant identifier|Set final ownership|Installed\./i, 99, 'Finalising…'],
         ];
         let pct = 0;
         const setProg = (p, label) => {
