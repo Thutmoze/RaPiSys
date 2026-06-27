@@ -10,13 +10,15 @@ Restart=on-failure
 RestartSec=3
 # Hardening (the agent needs root for mounts/apt/fan, but we still confine it)
 NoNewPrivileges=no
-# ProtectHome=tmpfs mounts an empty *writable* tmpfs over /home and /root so the
-# real home dirs stay hidden, while the SunFounder Pironman installer — which
-# resolves HOME from root's passwd entry (/root) and clones into
-# $HOME/pironman5 — can still write its throwaway build clone. (ReadWritePaths
-# does NOT re-grant write under ProtectHome=read-only, so tmpfs is the fix.)
-# The agent reads no config from home dirs (its env is /etc/rapisys/agent.env).
-ProtectHome=tmpfs
+# ProtectHome is disabled because the SunFounder Pironman installer resolves
+# HOME from root's passwd entry (/root) and clones into $HOME/pironman5; on this
+# platform neither ProtectHome=read-only + ReadWritePaths=/root nor
+# ProtectHome=tmpfs yields a writable /root (both leave it read-only — verified
+# on-device), so the clone fails. ProtectHome=no is the only setting that lets
+# it write. This is an acceptable trade: the agent already runs as root for
+# apt/systemd/fan/mount work and reads no config from home dirs (its env comes
+# from /etc/rapisys/agent.env), so home sandboxing added little here.
+ProtectHome=no
 PrivateTmp=yes
 RuntimeDirectory=rapisys
 RuntimeDirectoryMode=0755
