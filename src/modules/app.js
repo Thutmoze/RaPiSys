@@ -103,9 +103,10 @@ async function api(path, opts = {}, retried = false) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   const res = await fetch(`${API}${path}`, { ...opts, headers, credentials: 'same-origin',
     body: opts.body ? JSON.stringify(opts.body) : undefined });
-  if (res.status === 401 && !retried) {
-    // Admin action from an unauthenticated browser: show the login modal,
-    // then retry the original call once.
+  if (res.status === 401 && !retried && !loginSnoozed) {
+    // Admin action from an unauthenticated browser: show the login modal once,
+    // then retry the original call. If the user dismisses it, loginSnoozed stops
+    // further background 401s from re-popping it.
     const ok = await showLogin();
     if (ok) return api(path, opts, true);
   }
@@ -242,6 +243,9 @@ function enhanceSelects(root) {
 // ---------------------------------------------------------------------------
 
 let loginPromise = null;
+// Once the user dismisses the login modal, background 401s stop auto-popping it
+// (the nav-rail lock icon still opens it on demand). Reset on a successful sign-in.
+let loginSnoozed = false;
 function showLogin() {
   if (loginPromise) return loginPromise;       // one modal at a time
   loginPromise = new Promise((resolve) => {
@@ -258,18 +262,33 @@ function showLogin() {
           <div class="wz-row" data-lg="gateactions"><span data-lg="gatemsg">Checking for a secure address…</span></div>
         </div>` : ''}
         <div class="wz-form" data-lg="form" ${insecure ? 'hidden' : ''}>
-          <label>Username <input data-lg="user" autocomplete="username"></label>
-          <label>Password <input data-lg="pass" type="password" autocomplete="current-password"></label>
-          <label data-lg="codewrap">Authenticator code <input data-lg="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></label>
+          <label>Username
+            <span class="lg-ifield">
+              <svg class="lg-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+              <input data-lg="user" autocomplete="username">
+            </span>
+          </label>
+          <label>Password
+            <span class="lg-ifield">
+              <svg class="lg-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              <input data-lg="pass" type="password" autocomplete="current-password">
+            </span>
+          </label>
+          <label data-lg="codewrap">Authenticator code
+            <span class="lg-ifield">
+              <svg class="lg-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>
+              <input data-lg="code" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code">
+            </span>
+          </label>
           <div class="wz-row">
-            <button class="action-btn wz-primary" data-lg="go">Sign in</button>
-            <button class="action-btn set-btn-cancel" data-lg="cancel">Cancel</button>
+            <button class="action-btn wz-primary" data-lg="go"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg><span>Sign in</span></button>
+            <button class="action-btn set-btn-cancel" data-lg="cancel">${CANCEL_ICON}<span>Cancel</span></button>
             <span data-lg="status"></span>
           </div>
         </div>
       </div>`;
     document.body.appendChild(ov);
-    const done = (ok) => { ov.remove(); loginPromise = null; resolve(ok); };
+    const done = (ok) => { ov.remove(); loginPromise = null; loginSnoozed = !ok; resolve(ok); };
 
     // Over plain HTTP: figure out whether HTTPS is available and guide the user
     // to the secure URL (or to enabling HTTPS) instead of accepting a password.

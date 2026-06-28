@@ -4591,6 +4591,19 @@ body.wizard-open .container, body.wizard-open .nav-rail { display: none; }
   padding: 8px 10px; font-size: 13px; font-family: inherit;
 }
 .wz-form input:focus, .wz-form select:focus { outline: none; border-color: var(--accent-cyan); }
+/* Login field glyphs: icon inset on the left of the input. */
+.lg-ifield { position: relative; display: flex; align-items: center; }
+.lg-ifield .lg-ic { position: absolute; left: 11px; width: 15px; height: 15px; color: var(--text-muted); pointer-events: none; }
+.wz-form .lg-ifield input { width: 100%; box-sizing: border-box; padding-left: 34px; }
+.lg-ifield:focus-within .lg-ic { color: var(--accent-cyan); }
+/* Login field titles: white + bold (input value stays normal weight). */
+.login-card .wz-form label { color: var(--text-primary); font-weight: 700; }
+.login-card .wz-form .lg-ifield input { font-weight: 400; }
+/* Cancel in the login modal follows the site-wide cancel style (amber), not
+   the cyan primary that .wz-form .action-btn would otherwise apply. Scoped to
+   .login-card so it outranks .wz-form .action-btn regardless of source order. */
+.login-card .wz-form .set-btn-cancel { color: #f59e0b; border-color: rgba(245,158,11,0.45); background: rgba(245,158,11,0.1); }
+.login-card .wz-form .set-btn-cancel:hover { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.18); box-shadow: none; }
 .wz-inline { flex-direction: row !important; align-items: center; gap: 8px !important; }
 .wz-row { display: flex; gap: 10px; align-items: center; }
 .wz-hint { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
