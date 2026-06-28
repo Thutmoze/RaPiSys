@@ -1351,6 +1351,185 @@ const OPS = {
     return { output: r.stdout };
   },
 
+  // ---- Tailscale one-click install / connect ------------------------------
+  // The official `tailscale` binary lives on the HOST (not in Docker). These
+  // ops mirror the Pi-hole / Pironman lifecycle: detect → install → up →
+  // (down / logout / update / uninstall). All params are strictly validated
+  // and run via execFile — never arbitrary shell.
+
+  // Read-only snapshot: presence, version, daemon, backend state, and the
+  // authoritative prefs (ssh / accept-routes / magicdns / advertised routes).
+  async 'tailscale.detect'() {
+    const out = { installed: false, version: null, daemonActive: false,
+      backendState: null, loggedIn: false, online: null, dnsName: null,
+      magicDNS: null, tailnet: null, ssh: false, acceptRoutes: false,
+      acceptDns: null, advertiseRoutes: [], hostname: null, wantRunning: null };
+    const which = await run('sh', ['-c', 'command -v tailscale'], 4000).catch(() => ({ code: 1, stdout: '' }));
+    if (which.code !== 0 || !which.stdout.trim()) return out;
+    out.installed = true;
+    const ver = await run('tailscale', ['version'], 6000).catch(() => ({ stdout: '' }));
+    out.version = ((ver.stdout || '').split('\n')[0] || '').trim() || null;
+    out.daemonActive = (await run('systemctl', ['is-active', 'tailscaled'], 5000)
+      .catch(() => ({ stdout: '' }))).stdout.trim() === 'active';
+    const st = await run('tailscale', ['status', '--json'], 8000).catch(() => ({ code: 1, stdout: '' }));
+    if (st.code === 0 && st.stdout.trim()) {
+      try {
+        const j = JSON.parse(st.stdout);
+        out.backendState = j.BackendState || null;
+        out.loggedIn = !!out.backendState && !['NeedsLogin', 'NoState'].includes(out.backendState);
+        out.dnsName = (j.Self && j.Self.DNSName ? j.Self.DNSName : '').replace(/\.$/, '') || null;
+        out.online = j.Self ? !!j.Self.Online : null;
+        out.magicDNS = !!(j.CurrentTailnet && j.CurrentTailnet.MagicDNSEnabled);
+        out.tailnet = (j.CurrentTailnet && j.CurrentTailnet.Name) || null;
+      } catch { /* not running yet */ }
+    }
+    // Authoritative prefs (ssh / routes / dns / hostname) from `debug prefs`.
+    const pf = await run('tailscale', ['debug', 'prefs'], 6000).catch(() => ({ stdout: '' }));
+    try {
+      const p = JSON.parse(pf.stdout);
+      out.ssh = !!p.RunSSH;
+      out.acceptRoutes = !!p.RouteAll;
+      out.acceptDns = (p.CorpDNS === undefined) ? null : !!p.CorpDNS;
+      out.advertiseRoutes = Array.isArray(p.AdvertiseRoutes) ? p.AdvertiseRoutes : [];
+      out.hostname = p.Hostname || null;
+      out.wantRunning = (p.WantRunning === undefined) ? null : !!p.WantRunning;
+    } catch { /* prefs unavailable */ }
+    return out;
+  },
+
+  // Install the binary only (official install.sh → apt repo + package). Does
+  // NOT join a tailnet — that's `tailscale.up`. Streams installer output.
+  async 'tailscale.install'(_, send) {
+    send('Checking prerequisites (curl)…');
+    const have = await run('sh', ['-c', 'command -v curl >/dev/null && echo OK'], 6000);
+    assert(/OK/.test(have.stdout), 'curl is required on the host');
+    send('Downloading the official Tailscale installer…');
+    const tmp = '/tmp/tailscale-install.sh';
+    const dl = await run('curl', ['-fsSL', 'https://tailscale.com/install.sh', '-o', tmp], 60000);
+    assert(dl.code === 0 && fs.existsSync(tmp), `could not download installer: ${dl.stderr || dl.stdout}`);
+    send('Running installer (adds the Tailscale apt repo and installs the package)…');
+    const r = await runStreaming('sh', [tmp], {}, send);
+    try { fs.unlinkSync(tmp); } catch {}
+    assert(r.code === 0, `installer exited with code ${r.code}`);
+    send('Enabling the tailscaled service…');
+    await run('systemctl', ['enable', '--now', 'tailscaled'], 30000).catch(() => {});
+    send('Tailscale installed. Detecting status…');
+    const det = await OPS['tailscale.detect']();
+    return { ok: true, installed: det.installed, version: det.version,
+      backendState: det.backendState, loggedIn: det.loggedIn };
+  },
+
+  // Join / re-configure the tailnet. With an auth key this is headless; without
+  // one, `tailscale up` prints a login URL and blocks until the user authorizes
+  // in a browser (the route surfaces that URL). --reset makes the submitted
+  // form authoritative so cleared toggles actually revert.
+  async 'tailscale.up'({ authKey = '', ssh = false, hostname = '', acceptRoutes = false,
+    acceptDns = true, advertiseRoutes = '' } = {}, send) {
+    const present = await run('sh', ['-c', 'command -v tailscale'], 4000).catch(() => ({ code: 1 }));
+    assert(present.code === 0, 'Tailscale is not installed');
+    if (authKey) assert(/^tskey-[A-Za-z0-9_-]{6,200}$/.test(String(authKey)), 'invalid auth key format');
+    let host = '';
+    if (hostname) { host = String(hostname).toLowerCase();
+      assert(/^[a-z0-9][a-z0-9-]{0,62}$/.test(host), 'invalid hostname (a–z, 0–9, hyphen; ≤63 chars)'); }
+    let routes = [];
+    if (advertiseRoutes) {
+      routes = String(advertiseRoutes).split(',').map((s) => s.trim()).filter(Boolean);
+      const CIDR = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
+      for (const c of routes) assert(CIDR.test(c), `invalid route CIDR: ${c}`);
+    }
+    // Advertising subnet routes requires IP forwarding on the host.
+    if (routes.length) {
+      send('Enabling IP forwarding for subnet routing…');
+      try {
+        fs.writeFileSync('/etc/sysctl.d/99-tailscale.conf',
+          'net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n', { mode: 0o644 });
+        await run('sysctl', ['-p', '/etc/sysctl.d/99-tailscale.conf'], 10000).catch(() => {});
+      } catch (e) { send('Note: could not persist IP-forwarding sysctl: ' + e.message); }
+    }
+    const args = ['up', '--reset',
+      `--accept-routes=${acceptRoutes ? 'true' : 'false'}`,
+      `--accept-dns=${acceptDns ? 'true' : 'false'}`,
+      `--ssh=${ssh ? 'true' : 'false'}`];
+    if (host) args.push(`--hostname=${host}`);
+    if (routes.length) args.push(`--advertise-routes=${routes.join(',')}`);
+    if (authKey) {
+      args.push(`--authkey=${authKey}`);
+      send('Connecting to your tailnet with the provided auth key…');
+    } else {
+      // Self-terminate if the user never authorizes, so we don't leave a
+      // dangling `tailscale up` on the host.
+      args.push('--timeout=300s');
+      send('Starting login — open the link that appears below to authorize this Pi.');
+    }
+    const r = await runStreaming('tailscale', args, {}, send);
+    assert(r.code === 0, authKey
+      ? `tailscale up failed (code ${r.code})`
+      : `login did not complete (code ${r.code}) — the authorization link may have expired`);
+    send('Connected. Detecting status…');
+    const det = await OPS['tailscale.detect']();
+    return { ok: true, backendState: det.backendState, dnsName: det.dnsName, online: det.online,
+      ssh: det.ssh, magicDNS: det.magicDNS, advertiseRoutes: det.advertiseRoutes, loggedIn: det.loggedIn };
+  },
+
+  // Disconnect (stay logged in; reconnect later without re-auth).
+  async 'tailscale.down'() {
+    const r = await run('tailscale', ['down'], 20000);
+    const det = await OPS['tailscale.detect']();
+    return { ok: r.code === 0, backendState: det.backendState, wantRunning: det.wantRunning };
+  },
+
+  // Log out of the tailnet entirely (next connect needs re-authentication).
+  async 'tailscale.logout'(_, send) {
+    send && send('Logging out of the tailnet…');
+    const r = await run('tailscale', ['logout'], 30000);
+    assert(r.code === 0, `logout failed: ${r.stderr || r.stdout}`);
+    const det = await OPS['tailscale.detect']();
+    return { ok: true, backendState: det.backendState, loggedIn: det.loggedIn };
+  },
+
+  // Remove Tailscale from the host. Requires a typed confirmation token.
+  async 'tailscale.uninstall'({ confirm } = {}, send) {
+    assert(confirm === 'UNINSTALL', 'confirmation token required');
+    send('Disconnecting and logging out…');
+    await run('tailscale', ['down'], 20000).catch(() => {});
+    await run('tailscale', ['logout'], 30000).catch(() => {});
+    send('Stopping and disabling tailscaled…');
+    await run('sh', ['-c', 'systemctl stop tailscaled 2>/dev/null; systemctl disable tailscaled 2>/dev/null; true'], 30000).catch(() => {});
+    send('Removing the Tailscale package…');
+    const r = await runStreaming('apt-get', ['remove', '-y', 'tailscale'], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+    try { fs.unlinkSync('/etc/sysctl.d/99-tailscale.conf'); } catch {}
+    send('Reloading systemd…');
+    await run('systemctl', ['daemon-reload'], 10000).catch(() => {});
+    const det = await OPS['tailscale.detect']();
+    return { ok: r.code === 0, installed: det.installed };
+  },
+
+  // Is a newer Tailscale published? (apt-repo aware via `tailscale update`.)
+  async 'tailscale.checkUpdate'() {
+    const det = await OPS['tailscale.detect']();
+    if (!det.installed) return { installed: false, updateAvailable: false };
+    const r = await run('tailscale', ['update', '--check'], 30000)
+      .catch(() => ({ code: 1, stdout: '', stderr: '' }));
+    const text = (r.stdout || '') + (r.stderr || '');
+    if (/up to date|already.*latest|no update/i.test(text)) {
+      return { installed: true, currentVersion: det.version, updateAvailable: false };
+    }
+    const m = text.match(/(\d+\.\d+\.\d+)/);
+    return { installed: true, currentVersion: det.version,
+      latestVersion: m ? m[1] : null, updateAvailable: !!m };
+  },
+
+  // Apply the available Tailscale update (streamed).
+  async 'tailscale.update'(_, send) {
+    const det = await OPS['tailscale.detect']();
+    assert(det.installed, 'Tailscale is not installed');
+    send('Updating Tailscale…');
+    const r = await runStreaming('tailscale', ['update', '--yes'], {}, send);
+    assert(r.code === 0, `update failed (code ${r.code})`);
+    const after = await OPS['tailscale.detect']();
+    return { ok: true, version: after.version };
+  },
+
   // ---- NAS mounts (systemd .mount/.automount units, never fstab) ----------
   async 'nas.unmount'({ mountpoint }) {
     assert(mountpoint === path.posix.normalize(mountpoint) && mountpoint.startsWith(MOUNT_BASE + '/'),

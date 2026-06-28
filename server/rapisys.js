@@ -49,6 +49,7 @@ import { tlsRouter } from './routes/tls.js';
 import { layoutsRouter } from './routes/layouts.js';
 import { updatesRouter } from './routes/updates.js';
 import { remoteRouter } from './routes/remote.js';
+import { tailscaleRouter } from './routes/tailscale.js';
 import { authRouter } from './routes/auth.js';
 import { createPironmanClient } from './collectors/pironman.js';
 import { pironmanRouter } from './routes/pironman.js';
@@ -437,6 +438,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
+  app.use('/api/tailscale', rc, tailscaleRouter({ requireControl: auth.requireControl }));
   // TLS / HTTPS: self-signed or Tailscale certs, provisioned via the host agent.
   const tls = createTlsService({ loadSettings, saveSettings, withFileLock });
   // /api/tls/status must be readable WITHOUT auth: the login modal checks it

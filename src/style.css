@@ -6215,6 +6215,13 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .set-btn-cancel:hover, button.set-btn-cancel:hover {
   background: rgba(245,158,11,0.18); border-color: #f59e0b; color: #f59e0b;
 }
+/* Re-detect / re-scan: purple (second brand accent), distinct from cyan edit. */
+.set-btn-detect, button.set-btn-detect {
+  color: var(--accent-purple); border-color: rgba(168,85,247,0.45); background: rgba(168,85,247,0.1);
+}
+.set-btn-detect:hover, button.set-btn-detect:hover {
+  background: rgba(168,85,247,0.18); border-color: var(--accent-purple); color: var(--accent-purple);
+}
 
 /* Global nav-rail "checking now" indicator */
 .nav-checking { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 8px;
