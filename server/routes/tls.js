@@ -44,7 +44,11 @@ export function tlsRouter({ tls, requireControl, getApp, loadSettings }) {
     const mode = req.body?.mode === 'tailscale' ? 'tailscale' : 'selfsigned';
     try {
       const prov = await tls.provision(mode, { dnsName: req.body?.dnsName || null });
-      await tls.setConfig({ enabled: true, mode });
+      // Harden by default: turn on the HTTP→HTTPS redirect when HTTPS comes up so
+      // the admin UI is never served over plain HTTP. start() publishes the
+      // redirect once the listener binds. Caller may opt out with redirect:false.
+      const redirect = req.body?.redirect !== false;
+      await tls.setConfig({ enabled: true, mode, redirect });
       const started = await tls.start(getApp());
       if (!started.listening) {
         // Cert provisioned but the listener didn't come up — surface the reason

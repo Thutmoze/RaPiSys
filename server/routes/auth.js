@@ -24,6 +24,18 @@ export function authRouter({ auth, loadSettings }) {
     return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost';
   }
 
+  // Build the session cookie. Mark it Secure on a real HTTPS request so the
+  // browser never sends it back over plain HTTP — closing the gap where a
+  // session minted over HTTPS would still authenticate requests to the
+  // insecure :3001 listener. Loopback/dev over HTTP gets a non-Secure cookie
+  // (a Secure cookie set over HTTP is silently dropped), keeping localhost work.
+  function sessionCookie(req, token, { clear = false } = {}) {
+    let c = `${auth.COOKIE_NAME}=${clear ? '' : token}; HttpOnly; Path=/; `
+      + `Max-Age=${clear ? 0 : 30 * 86400}; SameSite=Lax`;
+    if (req.secure || req.protocol === 'https') c += '; Secure';
+    return c;
+  }
+
   // -- wizard: create the admin account, return QR for the authenticator app --
   r.post('/register', async (req, res) => {
     if (!await setupOpen()) return res.status(403).json({ error: 'setup already completed' });
@@ -37,8 +49,7 @@ export function authRouter({ auth, loadSettings }) {
       if (!r.mfa) {
         // MFA declined: account active now — sign the wizard browser in.
         const token = auth.createSessionDirect(req.ip, req.headers['user-agent']);
-        res.setHeader('Set-Cookie',
-          `${auth.COOKIE_NAME}=${token}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax`);
+        res.setHeader('Set-Cookie', sessionCookie(req, token));
         return res.json({ ok: true, mfa: false });
       }
       const qrDataUrl = await QRCode.toDataURL(r.otpauth, { margin: 1, width: 220 });
@@ -58,8 +69,7 @@ export function authRouter({ auth, loadSettings }) {
       // The wizard browser is the admin's: log it in immediately so the
       // rest of setup (and the dashboard afterwards) needs no extra login.
       const token = auth.createSessionDirect(req.ip, req.headers['user-agent']);
-      res.setHeader('Set-Cookie',
-        `${auth.COOKIE_NAME}=${token}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax`);
+      res.setHeader('Set-Cookie', sessionCookie(req, token));
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -77,8 +87,7 @@ export function authRouter({ auth, loadSettings }) {
     try {
       const { username, password, code } = req.body || {};
       const token = auth.login(username, password, code, req.ip, req.headers['user-agent']);
-      res.setHeader('Set-Cookie',
-        `${auth.COOKIE_NAME}=${token}; HttpOnly; Path=/; Max-Age=${30 * 86400}; SameSite=Lax`);
+      res.setHeader('Set-Cookie', sessionCookie(req, token));
       res.json({ ok: true });
     } catch (err) {
       res.status(401).json({ error: err.message });
@@ -87,7 +96,7 @@ export function authRouter({ auth, loadSettings }) {
 
   r.post('/logout', (req, res) => {
     auth.destroySession(auth.cookieToken(req));
-    res.setHeader('Set-Cookie', `${auth.COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+    res.setHeader('Set-Cookie', sessionCookie(req, '', { clear: true }));
     res.json({ ok: true });
   });
 
