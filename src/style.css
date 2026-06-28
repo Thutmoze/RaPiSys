@@ -6222,6 +6222,12 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .set-btn-detect:hover, button.set-btn-detect:hover {
   background: rgba(168,85,247,0.18); border-color: var(--accent-purple); color: var(--accent-purple);
 }
+/* Tailscale pop-ups (install / connect / uninstall / update) — compact glass
+   card over the wizard backdrop; header + scrollable body own their padding. */
+.ts-modal { width: min(560px, 92vw); max-height: 86vh; display: flex; flex-direction: column;
+  padding: 0; overflow: hidden; }
+.ts-modal-body { padding: 18px 20px; overflow-y: auto; }
+.ts-modal-body .set-actions { margin-top: 14px; }
 
 /* Global nav-rail "checking now" indicator */
 .nav-checking { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 8px;

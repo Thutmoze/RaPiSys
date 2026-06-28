@@ -1441,7 +1441,7 @@ pageRenderers.settings = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
-  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false, editTls = false, editTsConn = false;
+  let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false, editTls = false;
   // shared glyphs hoisted to module scope (EDIT_ICON, TRASH_ICON, …)
 
   async function load(host) {
@@ -1894,10 +1894,10 @@ pageRenderers.settings = (() => {
   }
 
   // ---- Tailscale settings pane (Remote Access tab) ----
-  // One-click lifecycle mirroring Pi-hole / Pironman: install the host binary,
-  // join the tailnet (auth key or browser login), then reconfigure / disconnect
-  // / log out / update / uninstall. Connecting unlocks the trusted *.ts.net TLS
-  // mode in the HTTPS/TLS card below.
+  // The card stays compact: status + actions. Install, Connect/Edit, Uninstall
+  // and Update each open a pop-up (modal) hosting the form/confirmation and the
+  // streamed progress + log. Disconnect / Log out are quick inline actions.
+  // Connecting unlocks the trusted *.ts.net TLS mode in the HTTPS/TLS card.
   async function loadTailscale(host) {
     const el = $('[data-set=tailscale]', host);
     if (!el) return;
@@ -1915,26 +1915,22 @@ pageRenderers.settings = (() => {
       </div>
       <pre class="set-pi-log up-install-log" data-ts="log" hidden></pre>`;
 
-    // Shared streamed-op runner: drives the progress row + log and the
-    // EventSource lifecycle for install / up / uninstall / update.
-    function runStream(url, { phases = [], creep = true, onEvent, onDone, onFail, doneLabel = 'Done' }) {
-      const progBox = $('[data-ts=progress]', el), stepEl = $('[data-ts=step]', el),
-        pctEl = $('[data-ts=pct]', el), barEl = $('[data-ts=bar]', el),
-        logEl = $('[data-ts=log]', el), logToggle = $('[data-ts=logtoggle]', el);
+    // Streamed-op runner scoped to a root (a modal body): drives the progress
+    // row + log and the EventSource lifecycle.
+    function runStream(root, url, { phases = [], creep = true, onEvent, onDone, onFail, doneLabel = 'Done' }) {
+      const q = (s) => root.querySelector(s);
+      const progBox = q('[data-ts=progress]'), stepEl = q('[data-ts=step]'),
+        pctEl = q('[data-ts=pct]'), barEl = q('[data-ts=bar]'),
+        logEl = q('[data-ts=log]'), logToggle = q('[data-ts=logtoggle]');
       if (progBox) progBox.style.display = '';
-      if (logToggle) {
-        logToggle.style.display = '';
-        logToggle.onclick = () => {
-          const show = logEl.hasAttribute('hidden');
-          if (show) { logEl.removeAttribute('hidden'); logToggle.textContent = '▾ Hide details'; }
-          else { logEl.setAttribute('hidden', ''); logToggle.textContent = '▸ Show details'; }
-        };
-      }
+      if (logToggle) { logToggle.style.display = ''; logToggle.onclick = () => {
+        const show = logEl.hasAttribute('hidden');
+        if (show) { logEl.removeAttribute('hidden'); logToggle.textContent = '▾ Hide details'; }
+        else { logEl.setAttribute('hidden', ''); logToggle.textContent = '▸ Show details'; }
+      }; }
       let pct = 0;
-      const setProg = (p, label) => {
-        if (p > pct) pct = p; if (barEl) barEl.style.width = pct + '%';
-        if (pctEl) pctEl.textContent = pct + '%'; if (label && stepEl) stepEl.textContent = label;
-      };
+      const setProg = (p, label) => { if (p > pct) pct = p; if (barEl) barEl.style.width = pct + '%';
+        if (pctEl) pctEl.textContent = pct + '%'; if (label && stepEl) stepEl.textContent = label; };
       let finished = false;
       const es = new EventSource(url);
       es.addEventListener('line', (ev) => {
@@ -1945,25 +1941,38 @@ pageRenderers.settings = (() => {
         if (!matched && creep && pct < 90) setProg(pct + 2);
       });
       if (onEvent) onEvent(es, setProg);
-      es.addEventListener('done', (ev) => {
-        finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
-        setProg(100, doneLabel); onDone && onDone(r);
-      });
-      es.addEventListener('failed', (ev) => {
-        finished = true; es.close(); let m = 'Failed'; try { m = JSON.parse(ev.data).error || m; } catch {}
+      es.addEventListener('done', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
+        setProg(100, doneLabel); onDone && onDone(r); });
+      es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Failed'; try { m = JSON.parse(ev.data).error || m; } catch {}
         if (progBox) progBox.style.display = 'none';
         if (logEl) logEl.removeAttribute('hidden'); if (logToggle) logToggle.textContent = '▾ Hide details';
-        appendCappedLog(logEl, '✗ ' + m); onFail && onFail(m);
-      });
-      es.onerror = () => {
-        if (finished) return; finished = true; es.close();
+        appendCappedLog(logEl, '✗ ' + m); onFail && onFail(m); });
+      es.onerror = () => { if (finished) return; finished = true; es.close();
         if (progBox) progBox.style.display = 'none'; if (logEl) logEl.removeAttribute('hidden');
-        appendCappedLog(logEl, '✗ Connection lost'); onFail && onFail('Connection lost');
-      };
+        appendCappedLog(logEl, '✗ Connection lost'); onFail && onFail('Connection lost'); };
       return es;
     }
 
-    // ---- host agent unavailable ----
+    // Generic Tailscale pop-up (glass card over a backdrop), matching the
+    // changelog/confirm modals.
+    function openTsModal(title, innerHtml) {
+      const ov = el('div', 'wizard-overlay ts-modal-overlay');
+      ov.innerHTML = `<div class="wizard card ts-modal">
+          <div class="up-cl-head"><div><b>${title}</b></div><button class="up-link" data-ts-modal="close">close ✕</button></div>
+          <div class="ts-modal-body">${innerHtml}</div>
+        </div>`;
+      document.body.appendChild(ov);
+      const body = ov.querySelector('.ts-modal-body');
+      const close = () => ov.remove();
+      ov.querySelector('[data-ts-modal=close]').onclick = close;
+      ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+      ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+      enhanceSelects(ov);
+      setTimeout(() => ov.querySelector('[data-ts-modal=close]').focus(), 40);
+      return { ov, body, close };
+    }
+
+    // ---- agent unavailable ----
     if (det.agent === false) {
       el.innerHTML = `
         <div class="set-summary"><div class="set-kv"><span>Status</span><b class="set-err">○ Host agent unavailable</b></div></div>
@@ -1971,22 +1980,15 @@ pageRenderers.settings = (() => {
       return;
     }
 
-    // ---- not installed: install block ----
-    if (!det.installed) {
-      el.innerHTML = `
-        <p class="hw-hint">Tailscale puts this Pi on your private mesh network (your <b>tailnet</b>) so you can reach it securely from anywhere — and it unlocks a trusted <b>*.ts.net</b> HTTPS certificate in the card below. It installs on the host via the RaPiSys agent using Tailscale\u2019s official installer.</p>
-        <div class="set-actions">
-          <button class="set-btn set-btn-primary" data-ts="install">${INSTALL_ICON}<span>Install Tailscale</span></button>
-          <button class="set-btn set-btn-detect" data-ts="redetect">${DETECT_ICON}<span>Re-detect</span></button>
-          <span data-ts="msg"></span>
-        </div>
-        ${progressMarkup}`;
-      $('[data-ts=redetect]', el)?.addEventListener('click', () => loadTailscale(host));
-      $('[data-ts=install]', el)?.addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        if (!await rapisysConfirm('Install Tailscale on this Pi? This runs the official installer as root (adds the Tailscale apt repo and installs the package). It won\u2019t join a tailnet until you choose to connect.', { confirmLabel: 'Install Tailscale' })) return;
-        btn.disabled = true; btn.querySelector('span').textContent = 'Installing\u2026';
-        runStream('/api/tailscale/install/stream', {
+    // ---- INSTALL modal ----
+    function openInstallModal() {
+      const m = openTsModal('Install Tailscale', `
+        <p class="hw-hint">This runs Tailscale\u2019s official installer on the host through the RaPiSys agent (adds the Tailscale apt repo and installs the package). It won\u2019t join a tailnet until you connect.</p>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-ts="install-go">${INSTALL_ICON}<span>Install Tailscale</span></button></div>
+        ${progressMarkup}`);
+      m.body.querySelector('[data-ts=install-go]').onclick = (e) => {
+        const btn = e.currentTarget; btn.disabled = true; btn.querySelector('span').textContent = 'Installing\u2026';
+        runStream(m.body, '/api/tailscale/install/stream', {
           phases: [
             [/download/i, 12, 'Downloading installer\u2026'],
             [/repo|sources\.list|apt/i, 30, 'Adding apt repo\u2026'],
@@ -1996,26 +1998,104 @@ pageRenderers.settings = (() => {
             [/Detecting status|installed/i, 98, 'Finalising\u2026'],
           ],
           doneLabel: 'Installed',
-          onDone: () => { toast('success', 'Tailscale', 'Installed'); setTimeout(() => loadTailscale(host), 1200); },
-          onFail: (m) => { toast('error', 'Tailscale', m); btn.disabled = false; btn.querySelector('span').textContent = 'Install Tailscale'; },
+          onDone: () => { toast('success', 'Tailscale', 'Installed'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+          onFail: (msg) => { toast('error', 'Tailscale', msg); btn.disabled = false; btn.querySelector('span').textContent = 'Install Tailscale'; },
         });
-      });
+      };
+    }
+
+    // ---- not installed: compact card ----
+    if (!det.installed) {
+      el.innerHTML = `
+        <p class="hw-hint">Tailscale puts this Pi on your private mesh network (your <b>tailnet</b>) so you can reach it securely from anywhere \u2014 and it unlocks a trusted <b>*.ts.net</b> HTTPS certificate in the card below.</p>
+        <div class="set-actions">
+          <button class="set-btn set-btn-primary" data-ts="install">${INSTALL_ICON}<span>Install Tailscale</span></button>
+          <button class="set-btn set-btn-detect" data-ts="redetect">${DETECT_ICON}<span>Re-detect</span></button>
+        </div>`;
+      $('[data-ts=install]', el).onclick = openInstallModal;
+      $('[data-ts=redetect]', el).onclick = () => loadTailscale(host);
       return;
     }
 
     // ---- installed ----
     const connected = det.backendState === 'Running';
     const loggedIn = !!det.loggedIn;
-    // "MagicDNS (this Pi)" reflects this node's own accept-dns preference
-    // (CorpDNS) — the same value the Edit toggle binds to — not the tailnet-wide
-    // MagicDNSEnabled flag, so the summary and the toggle never disagree.
-    const magicOn = det.acceptDns !== false;
-    const showForm = editTsConn || !loggedIn;
+    const magicOn = det.acceptDns === true;          // node accept-dns; OFF by default
     const routesStr = (det.advertiseRoutes || []).join(', ');
+
+    // CONNECT / EDIT modal (form).
+    function openConnectModal() {
+      const m = openTsModal(loggedIn ? 'Edit Tailscale connection' : 'Connect to your tailnet', `
+        <p class="net-dns-note">Paste a one-off <b>auth key</b> from the Tailscale admin console for a headless connect, or leave it blank to get a browser login link.</p>
+        <div class="set-kv"><span>Auth key <span class="net-dns-note" style="display:inline">(optional)</span></span><input type="password" data-ts="authkey" placeholder="tskey-auth-\u2026" autocomplete="off"></div>
+        <div class="set-kv"><span>Custom hostname <span class="net-dns-note" style="display:inline">(optional)</span></span><input type="text" data-ts="hostname" placeholder="rapisys" value="${esc(det.hostname || '')}"></div>
+        <div class="set-kv set-kv-toggle"><span>Tailscale SSH <span class="net-dns-note" style="display:inline">\u2014 SSH in from your tailnet (governed by your ACLs)</span></span><label class="set-switch"><input type="checkbox" data-ts="ssh" ${det.ssh ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+        <div class="set-kv set-kv-toggle"><span>Accept subnet routes <span class="net-dns-note" style="display:inline">\u2014 use LAN routes other nodes advertise</span></span><label class="set-switch"><input type="checkbox" data-ts="acceptroutes" ${det.acceptRoutes ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+        <div class="set-kv set-kv-toggle"><span>MagicDNS for this Pi <span class="net-dns-note" style="display:inline">\u2014 let Tailscale manage this Pi\u2019s DNS (off keeps Pi-hole for this Pi)</span></span><label class="set-switch"><input type="checkbox" data-ts="acceptdns" ${magicOn ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+        <div class="set-kv"><span>Advertise routes <span class="net-dns-note" style="display:inline">(optional CIDR)</span></span><input type="text" data-ts="advroutes" placeholder="192.168.10.0/24" value="${esc(routesStr)}"></div>
+        <p class="net-dns-note">Advertising routes makes this Pi a subnet router. RaPiSys enables IP forwarding for you, but you must still approve the route in the Tailscale admin console.</p>
+        <div class="set-actions"><button class="set-btn set-btn-primary" data-ts="connect">${CONNECT_ICON}<span>${loggedIn ? 'Apply' : 'Connect'}</span></button></div>
+        <div data-ts="loginurl" style="display:none;margin-top:10px"></div>
+        ${progressMarkup}`);
+      enhanceSelects(m.body);
+      m.body.querySelector('[data-ts=connect]').onclick = (e) => {
+        const q = (s) => m.body.querySelector(s);
+        const v = (sel) => (q(`[data-ts=${sel}]`) || {}).value || '';
+        const ck = (sel) => !!(q(`[data-ts=${sel}]`) || {}).checked;
+        const authKey = v('authkey').trim(), hostname = v('hostname').trim(), advRoutes = v('advroutes').trim();
+        if (authKey && !/^tskey-/.test(authKey)) { toast('error', 'Tailscale', 'Auth keys start with tskey-'); return; }
+        if (advRoutes && !advRoutes.split(',').every((c) => /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(c.trim()))) {
+          toast('error', 'Tailscale', 'Routes must be CIDRs like 192.168.10.0/24'); return; }
+        const params = new URLSearchParams();
+        if (authKey) params.set('authKey', authKey);
+        if (hostname) params.set('hostname', hostname);
+        params.set('ssh', ck('ssh') ? '1' : '0');
+        params.set('acceptRoutes', ck('acceptroutes') ? '1' : '0');
+        params.set('acceptDns', ck('acceptdns') ? '1' : '0');
+        if (advRoutes) params.set('advertiseRoutes', advRoutes);
+        const btn = e.currentTarget; btn.disabled = true; btn.querySelector('span').textContent = authKey ? 'Connecting\u2026' : 'Starting\u2026';
+        const loginBox = q('[data-ts=loginurl]'); if (loginBox) loginBox.style.display = 'none';
+        runStream(m.body, '/api/tailscale/up/stream?' + params.toString(), {
+          doneLabel: 'Connected',
+          onEvent: (es) => { es.addEventListener('loginurl', (ev) => {
+            let url = ''; try { url = JSON.parse(ev.data).url; } catch { return; }
+            if (loginBox) { loginBox.style.display = ''; loginBox.innerHTML = `<p class="net-dns-note">Open this link to authorize this Pi \u2014 it finishes automatically once you approve:</p><a class="set-btn set-btn-primary" href="${esc(url)}" target="_blank" rel="noopener">Open Tailscale login \u2197</a>`; }
+            const stepEl = q('[data-ts=step]'); if (stepEl) stepEl.textContent = 'Waiting for browser authorization\u2026';
+          }); },
+          onDone: () => { toast('success', 'Tailscale', 'Connected'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+          onFail: (msg) => { toast('error', 'Tailscale', msg); btn.disabled = false; btn.querySelector('span').textContent = loggedIn ? 'Apply' : 'Connect'; },
+        });
+      };
+    }
+
+    // UNINSTALL modal.
+    function openUninstallModal() {
+      const m = openTsModal('Uninstall Tailscale', `
+        <p class="net-dns-note">This disconnects, logs out, and removes the Tailscale package from the host. The trusted <b>*.ts.net</b> HTTPS option will no longer be available.</p>
+        <div class="set-actions"><button class="set-btn set-btn-danger" data-ts="uninstall-go">${TRASH_ICON}<span>Uninstall Tailscale</span></button></div>
+        ${progressMarkup}`);
+      m.body.querySelector('[data-ts=uninstall-go]').onclick = (e) => {
+        const btn = e.currentTarget; btn.disabled = true; btn.querySelector('span').textContent = 'Uninstalling\u2026';
+        runStream(m.body, '/api/tailscale/uninstall/stream', {
+          doneLabel: 'Uninstalled',
+          onDone: () => { toast('success', 'Tailscale', 'Uninstalled'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+          onFail: (msg) => { toast('error', 'Tailscale', msg); btn.disabled = false; btn.querySelector('span').textContent = 'Uninstall Tailscale'; },
+        });
+      };
+    }
+
+    // UPDATE modal (streams immediately).
+    function openUpdateModal() {
+      const m = openTsModal('Update Tailscale', progressMarkup);
+      runStream(m.body, '/api/tailscale/update/stream', {
+        doneLabel: 'Updated',
+        onDone: () => { toast('success', 'Tailscale', 'Updated'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+        onFail: (msg) => { toast('error', 'Tailscale', msg); },
+      });
+    }
 
     const stateBadge = connected ? statusPill('live', 'Connected')
       : (loggedIn ? statusPill('warn', 'Disconnected') : statusPill('off', 'Not connected'));
-
     const updRow = connected ? (upd && upd.updateAvailable
       ? `<div class="set-kv"><span>Updates</span><span><b class="set-warn">\u25cf Update available</b>${upd.latestVersion ? ` <span class="net-dns-note" style="display:inline">(\u2192 ${esc(upd.latestVersion)})</span>` : ''} <button class="net-toggle" data-ts="update">Update</button></span></div>`
       : `<div class="set-kv"><span>Updates</span><span><b class="set-ok">\u25cf Up to date</b> <button class="net-toggle" data-ts="checkupd">Check now</button></span></div>`) : '';
@@ -2033,55 +2113,19 @@ pageRenderers.settings = (() => {
         ${connected && det.dnsName ? `<p class="hw-hint" style="margin-top:8px">Trusted <b>*.ts.net</b> certificates are now available \u2014 pick <b>Tailscale (trusted)</b> in the HTTPS/TLS card below.</p>` : ''}
       </div>`;
 
-    // Full action row (connected or logged-in-but-disconnected).
     let actions = '<div class="set-actions">';
-    if (connected) actions += `<button class="set-btn set-btn-edit" data-ts="reconfig">${EDIT_ICON}<span>Edit</span></button><button class="set-btn set-btn-cancel" data-ts="down">${CANCEL_ICON}<span>Disconnect</span></button>`;
-    else if (loggedIn) actions += `<button class="set-btn set-btn-primary" data-ts="reconnect">${CONNECT_ICON}<span>Reconnect</span></button>`;
+    if (connected) actions += `<button class="set-btn set-btn-edit" data-ts="edit">${EDIT_ICON}<span>Edit</span></button><button class="set-btn set-btn-cancel" data-ts="down">${CANCEL_ICON}<span>Disconnect</span></button>`;
+    else if (loggedIn) actions += `<button class="set-btn set-btn-primary" data-ts="edit">${CONNECT_ICON}<span>Reconnect</span></button>`;
+    else actions += `<button class="set-btn set-btn-primary" data-ts="edit">${CONNECT_ICON}<span>Connect</span></button>`;
     if (loggedIn) actions += `<button class="set-btn set-btn-cancel" data-ts="logout">${LOGOUT_ICON}<span>Log out</span></button>`;
-    actions += `<button class="set-btn set-btn-danger" data-ts="uninstall">${TRASH_ICON}<span>Uninstall</span></button><span data-ts="msg"></span></div>`;
+    actions += `<button class="set-btn set-btn-danger" data-ts="uninstall">${TRASH_ICON}<span>Uninstall</span></button></div>`;
 
-    // Connect / reconfigure form.
-    const form = showForm ? `
-      <div class="set-pi-install">
-        <h4 class="sess-h">${loggedIn ? 'Edit connection' : 'Connect to your tailnet'}</h4>
-        <p class="net-dns-note">Paste a one-off <b>auth key</b> from the Tailscale admin console for a headless connect, or leave it blank to get a browser login link.</p>
-        <div class="set-kv"><span>Auth key <span class="net-dns-note" style="display:inline">(optional)</span></span><input type="password" data-ts="authkey" placeholder="tskey-auth-\u2026" autocomplete="off"></div>
-        <div class="set-kv"><span>Custom hostname <span class="net-dns-note" style="display:inline">(optional)</span></span><input type="text" data-ts="hostname" placeholder="rapisys" value="${esc(det.hostname || '')}"></div>
-        <div class="set-kv set-kv-toggle"><span>Tailscale SSH <span class="net-dns-note" style="display:inline">\u2014 SSH in from your tailnet (governed by your ACLs)</span></span><label class="set-switch"><input type="checkbox" data-ts="ssh" ${det.ssh ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
-        <div class="set-kv set-kv-toggle"><span>Accept subnet routes <span class="net-dns-note" style="display:inline">\u2014 use LAN routes other nodes advertise</span></span><label class="set-switch"><input type="checkbox" data-ts="acceptroutes" ${det.acceptRoutes ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
-        <div class="set-kv set-kv-toggle"><span>MagicDNS for this Pi <span class="net-dns-note" style="display:inline">\u2014 let Tailscale manage this Pi\u2019s DNS</span></span><label class="set-switch"><input type="checkbox" data-ts="acceptdns" ${det.acceptDns !== false ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
-        <div class="set-kv"><span>Advertise routes <span class="net-dns-note" style="display:inline">(optional CIDR)</span></span><input type="text" data-ts="advroutes" placeholder="192.168.10.0/24" value="${esc(routesStr)}"></div>
-        <p class="net-dns-note">Advertising routes makes this Pi a subnet router. RaPiSys enables IP forwarding for you, but you must still approve the route in the Tailscale admin console.</p>
-        <div class="set-actions">
-          <button class="set-btn set-btn-primary" data-ts="connect">${CONNECT_ICON}<span>${loggedIn ? 'Apply' : 'Connect'}</span></button>
-          ${loggedIn ? `<button class="set-btn set-btn-edit" data-ts="formcancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
-          <span data-ts="msg"></span>
-        </div>
-        <div data-ts="loginurl" style="display:none;margin-top:10px"></div>
-      </div>` : '';
+    el.innerHTML = summary + actions;
 
-    // When not logged in we still expose a bare Uninstall control beneath the form.
-    const minorActions = (showForm && !loggedIn)
-      ? `<div class="set-actions"><button class="set-btn set-btn-danger" data-ts="uninstall">${TRASH_ICON}<span>Uninstall</span></button><span data-ts="msg"></span></div>`
-      : '';
-
-    el.innerHTML = summary + (showForm ? '' : actions) + form + minorActions + progressMarkup;
-    enhanceSelects(el);
-
-    // ---- summary buttons ----
-    $('[data-ts=checkupd]', el)?.addEventListener('click', async () => {
-      try { await api('/tailscale/update-check'); } catch { /* */ } loadTailscale(host);
-    });
-    $('[data-ts=update]', el)?.addEventListener('click', async () => {
-      if (!await rapisysConfirm('Update Tailscale now? This upgrades the package on the host; the connection blips briefly during the restart.', { confirmLabel: 'Update Tailscale' })) return;
-      runStream('/api/tailscale/update/stream', {
-        doneLabel: 'Updated',
-        onDone: () => { toast('success', 'Tailscale', 'Updated'); setTimeout(() => loadTailscale(host), 1200); },
-        onFail: (m) => toast('error', 'Tailscale', m),
-      });
-    });
-
-    // ---- lifecycle actions ----
+    $('[data-ts=edit]', el)?.addEventListener('click', openConnectModal);
+    $('[data-ts=uninstall]', el)?.addEventListener('click', openUninstallModal);
+    $('[data-ts=update]', el)?.addEventListener('click', openUpdateModal);
+    $('[data-ts=checkupd]', el)?.addEventListener('click', async () => { try { await api('/tailscale/update-check'); } catch { /* */ } loadTailscale(host); });
     $('[data-ts=down]', el)?.addEventListener('click', async () => {
       if (!await rapisysConfirm('Disconnect this Pi from the tailnet? It stays logged in, so you can reconnect later without re-authenticating.', { confirmLabel: 'Disconnect' })) return;
       try { await api('/tailscale/down', { method: 'POST', body: {} }); toast('info', 'Tailscale', 'Disconnected'); loadTailscale(host); }
@@ -2091,56 +2135,6 @@ pageRenderers.settings = (() => {
       if (!await rapisysConfirm('Log this Pi out of the tailnet? Reconnecting afterwards requires authenticating again (auth key or browser login).', { danger: true, confirmLabel: 'Log out' })) return;
       try { await api('/tailscale/logout', { method: 'POST', body: {} }); toast('info', 'Tailscale', 'Logged out'); loadTailscale(host); }
       catch (e) { toast('error', 'Tailscale', e.message); }
-    });
-    $('[data-ts=reconfig]', el)?.addEventListener('click', () => { editTsConn = true; loadTailscale(host); });
-    $('[data-ts=reconnect]', el)?.addEventListener('click', () => { editTsConn = true; loadTailscale(host); });
-    $('[data-ts=formcancel]', el)?.addEventListener('click', () => { editTsConn = false; loadTailscale(host); });
-    el.querySelectorAll('[data-ts=uninstall]').forEach((b) => b.addEventListener('click', async () => {
-      if (!await rapisysConfirm('Uninstall Tailscale from this Pi? This disconnects, logs out, and removes the package from the host. The trusted *.ts.net HTTPS option will no longer be available.', { danger: true, confirmLabel: 'Uninstall Tailscale' })) return;
-      editTsConn = false;
-      runStream('/api/tailscale/uninstall/stream', {
-        doneLabel: 'Uninstalled',
-        onDone: () => { toast('success', 'Tailscale', 'Uninstalled'); setTimeout(() => loadTailscale(host), 1200); },
-        onFail: (m) => toast('error', 'Tailscale', m),
-      });
-    }));
-
-    // ---- connect / apply (up) ----
-    $('[data-ts=connect]', el)?.addEventListener('click', async (e) => {
-      const v = (sel) => ($(`[data-ts=${sel}]`, el) || {}).value || '';
-      const ck = (sel) => !!($(`[data-ts=${sel}]`, el) || {}).checked;
-      const authKey = v('authkey').trim();
-      const hostname = v('hostname').trim();
-      const advRoutes = v('advroutes').trim();
-      if (authKey && !/^tskey-/.test(authKey)) { toast('error', 'Tailscale', 'Auth keys start with tskey-'); return; }
-      if (advRoutes && !advRoutes.split(',').every((c) => /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(c.trim()))) {
-        toast('error', 'Tailscale', 'Routes must be CIDRs like 192.168.10.0/24'); return;
-      }
-      const params = new URLSearchParams();
-      if (authKey) params.set('authKey', authKey);
-      if (hostname) params.set('hostname', hostname);
-      params.set('ssh', ck('ssh') ? '1' : '0');
-      params.set('acceptRoutes', ck('acceptroutes') ? '1' : '0');
-      params.set('acceptDns', ck('acceptdns') ? '1' : '0');
-      if (advRoutes) params.set('advertiseRoutes', advRoutes);
-      const btn = e.currentTarget; btn.disabled = true;
-      btn.querySelector('span').textContent = authKey ? 'Connecting\u2026' : 'Starting\u2026';
-      const loginBox = $('[data-ts=loginurl]', el); if (loginBox) loginBox.style.display = 'none';
-      runStream('/api/tailscale/up/stream?' + params.toString(), {
-        doneLabel: 'Connected',
-        onEvent: (es) => {
-          es.addEventListener('loginurl', (ev) => {
-            let url = ''; try { url = JSON.parse(ev.data).url; } catch { return; }
-            if (loginBox) {
-              loginBox.style.display = '';
-              loginBox.innerHTML = `<p class="net-dns-note">Open this link to authorize this Pi \u2014 it finishes automatically once you approve:</p><a class="set-btn set-btn-primary" href="${esc(url)}" target="_blank" rel="noopener">Open Tailscale login \u2197</a>`;
-            }
-            const stepEl = $('[data-ts=step]', el); if (stepEl) stepEl.textContent = 'Waiting for browser authorization\u2026';
-          });
-        },
-        onDone: () => { editTsConn = false; toast('success', 'Tailscale', 'Connected'); setTimeout(() => loadTailscale(host), 1200); },
-        onFail: (m) => { toast('error', 'Tailscale', m); btn.disabled = false; btn.querySelector('span').textContent = loggedIn ? 'Apply' : 'Connect'; },
-      });
     });
   }
 
