@@ -6228,6 +6228,9 @@ body.layout-editing .gs-size-ctrl { display: flex; }
   padding: 0; overflow: hidden; }
 .ts-modal-body { padding: 18px 20px; overflow-y: auto; }
 .ts-modal-body .set-actions { margin-top: 14px; }
+/* Success check that replaces the spinner in a finished Tailscale stream. */
+.ts-ok-check { color: #10b981; display: inline-flex; align-items: center; }
+.ts-ok-check svg { width: 16px; height: 16px; }
 
 /* Global nav-rail "checking now" indicator */
 .nav-checking { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 8px;

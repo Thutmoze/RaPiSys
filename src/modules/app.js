@@ -1942,7 +1942,12 @@ pageRenderers.settings = (() => {
       });
       if (onEvent) onEvent(es, setProg);
       es.addEventListener('done', (ev) => { finished = true; es.close(); let r = {}; try { r = JSON.parse(ev.data); } catch {}
-        setProg(100, doneLabel); onDone && onDone(r); });
+        setProg(100, doneLabel);
+        const spin = progBox && progBox.querySelector('.up-spinner');
+        if (spin) { const c = document.createElement('span'); c.className = 'ts-ok-check'; c.innerHTML = CHECK_ICON; spin.replaceWith(c); }
+        if (stepEl) stepEl.classList.add('set-ok');
+        if (logEl) { const ok = document.createElement('span'); ok.className = 'set-ok'; ok.textContent = '✓ ' + doneLabel + ' successfully.\n'; logEl.appendChild(ok); logEl.scrollTop = logEl.scrollHeight; }
+        onDone && onDone(r); });
       es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Failed'; try { m = JSON.parse(ev.data).error || m; } catch {}
         if (progBox) progBox.style.display = 'none';
         if (logEl) logEl.removeAttribute('hidden'); if (logToggle) logToggle.textContent = '▾ Hide details';
@@ -1964,7 +1969,7 @@ pageRenderers.settings = (() => {
         </div>`;
       document.body.appendChild(ov);
       const body = ov.querySelector('.ts-modal-body');
-      const close = () => ov.remove();
+      const close = () => { const reload = ov.getAttribute('data-ts-done') === '1'; ov.remove(); if (reload) loadTailscale(host); };
       ov.querySelector('[data-ts-modal=close]').onclick = close;
       ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
       ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
@@ -1999,7 +2004,7 @@ pageRenderers.settings = (() => {
             [/Detecting status|installed/i, 98, 'Finalising\u2026'],
           ],
           doneLabel: 'Installed',
-          onDone: () => { toast('success', 'Tailscale', 'Installed'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+          onDone: () => { toast('success', 'Tailscale', 'Installed'); m.ov.setAttribute('data-ts-done', '1'); btn.querySelector('span').textContent = 'Installed'; },
           onFail: (msg) => { toast('error', 'Tailscale', msg); btn.disabled = false; btn.querySelector('span').textContent = 'Install Tailscale'; },
         });
       };
@@ -2063,7 +2068,7 @@ pageRenderers.settings = (() => {
             if (loginBox) { loginBox.style.display = ''; loginBox.innerHTML = `<p class="net-dns-note">Open this link to authorize this Pi \u2014 it finishes automatically once you approve:</p><a class="set-btn set-btn-primary" href="${esc(url)}" target="_blank" rel="noopener">Open Tailscale login \u2197</a>`; }
             const stepEl = q('[data-ts=step]'); if (stepEl) stepEl.textContent = 'Waiting for browser authorization\u2026';
           }); },
-          onDone: () => { toast('success', 'Tailscale', 'Connected'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+          onDone: () => { toast('success', 'Tailscale', 'Connected'); m.ov.setAttribute('data-ts-done', '1'); btn.querySelector('span').textContent = 'Connected'; },
           onFail: (msg) => { toast('error', 'Tailscale', msg); btn.disabled = false; btn.querySelector('span').textContent = loggedIn ? 'Apply' : 'Connect'; },
         });
       };
@@ -2079,7 +2084,7 @@ pageRenderers.settings = (() => {
         const btn = e.currentTarget; btn.disabled = true; btn.querySelector('span').textContent = 'Uninstalling\u2026';
         runStream(m.body, '/api/tailscale/uninstall/stream', {
           doneLabel: 'Uninstalled',
-          onDone: () => { toast('success', 'Tailscale', 'Uninstalled'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+          onDone: () => { toast('success', 'Tailscale', 'Uninstalled'); m.ov.setAttribute('data-ts-done', '1'); btn.querySelector('span').textContent = 'Uninstalled'; },
           onFail: (msg) => { toast('error', 'Tailscale', msg); btn.disabled = false; btn.querySelector('span').textContent = 'Uninstall Tailscale'; },
         });
       };
@@ -2090,7 +2095,7 @@ pageRenderers.settings = (() => {
       const m = openTsModal('Update Tailscale', progressMarkup);
       runStream(m.body, '/api/tailscale/update/stream', {
         doneLabel: 'Updated',
-        onDone: () => { toast('success', 'Tailscale', 'Updated'); setTimeout(() => { m.close(); loadTailscale(host); }, 1000); },
+        onDone: () => { toast('success', 'Tailscale', 'Updated'); m.ov.setAttribute('data-ts-done', '1'); },
         onFail: (msg) => { toast('error', 'Tailscale', msg); },
       });
     }
