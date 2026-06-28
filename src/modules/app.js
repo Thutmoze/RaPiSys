@@ -1956,7 +1956,8 @@ pageRenderers.settings = (() => {
     // Generic Tailscale pop-up (glass card over a backdrop), matching the
     // changelog/confirm modals.
     function openTsModal(title, innerHtml) {
-      const ov = el('div', 'wizard-overlay ts-modal-overlay');
+      const ov = document.createElement('div');
+      ov.className = 'wizard-overlay ts-modal-overlay';
       ov.innerHTML = `<div class="wizard card ts-modal">
           <div class="up-cl-head"><div><b>${title}</b></div><button class="up-link" data-ts-modal="close">close ✕</button></div>
           <div class="ts-modal-body">${innerHtml}</div>
