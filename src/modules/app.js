@@ -2006,6 +2006,10 @@ pageRenderers.settings = (() => {
     // ---- installed ----
     const connected = det.backendState === 'Running';
     const loggedIn = !!det.loggedIn;
+    // "MagicDNS (this Pi)" reflects this node's own accept-dns preference
+    // (CorpDNS) — the same value the Edit toggle binds to — not the tailnet-wide
+    // MagicDNSEnabled flag, so the summary and the toggle never disagree.
+    const magicOn = det.acceptDns !== false;
     const showForm = editTsConn || !loggedIn;
     const routesStr = (det.advertiseRoutes || []).join(', ');
 
@@ -2022,10 +2026,10 @@ pageRenderers.settings = (() => {
         ${det.dnsName ? `<div class="set-kv"><span>Machine name</span><b>${esc(det.dnsName)}</b></div>` : ''}
         ${det.tailnet ? `<div class="set-kv"><span>Tailnet</span><b>${esc(det.tailnet)}</b></div>` : ''}
         ${connected ? `<div class="set-kv"><span>Tailscale SSH</span><b class="${det.ssh ? 'set-ok' : ''}">${det.ssh ? '\u25cf On' : '\u25cb Off'}</b></div>` : ''}
-        ${connected ? `<div class="set-kv"><span>MagicDNS (this Pi)</span><b class="${det.magicDNS ? 'set-ok' : ''}">${det.magicDNS ? '\u25cf On' : '\u25cb Off'}</b></div>` : ''}
+        ${connected ? `<div class="set-kv"><span>MagicDNS (this Pi)</span><b class="${magicOn ? 'set-ok' : ''}">${magicOn ? '\u25cf On' : '\u25cb Off'}</b></div>` : ''}
         ${connected && routesStr ? `<div class="set-kv"><span>Advertised routes</span><b>${esc(routesStr)}</b></div>` : ''}
         ${updRow}
-        ${connected && det.magicDNS ? `<p class="net-dns-note">MagicDNS manages this Pi\u2019s own DNS, so the \u201cpoint this Pi at Pi-hole\u201d toggle is unavailable. Your other LAN clients still query Pi-hole directly \u2014 its analytics are unaffected.</p>` : ''}
+        ${connected && magicOn ? `<p class="net-dns-note">MagicDNS manages this Pi\u2019s own DNS, so the \u201cpoint this Pi at Pi-hole\u201d toggle is unavailable. Your other LAN clients still query Pi-hole directly \u2014 its analytics are unaffected.</p>` : ''}
         ${connected && det.dnsName ? `<p class="hw-hint" style="margin-top:8px">Trusted <b>*.ts.net</b> certificates are now available \u2014 pick <b>Tailscale (trusted)</b> in the HTTPS/TLS card below.</p>` : ''}
       </div>`;
 
