@@ -1983,8 +1983,9 @@ pageRenderers.settings = (() => {
         ${progressMarkup}`;
       $('[data-ts=redetect]', el)?.addEventListener('click', () => loadTailscale(host));
       $('[data-ts=install]', el)?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
         if (!await rapisysConfirm('Install Tailscale on this Pi? This runs the official installer as root (adds the Tailscale apt repo and installs the package). It won\u2019t join a tailnet until you choose to connect.', { confirmLabel: 'Install Tailscale' })) return;
-        const btn = e.currentTarget; btn.disabled = true; btn.querySelector('span').textContent = 'Installing\u2026';
+        btn.disabled = true; btn.querySelector('span').textContent = 'Installing\u2026';
         runStream('/api/tailscale/install/stream', {
           phases: [
             [/download/i, 12, 'Downloading installer\u2026'],
