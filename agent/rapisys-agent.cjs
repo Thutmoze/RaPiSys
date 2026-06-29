@@ -735,14 +735,14 @@ const OPS = {
     const cats = [];
 
     // run a `find ... -printf '%s\t%p\n'` and aggregate bytes/count/sample
-    const sampleFind = async (args, max = 5) => {
+    const sampleFind = async (args, desc = '', max = 60) => {
       const r = await run('find', args, 12000).catch(() => ({ stdout: '' }));
       let bytes = 0, count = 0; const sample = [];
       for (const line of (r.stdout || '').split('\n')) {
         const tab = line.indexOf('\t'); if (tab < 0) continue;
         const sz = Number(line.slice(0, tab)) || 0;
         bytes += sz; count++;
-        sample.push({ path: line.slice(tab + 1), bytes: sz });
+        sample.push({ path: line.slice(tab + 1), bytes: sz, desc });
       }
       sample.sort((a, b) => b.bytes - a.bytes);
       return { bytes, count, sample: sample.slice(0, max) };
@@ -751,7 +751,7 @@ const OPS = {
     // 1) APT package cache
     {
       const f = await sampleFind(['/var/cache/apt/archives', '-maxdepth', '1', '-type', 'f',
-        '-name', '*.deb', '-printf', '%s\t%p\n']);
+        '-name', '*.deb', '-printf', '%s\t%p\n'], 'Cached installer package — its software is already installed');
       cats.push({ id: 'apt-cache', name: 'APT package cache', path: '/var/cache/apt/archives',
         bytes: f.bytes, count: f.count, sample: f.sample, default: true, caution: false,
         cmd: 'apt-get clean', safe: 'Safe · apt-get clean',
@@ -768,15 +768,15 @@ const OPS = {
       cats.push({ id: 'journal', name: 'Systemd journal', path: `journalctl --vacuum-size=${target}M`,
         bytes: reclaim, count: 1, single: true, default: true, caution: false,
         cmd: `journalctl --vacuum-size=${target}M`, safe: 'Safe · vacuum-size', journalTargetMB: target,
-        sample: [{ path: `current ${(cur / 1048576).toFixed(0)} MB → keep ${target} MB`, bytes: reclaim }],
+        sample: [{ path: `current ${(cur / 1048576).toFixed(0)} MB → keep ${target} MB`, bytes: reclaim, desc: 'Archived journal entries beyond the size you keep' }],
         why: 'Historical journal entries beyond the size you keep. The current boot and recent logs stay intact.' });
     }
 
     // 3) rotated & compressed logs
     {
-      const gz = await sampleFind(['/var/log', '-type', 'f', '-name', '*.gz', '-printf', '%s\t%p\n']);
+      const gz = await sampleFind(['/var/log', '-type', 'f', '-name', '*.gz', '-printf', '%s\t%p\n'], 'Rotated log archive (gzip) — superseded by the current log');
       const rot = await sampleFind(['/var/log', '-type', 'f', '-regextype', 'posix-extended',
-        '-regex', '.*\\.[0-9]+', '-printf', '%s\t%p\n']);
+        '-regex', '.*\\.[0-9]+', '-printf', '%s\t%p\n'], 'Rotated log file — superseded by the current log');
       const sample = [...gz.sample, ...rot.sample].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
       cats.push({ id: 'logs-rotated', name: 'Rotated & compressed logs', path: '/var/log/*.gz, *.N',
         bytes: gz.bytes + rot.bytes, count: gz.count + rot.count, sample, default: true, caution: false,
@@ -786,7 +786,7 @@ const OPS = {
 
     // 4) stale temp files (not accessed in > 7 days)
     {
-      const f = await sampleFind(['/tmp', '/var/tmp', '-type', 'f', '-atime', '+7', '-printf', '%s\t%p\n']);
+      const f = await sampleFind(['/tmp', '/var/tmp', '-type', 'f', '-atime', '+7', '-printf', '%s\t%p\n'], 'Temp file no process has opened in over 7 days');
       cats.push({ id: 'tmp-stale', name: 'Stale temp files', path: '/tmp, /var/tmp (>7 days)',
         bytes: f.bytes, count: f.count, sample: f.sample, default: true, caution: false,
         cmd: 'find /tmp /var/tmp -type f -atime +7 -delete', safe: 'Safe',
@@ -802,7 +802,7 @@ const OPS = {
       for (const n of names) {
         const meta = await run('dpkg-query', ['-W', '-f=${Installed-Size}', n], 3000).catch(() => ({ stdout: '0' }));
         const s = Number(meta.stdout) || 0; kb += s;
-        sample.push({ path: n, bytes: s * 1024 });
+        sample.push({ path: n, bytes: s * 1024, desc: 'Orphaned dependency — nothing installed requires it' });
       }
       sample.sort((a, b) => b.bytes - a.bytes);
       cats.push({ id: 'apt-autoremove', name: 'Orphaned packages', path: 'apt-get autoremove',
@@ -829,7 +829,7 @@ const OPS = {
           if (/Images|Build Cache/i.test(type || '')) bytes += parseSz(recl);
         }
         cats.push({ id: 'docker-prune', name: 'Docker dangling & build cache', path: 'docker image/builder prune',
-          bytes, count: 0, sample: [{ path: 'untagged image layers + build cache', bytes }],
+          bytes, count: 0, sample: [{ path: 'untagged image layers + build cache', bytes, desc: 'Untagged image layers and stale build cache (volumes excluded)' }],
           default: true, caution: false, cmd: 'docker image prune -f && docker builder prune -f',
           safe: 'Safe · volumes excluded',
           why: 'Untagged image layers and stale build cache. Running containers and named volumes are explicitly excluded.' });
@@ -838,7 +838,7 @@ const OPS = {
 
     // 7) crash & core dumps (off by default)
     {
-      const f = await sampleFind(['/var/crash', '-type', 'f', '-printf', '%s\t%p\n']);
+      const f = await sampleFind(['/var/crash', '-type', 'f', '-printf', '%s\t%p\n'], 'Saved crash / core dump report');
       cats.push({ id: 'crash-dumps', name: 'Crash & core dumps', path: '/var/crash',
         bytes: f.bytes, count: f.count, sample: f.sample, default: false, caution: false,
         cmd: 'rm -f /var/crash/*', safe: 'Optional',
@@ -847,13 +847,25 @@ const OPS = {
 
     // 8) user trash & thumbnail cache (off by default)
     {
-      const trash = await sampleFind(['/home', '-maxdepth', '4', '-type', 'f', '-path', '*/.local/share/Trash/*', '-printf', '%s\t%p\n']);
-      const thumbs = await sampleFind(['/home', '-maxdepth', '5', '-type', 'f', '-path', '*/.cache/thumbnails/*', '-printf', '%s\t%p\n']);
+      const trash = await sampleFind(['/home', '-maxdepth', '4', '-type', 'f', '-path', '*/.local/share/Trash/*', '-printf', '%s\t%p\n'], 'File sitting in the desktop trash');
+      const thumbs = await sampleFind(['/home', '-maxdepth', '5', '-type', 'f', '-path', '*/.cache/thumbnails/*', '-printf', '%s\t%p\n'], 'Regenerable thumbnail cache');
       const sample = [...trash.sample, ...thumbs.sample].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
       cats.push({ id: 'user-cache', name: 'Trash & thumbnail cache', path: '~/.local/share/Trash, ~/.cache/thumbnails',
         bytes: trash.bytes + thumbs.bytes, count: trash.count + thumbs.count, sample, default: false, caution: false,
         cmd: 'rm -rf ~/.local/share/Trash/* ~/.cache/thumbnails/*', safe: 'Optional',
         why: 'User trash and regenerable thumbnail caches for each login.' });
+    }
+
+    // 9) old user files in Downloads / Desktop (off by default; user data — caution)
+    {
+      const f = await sampleFind(['/home', '-maxdepth', '4', '-type', 'f',
+        '(', '-path', '*/Downloads/*', '-o', '-path', '*/Desktop/*', ')',
+        '-mtime', '+90', '-printf', '%s\t%p\n'], 'Old file in Downloads/Desktop — not modified in 90+ days');
+      cats.push({ id: 'user-old-files', name: 'Old user files', path: '~/Downloads, ~/Desktop (>90 days)',
+        bytes: f.bytes, count: f.count, sample: f.sample, default: false, caution: true,
+        cmd: "find /home -maxdepth 4 -type f ( -path '*/Downloads/*' -o -path '*/Desktop/*' ) -mtime +90 -delete",
+        safe: 'Caution · review first',
+        why: 'Files in your Downloads and Desktop not modified in over 90 days. Off by default — review the full list in “More details” before removing, since these are your own files.' });
     }
 
     const totalDefaultBytes = cats.reduce((a, c) => a + (c.default ? c.bytes : 0), 0);
@@ -868,7 +880,7 @@ const OPS = {
     const target = Math.min(2000, Math.max(50, Number(journalTargetMB) || 200));
     if (purgeAll) assert(confirm === 'PURGE', 'purge-all requires typing PURGE to confirm');
     const ALLOWED = new Set(['apt-cache', 'journal', 'logs-rotated', 'tmp-stale',
-      'apt-autoremove', 'docker-prune', 'crash-dumps', 'user-cache']);
+      'apt-autoremove', 'docker-prune', 'crash-dumps', 'user-cache', 'user-old-files']);
     for (const id of categories) assert(ALLOWED.has(id), `unknown category: ${id}`);
     const log = (l) => { if (typeof send === 'function') send(l); };
 
@@ -914,6 +926,10 @@ const OPS = {
         log('› Clearing user trash & thumbnail caches…');
         await run('find', ['/home', '-maxdepth', '4', '-type', 'f', '-path', '*/.local/share/Trash/*', '-delete'], 20000).catch(() => {});
         await run('find', ['/home', '-maxdepth', '5', '-type', 'f', '-path', '*/.cache/thumbnails/*', '-delete'], 20000).catch(() => {});
+      },
+      'user-old-files': async () => {
+        log('› Removing old files in Downloads/Desktop (>90d)…');
+        await run('find', ['/home', '-maxdepth', '4', '-type', 'f', '(', '-path', '*/Downloads/*', '-o', '-path', '*/Desktop/*', ')', '-mtime', '+90', '-delete'], 30000).catch(() => {});
       },
     };
 
