@@ -4572,17 +4572,26 @@ pageRenderers.disk = (() => {
 
   // ---- detail modal: what exactly gets deleted ----
   function openDetail(c) {
-    const rows = (c.sample || []).map((f) => `<div class="dk-fr"><span class="dk-fp"><span class="dk-fpath">${esc(f.path)}</span>${f.desc ? `<small class="dk-fd">${esc(f.desc)}</small>` : ''}</span><span class="dk-fs">${fmtB(f.bytes)}</span></div>`).join('');
-    const more = (c.count && c.sample && c.count > c.sample.length) ? `<div class="dk-more">+ ${c.count - c.sample.length} more…</div>` : '';
+    const all = c.sample || [];
+    const rowH = (f) => `<div class="dk-fr"><span class="dk-fp"><span class="dk-fpath">${esc(f.path)}</span>${f.desc ? `<small class="dk-fd">${esc(f.desc)}</small>` : ''}</span><span class="dk-fs">${fmtB(f.bytes)}</span></div>`;
+    const head = all.slice(0, 5).map(rowH).join('');
+    const rest = all.slice(5).map(rowH).join('');
+    const moreBtn = all.length > 5 ? `<button class="dk-morebtn" data-dk="more"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg><span>Show ${all.length - 5} more…</span></button>` : '';
+    const notShown = (c.count && c.count > all.length) ? `<div class="dk-more">+ ${c.count - all.length} more not listed</div>` : '';
     const m = openModal(c.name, `
       <p class="dk-why">${esc(c.why || '')}</p>
       <div class="dk-cmd">$ ${esc(c.cmd || '')}</div>
-      <div class="dk-flist">${rows || '<div class="dk-more">Nothing to remove right now.</div>'}${more}</div>
+      <div class="dk-flist">
+        <div class="dk-fscroll">${head || '<div class="dk-more">Nothing to remove right now.</div>'}<div class="dk-rest" hidden>${rest}</div></div>
+        ${moreBtn}${notShown}
+      </div>
       <div class="dk-mtot"><span>Total reclaimable</span><b>${fmtB(c.bytes)}</b></div>
       <div class="set-actions dk-mact">
         <button class="set-btn set-btn-clean" data-dk="cleanone">${BROOM}<span>Clean</span></button>
         <button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Close</span></button>
       </div>`);
+    const moreEl = m.body.querySelector('[data-dk=more]');
+    if (moreEl) moreEl.onclick = () => { m.body.querySelector('.dk-rest').hidden = false; moreEl.remove(); };
     m.body.querySelector('[data-dk=cancel]').onclick = m.close;
     m.body.querySelector('[data-dk=cleanone]').onclick = () => { m.close(); runClean([c.id], { purgeAll: false }); };
   }
@@ -4770,10 +4779,10 @@ pageRenderers.disk = (() => {
           <span class="dk-spacer"></span>
           <button class="set-btn dk-danger" data-disk="purge">${TRASH_ICON}<span>Purge All</span></button>
         </div>
-        <p class="dk-note"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Deletions run through the host agent against a fixed allow-list. The UI only sends category IDs — never raw paths.</p>
+        <div class="warn-note dk-note"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>Deletions run through the host agent against a fixed allow-list. The UI only sends category IDs — never raw paths.</span></div>
         <div class="card dk-card">
           <div class="card-header dk-cathead"><div class="dk-ct">${clockIconSvg()}<span class="card-title">Auto-clean schedule</span></div>
-            <button class="set-btn dk-edit" data-disk="sched-edit">${EDIT_ICON}<span>Edit</span></button></div>
+            <button class="set-btn set-btn-edit dk-edit" data-disk="sched-edit">${EDIT_ICON}<span>Edit</span></button></div>
           <div data-disk="sched"></div>
         </div>`;
       $('[data-disk=rescan]', host).onclick = rescanOnly;

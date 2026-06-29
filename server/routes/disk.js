@@ -10,7 +10,7 @@
 import express from 'express';
 
 const VALID_CATS = new Set(['apt-cache', 'journal', 'logs-rotated', 'tmp-stale',
-  'apt-autoremove', 'docker-prune', 'crash-dumps', 'user-cache']);
+  'apt-autoremove', 'docker-prune', 'crash-dumps', 'user-cache', 'user-old-files']);
 
 const DEFAULT_SCHEDULE = {
   enabled: false, frequency: 'weekly', time: '03:00', dayOfWeek: 0, dayOfMonth: 1,
