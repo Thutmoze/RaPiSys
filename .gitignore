@@ -13,3 +13,6 @@ dist/
 # Docker data directory (persisted config)
 data/*
 !data/.gitkeep
+
+# Patch files (applied from the repo root, never committed)
+*.patch
