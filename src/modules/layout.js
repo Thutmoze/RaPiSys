@@ -117,6 +117,11 @@ function makeItem(widget, placement, { editable }) {
   const scale = document.createElement('div');
   scale.className = 'gs-scale';
   if (node.parentNode) node.parentNode.removeChild(node);
+  // Section widgets (Services/Containers/…) are direct children of the dashboard
+  // and get an inline display:none when the grid hides leftover native children.
+  // Adding one from the palette mid-edit would otherwise render a blank cell
+  // until a save cleared it — strip the inherited hide so it shows immediately.
+  node.style.removeProperty('display');
   scale.appendChild(node);
   body.appendChild(scale);
   content.appendChild(body);
