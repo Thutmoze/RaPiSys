@@ -4779,7 +4779,7 @@ pageRenderers.disk = (() => {
           <span class="dk-spacer"></span>
           <button class="set-btn dk-danger" data-disk="purge">${TRASH_ICON}<span>Purge All</span></button>
         </div>
-        <div class="warn-note dk-note"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>Deletions run through the host agent against a fixed allow-list. The UI only sends category IDs — never raw paths.</span></div>
+        <div class="warn-note dk-note"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>Deletions run through the host agent against a fixed allow-list. The UI only sends category IDs, never raw paths.</span></div>
         <div class="card dk-card">
           <div class="card-header dk-cathead"><div class="dk-ct">${clockIconSvg()}<span class="card-title">Auto-clean schedule</span></div>
             <button class="set-btn set-btn-edit dk-edit" data-disk="sched-edit">${EDIT_ICON}<span>Edit</span></button></div>
