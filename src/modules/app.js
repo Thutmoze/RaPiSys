@@ -453,6 +453,7 @@ export const ICONS = {
   reports: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>',
   updates: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   inventory: '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/>',
+  disk: '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M21.9,6.8 21.6,6.8 21.2,7.1 18.2,12.3 18.0,12.2 17.1,12.3 16.4,12.7 15.5,13.6 15.1,14.2 13.8,15.5 13.1,15.9 11.9,16.4 10.9,16.5 10.7,16.7 10.8,17.3 11.4,18.1 12.1,18.1 12.8,17.9 12.9,18.0 12.2,18.7 12.6,19.2 14.1,20.1 14.9,19.5 15.6,18.5 15.7,18.7 15.2,20.8 17.4,21.6 17.4,20.5 17.6,20.4 18.2,21.9 19.3,21.9 19.5,21.5 18.8,19.7 18.8,18.2 19.9,15.0 19.9,13.9 19.4,12.8 22.4,7.6 22.4,7.2ZM7.9,6.7 7.1,7.0 6.6,7.5 6.2,8.3 6.2,9.0 6.6,9.8 7.1,10.3 7.9,10.7 8.7,10.7 9.6,10.2 10.0,9.7 10.2,9.1 10.2,8.2 9.8,7.3 9.3,6.9 8.7,6.7ZM2.0,2.2 1.6,2.8 1.6,18.4 1.7,18.7 2.4,19.2 11.5,19.2 10.2,17.7 9.9,17.0 9.9,16.4 10.3,15.9 11.8,15.7 12.9,15.3 13.7,14.7 14.9,13.5 14.9,2.7 14.7,2.5 14.3,2.1 2.2,2.1ZM3.0,16.8 3.6,16.8 4.1,17.3 4.0,18.0 3.5,18.3 3.0,18.3 2.6,17.9 2.6,17.2ZM8.0,12.1 8.3,12.4 5.6,15.6 4.9,16.1 4.1,15.3ZM7.4,3.5 9.6,3.6 10.2,3.9 11.3,4.5 12.7,6.0 13.3,7.7 13.3,9.6 13.0,10.7 12.5,11.6 11.2,12.9 10.2,13.5 9.0,13.8 8.3,13.8 8.2,13.7 9.0,12.6 9.0,12.1 8.3,11.3 7.6,11.3 5.6,13.0 5.0,12.7 4.2,11.8 3.4,10.5 3.1,9.4 3.2,7.4 3.4,6.8 4.2,5.5 5.5,4.3 6.3,3.9ZM13.1,2.9 13.6,3.0 14.0,3.5 13.9,4.1 13.3,4.5 12.8,4.4 12.5,4.1 12.4,3.8 12.5,3.3 12.8,3.0ZM3.2,2.9 3.6,3.0 4.1,3.4 4.1,4.0 3.4,4.5 2.9,4.4 2.6,4.0 2.7,3.2Z"/>',
   alerts: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   // --- additional library glyphs (System, Performance, Health, Overview) ---
@@ -506,6 +507,7 @@ const PAGES = [
   { id: 'reports', label: 'Reports' },
   { id: 'updates', label: 'Updates' },
   { id: 'inventory', label: 'Inventory' },
+  { id: 'disk', label: 'Disk' },
   { id: 'alerts', label: 'Alerts' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -4531,6 +4533,265 @@ pageRenderers.inventory = (() => {
 // ---------------------------------------------------------------------------
 // Updates page (F8) — apt + firmware updates with live progress & history
 // ---------------------------------------------------------------------------
+
+// ===========================================================================
+// Disk Management (F-disk) — detect & reclaim stale / temp / unneeded files.
+// Reads /api/disk/{usage,scan,schedule}; cleans via /api/disk/clean/stream (SSE).
+// The UI only ever sends category IDs — never paths. Purge-all requires a typed
+// PURGE confirmation; the agent re-checks it.
+// ===========================================================================
+pageRenderers.disk = (() => {
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const fmtB = (b) => { b = Number(b) || 0; if (b >= 1073741824) return `${(b / 1073741824).toFixed(2)} GB`; if (b >= 1048576) return `${(b / 1048576).toFixed(1)} MB`; if (b >= 1024) return `${(b / 1024).toFixed(0)} KB`; return `${b} B`; };
+  const BROOM = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.0,2.0 L18.7,2.0 L18.1,2.4 L14.1,9.2 L13.8,9.1 L12.7,9.2 L11.7,9.8 L10.6,10.9 L10.0,11.8 L8.3,13.5 L7.5,14.1 L5.9,14.6 L4.5,14.8 L4.2,15.0 L4.3,15.9 L5.2,16.9 L6.0,16.9 L7.0,16.6 L7.2,16.8 L6.2,17.7 L6.8,18.3 L8.7,19.6 L9.7,18.7 L10.7,17.5 L10.9,17.7 L10.2,20.4 L13.1,21.6 L13.1,20.0 L13.3,19.9 L14.1,21.9 L15.5,21.9 L15.8,21.4 L15.0,19.0 L15.0,17.0 L16.4,12.8 L16.4,11.4 L15.7,9.9 L19.7,3.1 L19.7,2.6 Z"/></svg>';
+
+  let catsData = [];
+  let selected = new Set();
+  let journalTargetMB = 200;
+  let schedule = null;
+
+  // ---- modal shell (mirrors the app's wizard/ts-modal dialog) ----
+  function openModal(title, innerHtml, onClose) {
+    const ov = el('div', 'wizard-overlay dk-modal-overlay');
+    ov.innerHTML = `<div class="wizard card dk-modal">
+        <div class="up-cl-head"><div><b>${esc(title)}</b></div><button class="up-link" data-dk="close">close ✕</button></div>
+        <div class="dk-modal-body">${innerHtml}</div>
+      </div>`;
+    document.body.appendChild(ov);
+    const body = ov.querySelector('.dk-modal-body');
+    const close = () => { ov.remove(); onClose?.(); };
+    ov.querySelector('[data-dk=close]').onclick = close;
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    return { ov, body, close };
+  }
+
+  function reclaimable() {
+    return catsData.filter((c) => selected.has(c.id)).reduce((a, c) => a + (c.bytes || 0), 0);
+  }
+
+  // ---- detail modal: what exactly gets deleted ----
+  function openDetail(c) {
+    const rows = (c.sample || []).map((f) => `<div class="dk-fr"><span class="dk-fp"><span class="dk-fpath">${esc(f.path)}</span>${f.desc ? `<small class="dk-fd">${esc(f.desc)}</small>` : ''}</span><span class="dk-fs">${fmtB(f.bytes)}</span></div>`).join('');
+    const more = (c.count && c.sample && c.count > c.sample.length) ? `<div class="dk-more">+ ${c.count - c.sample.length} more…</div>` : '';
+    const m = openModal(c.name, `
+      <p class="dk-why">${esc(c.why || '')}</p>
+      <div class="dk-cmd">$ ${esc(c.cmd || '')}</div>
+      <div class="dk-flist">${rows || '<div class="dk-more">Nothing to remove right now.</div>'}${more}</div>
+      <div class="dk-mtot"><span>Total reclaimable</span><b>${fmtB(c.bytes)}</b></div>
+      <div class="set-actions dk-mact">
+        <button class="set-btn set-btn-clean" data-dk="cleanone">${BROOM}<span>Clean</span></button>
+        <button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Close</span></button>
+      </div>`);
+    m.body.querySelector('[data-dk=cancel]').onclick = m.close;
+    m.body.querySelector('[data-dk=cleanone]').onclick = () => { m.close(); runClean([c.id], { purgeAll: false }); };
+  }
+
+  // ---- streamed clean / purge ----
+  function runClean(categories, { purgeAll = false, confirm = '' } = {}) {
+    const m = openModal(purgeAll ? 'Purge all' : 'Clean', `
+      <p class="dk-why">${purgeAll ? 'Purging the scanned, allow-listed categories.' : 'Cleaning the selected categories.'} Output streams below.</p>
+      <pre class="dk-log" data-dk="log"></pre>
+      <div class="set-actions dk-mact" data-dk="foot"></div>`);
+    const log = m.body.querySelector('[data-dk=log]');
+    const foot = m.body.querySelector('[data-dk=foot]');
+    const append = (t) => { log.textContent += (log.textContent ? '\n' : '') + t; log.scrollTop = log.scrollHeight; };
+    const params = new URLSearchParams({ categories: categories.join(','), journalTargetMB });
+    if (purgeAll) { params.set('purgeAll', '1'); params.set('confirm', confirm); }
+    const es = new EventSource(`/api/disk/clean/stream?${params}`);
+    es.addEventListener('progress', (e) => { try { append(JSON.parse(e.data).line); } catch { /* */ } });
+    es.addEventListener('done', (e) => {
+      es.close();
+      let d = {}; try { d = JSON.parse(e.data); } catch { /* */ }
+      append(`✓ Reclaimed ${fmtB(d.reclaimedBytes || 0)}.`);
+      foot.innerHTML = `<span class="dk-okpill">${CHECK_ICON}<span>Done · ${fmtB(d.reclaimedBytes || 0)} freed</span></span><button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Close</span></button>`;
+      foot.querySelector('[data-dk=cancel]').onclick = () => { m.close(); refresh(); };
+      toast('success', 'Disk', `Reclaimed ${fmtB(d.reclaimedBytes || 0)}`);
+    });
+    es.addEventListener('error', (e) => {
+      es.close();
+      let msg = 'Cleanup failed'; try { msg = JSON.parse(e.data).message || msg; } catch { /* */ }
+      append(`✗ ${msg}`);
+      foot.innerHTML = `<button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Close</span></button>`;
+      foot.querySelector('[data-dk=cancel]').onclick = m.close;
+    });
+  }
+
+  // ---- purge-all confirmation (type PURGE) ----
+  function openPurge() {
+    const m = openModal('Purge all', `
+      <p class="dk-why">This removes <b>every scanned, allow-listed category above</b> (selected or not) — apt cache, journal, rotated logs, stale temp, autoremove, Docker dangling/build-cache, and any other detected category. It never touches your databases, NAS data, named Docker volumes, or anything outside the list. Type <b>PURGE</b> to confirm.</p>
+      <input type="text" class="dk-purge-in" data-dk="confirm" placeholder="PURGE" autocomplete="off">
+      <div class="set-actions dk-mact">
+        <button class="set-btn dk-danger" data-dk="go" disabled>${TRASH_ICON}<span>Purge all</span></button>
+        <button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+      </div>`);
+    const input = m.body.querySelector('[data-dk=confirm]');
+    const go = m.body.querySelector('[data-dk=go]');
+    input.oninput = () => { go.disabled = input.value !== 'PURGE'; };
+    input.focus();
+    go.onclick = () => { m.close(); runClean(catsData.map((c) => c.id), { purgeAll: true, confirm: 'PURGE' }); };
+    m.body.querySelector('[data-dk=cancel]').onclick = m.close;
+  }
+
+  // ---- schedule edit modal ----
+  function openSchedule() {
+    const s = schedule || {};
+    const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const seg = (name, opts, val) => `<div class="dk-seg" data-seg="${name}">${opts.map((o) => `<button data-val="${o.v}" class="${String(o.v) === String(val) ? 'act' : ''}">${o.l}</button>`).join('')}</div>`;
+    const catRows = catsData.map((c) => `<label><input type="checkbox" data-sc="${c.id}" ${(s.categories || []).includes(c.id) ? 'checked' : ''}>${esc(c.name)}<span class="dk-sz">${fmtB(c.bytes)}</span></label>`).join('');
+    const m = openModal('Edit auto-clean schedule', `
+      <div class="dk-frow"><div class="dk-fl">Enabled</div>${seg('enabled', [{ v: '1', l: 'On' }, { v: '0', l: 'Off' }], s.enabled ? '1' : '0')}</div>
+      <div class="dk-frow"><div class="dk-fl">Frequency</div>${seg('frequency', [{ v: 'daily', l: 'Daily' }, { v: 'weekly', l: 'Weekly' }, { v: 'monthly', l: 'Monthly' }], s.frequency || 'weekly')}</div>
+      <div class="dk-frow" data-dk="dow"><div class="dk-fl">Day of week</div>${seg('dayOfWeek', dow.map((d, i) => ({ v: i, l: d })), s.dayOfWeek ?? 0)}</div>
+      <div class="dk-frow" data-dk="dom"><div class="dk-fl">Day of month</div><input type="text" class="dk-num" data-sc-dom value="${Number(s.dayOfMonth) || 1}"></div>
+      <div class="dk-frow"><div class="dk-fl">Time</div><input type="time" class="dk-time" data-sc-time value="${esc(s.time || '03:00')}"></div>
+      <div class="dk-frow"><div class="dk-fl">Run mode<small>Scan only just refreshes the estimate.</small></div>${seg('mode', [{ v: 'scan', l: 'Scan only' }, { v: 'clean', l: 'Scan + clean' }], s.mode || 'clean')}</div>
+      <div data-dk="catpick"><div class="dk-fl" style="margin-top:6px">Categories to clean</div><div class="dk-catpick">${catRows}</div></div>
+      <div class="set-actions dk-mact">
+        <button class="set-btn set-btn-primary" data-dk="save">${SAVE_ICON}<span>Save schedule</span></button>
+        <button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+      </div>`);
+    const segVal = (name) => m.body.querySelector(`[data-seg=${name}] .act`)?.dataset.val;
+    m.body.querySelectorAll('.dk-seg').forEach((sg) => sg.querySelectorAll('button').forEach((b) => b.onclick = () => {
+      sg.querySelectorAll('button').forEach((x) => x.classList.toggle('act', x === b));
+      const nm = sg.dataset.seg;
+      if (nm === 'frequency') { m.body.querySelector('[data-dk=dow]').style.display = b.dataset.val === 'weekly' ? '' : 'none'; m.body.querySelector('[data-dk=dom]').style.display = b.dataset.val === 'monthly' ? '' : 'none'; }
+      if (nm === 'mode') { m.body.querySelector('[data-dk=catpick]').style.display = b.dataset.val === 'clean' ? '' : 'none'; }
+    }));
+    // initial show/hide
+    m.body.querySelector('[data-dk=dow]').style.display = (s.frequency || 'weekly') === 'weekly' ? '' : 'none';
+    m.body.querySelector('[data-dk=dom]').style.display = (s.frequency || 'weekly') === 'monthly' ? '' : 'none';
+    m.body.querySelector('[data-dk=catpick]').style.display = (s.mode || 'clean') === 'clean' ? '' : 'none';
+    m.body.querySelector('[data-dk=cancel]').onclick = m.close;
+    m.body.querySelector('[data-dk=save]').onclick = async () => {
+      const body = {
+        enabled: segVal('enabled') === '1',
+        frequency: segVal('frequency'),
+        dayOfWeek: Number(segVal('dayOfWeek')) || 0,
+        dayOfMonth: Number(m.body.querySelector('[data-sc-dom]').value) || 1,
+        time: m.body.querySelector('[data-sc-time]').value || '03:00',
+        mode: segVal('mode'),
+        categories: [...m.body.querySelectorAll('[data-sc]:checked')].map((c) => c.dataset.sc),
+        journalTargetMB,
+      };
+      try { const r = await api('/disk/schedule', { method: 'POST', body }); schedule = r.schedule; toast('success', 'Disk', 'Schedule saved'); m.close(); renderSchedule(); }
+      catch (e) { toast('error', 'Disk', e.message); }
+    };
+  }
+
+  // ---- render pieces ----
+  function renderUsage(host, u) {
+    const fs = (u?.filesystems || [])[0];
+    const wrap = $('[data-disk=usage]', host); if (!wrap || !fs) return;
+    const usedPct = fs.size ? Math.min(100, (fs.used / fs.size) * 100) : 0;
+    wrap.innerHTML = `
+      <div class="dk-meter"><div class="dk-lab"><span>Root filesystem (${esc(fs.fstype || fs.source || '/')})</span><span><b>${fmtB(fs.avail)}</b> free of ${fmtB(fs.size)}</span></div>
+        <div class="dk-bar"><i style="width:${usedPct.toFixed(1)}%"></i></div>
+        <div class="dk-legend"><span><i class="dk-dot dk-dot-u"></i>Used ${fmtB(fs.used)}</span><span><i class="dk-dot dk-dot-f"></i>Free ${fmtB(fs.avail)}</span><span><i class="dk-dot dk-dot-r"></i>Reclaimable ${fmtB(reclaimable())}</span></div>
+      </div>`;
+  }
+
+  function renderReclaim(host) {
+    const r = $('[data-disk=reclaim]', host); if (!r) return;
+    const n = catsData.filter((c) => selected.has(c.id)).length;
+    r.innerHTML = `<div class="dk-big">${fmtB(reclaimable())}</div><div class="dk-cap">reclaimable across ${n} selected categories</div>`;
+  }
+
+  function renderCats(host) {
+    const wrap = $('[data-disk=cats]', host); if (!wrap) return;
+    wrap.innerHTML = catsData.map((c, i) => `
+      <div class="dk-cat ${selected.has(c.id) ? 'on' : ''}" data-i="${i}">
+        <button class="dk-chk" data-dk-tog="${c.id}" aria-label="toggle">${CHECK_ICON}</button>
+        <div>
+          <div class="dk-name">${esc(c.name)} <span class="dk-path">${esc(c.path)}</span></div>
+          <div class="dk-why2">${esc(c.why || '')}</div>
+          <div class="dk-meta"><span class="dk-safe ${c.caution ? 'caution' : ''}">${CHECK_ICON}${esc(c.safe || 'Safe')}</span>
+            <button class="dk-details" data-dk-det="${i}">More details ›</button></div>
+        </div>
+        <div class="dk-size"><div class="dk-v">${fmtB(c.bytes)}</div><div class="dk-c">${esc(c.count != null ? (typeof c.count === 'number' ? `${c.count} item${c.count === 1 ? '' : 's'}` : c.count) : '')}</div></div>
+      </div>`).join('') || '<p class="dk-why2">Nothing to scan — the host agent returned no categories.</p>';
+    wrap.querySelectorAll('[data-dk-tog]').forEach((b) => b.onclick = () => {
+      const id = b.dataset.dkTog; selected.has(id) ? selected.delete(id) : selected.add(id);
+      b.closest('.dk-cat').classList.toggle('on', selected.has(id));
+      renderReclaim(host); renderUsage(host, lastUsage);
+    });
+    wrap.querySelectorAll('[data-dk-det]').forEach((b) => b.onclick = () => openDetail(catsData[Number(b.dataset.dkDet)]));
+  }
+
+  function renderSchedule() {
+    const wrap = document.querySelector('[data-disk=sched]'); if (!wrap || !schedule) return;
+    const s = schedule;
+    const when = s.frequency === 'daily' ? `Daily ${s.time}` : s.frequency === 'monthly' ? `Monthly day ${s.dayOfMonth} ${s.time}` : `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][s.dayOfWeek] || 'Sun'} ${s.time}`;
+    const badges = s.mode === 'clean' ? (s.categories || []).map((c) => `<span class="dk-badge">${esc((catsData.find((x) => x.id === c) || {}).name || c)}</span>`).join('') : '<span class="dk-badge">scan only</span>';
+    wrap.innerHTML = `
+      <div class="dk-schedsum">
+        <div class="dk-kv"><div class="dk-k">Status</div><div class="dk-vv ${s.enabled ? 'on' : ''}">${s.enabled ? 'Enabled · ' + (s.frequency[0].toUpperCase() + s.frequency.slice(1)) : 'Disabled'}</div></div>
+        <div class="dk-kv"><div class="dk-k">Next run</div><div class="dk-vv">${esc(when)}</div></div>
+        <div class="dk-kv"><div class="dk-k">Mode</div><div class="dk-vv">${s.mode === 'clean' ? 'Scan + clean' : 'Scan only'}</div></div>
+      </div>
+      <div class="dk-badges">${badges}</div>`;
+  }
+
+  let lastUsage = null;
+  async function refresh() {
+    const host = document.querySelector('.rapisys-page'); if (!host) return;
+    try {
+      const [u, scan] = await Promise.all([api('/disk/usage').catch(() => null), api(`/disk/scan?journalTargetMB=${journalTargetMB}`)]);
+      lastUsage = u;
+      catsData = scan.categories || [];
+      selected = new Set(catsData.filter((c) => c.default).map((c) => c.id));
+      renderUsage(host, u); renderReclaim(host); renderCats(host); renderSchedule();
+    } catch (e) { toast('error', 'Disk', e.message); }
+  }
+
+  async function rescanOnly() {
+    const big = document.querySelector('[data-disk=reclaim] .dk-big'); if (big) big.textContent = 'scanning…';
+    await refresh();
+  }
+
+  return {
+    async mount(host) {
+      host.innerHTML = `
+        ${pageHeader('disk', 'Disk Management')}
+        <p class="dk-sub">Detect and reclaim stale, temporary and unneeded files — scanned and explained before anything is removed.</p>
+        <div class="dk-grid">
+          <div class="card dk-card"><div class="card-header"><div class="card-icon">${storageIconSvg()}</div><span class="card-title">Storage</span></div><div data-disk="usage"></div></div>
+          <div class="card dk-card dk-reclaim" data-disk="reclaim"></div>
+        </div>
+        <div class="card dk-card">
+          <div class="card-header dk-cathead"><div class="dk-ct">${trashIconSvg()}<span class="card-title">What can be cleaned</span></div>
+            <button class="set-btn set-btn-detect dk-rescan" data-disk="rescan">${DETECT_ICON}<span>Re-scan</span></button></div>
+          <div data-disk="cats"><p class="dk-why2">Scanning…</p></div>
+        </div>
+        <div class="dk-actions">
+          <button class="set-btn set-btn-clean" data-disk="clean">${BROOM}<span>Clean Selected</span></button>
+          <button class="set-btn set-btn-detect" data-disk="scan">${DETECT_ICON}<span>Scan Again</span></button>
+          <span class="dk-spacer"></span>
+          <button class="set-btn dk-danger" data-disk="purge">${TRASH_ICON}<span>Purge All</span></button>
+        </div>
+        <p class="dk-note"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>Deletions run through the host agent against a fixed allow-list. The UI only sends category IDs — never raw paths.</p>
+        <div class="card dk-card">
+          <div class="card-header dk-cathead"><div class="dk-ct">${clockIconSvg()}<span class="card-title">Auto-clean schedule</span></div>
+            <button class="set-btn dk-edit" data-disk="sched-edit">${EDIT_ICON}<span>Edit</span></button></div>
+          <div data-disk="sched"></div>
+        </div>`;
+      $('[data-disk=rescan]', host).onclick = rescanOnly;
+      $('[data-disk=scan]', host).onclick = rescanOnly;
+      $('[data-disk=clean]', host).onclick = () => { const ids = [...selected]; if (!ids.length) return toast('error', 'Disk', 'No categories selected'); runClean(ids, { purgeAll: false }); };
+      $('[data-disk=purge]', host).onclick = openPurge;
+      $('[data-disk=sched-edit]', host).onclick = openSchedule;
+      try { schedule = await api('/disk/schedule'); } catch { /* */ }
+      await refresh();
+    },
+    unmount() { document.querySelectorAll('.dk-modal-overlay').forEach((m) => m.remove()); },
+  };
+
+  // small inline glyph helpers (stroke icons, app style)
+  function storageIconSvg() { return `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>`; }
+  function trashIconSvg() { return `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`; }
+  function clockIconSvg() { return `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`; }
+})();
 
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set(), activeFilter = 'all', piholeUpd = null;
