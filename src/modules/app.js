@@ -3802,128 +3802,386 @@ pageRenderers.network = (() => {
 // ---------------------------------------------------------------------------
 
 pageRenderers.reports = (() => {
+  // Revamped Reports page: a meaningful, drill-down health score.
+  // One fetch of /reports/daily?days=90 feeds client-side daily/weekly/monthly
+  // bucketing. Every timeline cell, factor card and feed entry is backed by a
+  // real materialized daily summary (health.overall, health.factors, metrics,
+  // event counts).
   let view = 'daily';
+  let allDays = [];          // normalized, oldest -> newest
+  let buckets = [];
+  let sel = 0;
+  let openF = -1;
+  let FACTOR_ORDER = [];
+  let hostRef = null;
+
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const METRIC_LABEL = { 'cpu.usage': 'CPU %', 'mem.percent': 'Memory %', 'temp.cpu': 'CPU Temp °C', 'fan.rpm': 'Fan RPM', 'power.watts': 'Power W', 'load.avg1': 'Load 1m' };
-  const fix = (v) => (v == null ? '—' : (Math.round(v * 10) / 10).toLocaleString());
+  const colFor = (s) => (s >= 80 ? '#10b981' : s >= 60 ? '#eab308' : '#ef4444');
+  const pillCls = (o) => (o >= 80 ? 'good' : o >= 60 ? 'warn' : 'bad');
+  const verdict = (o) => (o >= 80 ? 'Good' : o >= 60 ? 'Fair' : 'Degraded');
+  const fix = (v) => (v == null ? '-' : (Math.round(v * 10) / 10).toLocaleString());
+  const fmtMD = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const fmtMon = (d) => d.toLocaleDateString('en-US', { month: 'short' });
+  const fmtMonY = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-  function healthRing(score) {
-    const col = score >= 80 ? '#10b981' : score >= 60 ? '#eab308' : '#ef4444';
-    const circ = 2 * Math.PI * 52;
-    const off = circ * (1 - score / 100);
-    return `<svg viewBox="0 0 120 120" class="rep-ring">
-      <circle cx="60" cy="60" r="52" fill="none" stroke="var(--border-color)" stroke-width="10"/>
-      <circle cx="60" cy="60" r="52" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
-        stroke-dasharray="${circ}" stroke-dashoffset="${off}" transform="rotate(-90 60 60)"/>
-      <text x="60" y="58" text-anchor="middle" class="rep-ring-score" fill="${col}">${score}</text>
-      <text x="60" y="76" text-anchor="middle" class="rep-ring-label">/ 100</text>
-    </svg>`;
+  const METRIC_META = {
+    'cpu.usage': { label: 'CPU %', unit: '%' },
+    'mem.percent': { label: 'Memory %', unit: '%' },
+    'temp.cpu': { label: 'CPU Temp °C', unit: '°C' },
+    'fan.rpm': { label: 'Fan RPM', unit: 'rpm' },
+    'power.watts': { label: 'Power W', unit: 'W' },
+    'load.avg1': { label: 'Load 1m', unit: '' },
+  };
+  const FHINT = {
+    'Thermal headroom': 'Consider a more aggressive fan curve, or schedule heavy builds outside the warm part of the day.',
+    'Throttle / undervoltage': 'When clean, the PSU and cooling are keeping the SoC in spec.',
+    'CPU load': 'If p95 creeps up, check the 02:00 maintenance jobs for overlap.',
+    'Memory': 'Large Pi-hole blocklists push a 1 GB Pi toward swap; consider an 8 GB board if you add containers.',
+    'Storage runway': 'NAS archives rotate automatically; watch the projected exhaustion date.',
+    'Alert activity': 'If a rule fires daily, it may need a longer sustain duration.',
+  };
+  const ICONS = {
+    '#ef4444': 'M13 2 3 14h9l-1 8 10-12h-9l1-8z',
+    '#eab308': 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01',
+    '#10b981': 'M20 6 9 17l-5-5',
+    '#a855f7': 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
+    '#00d4ff': 'M3 3v18h18M18 17V9M13 17V5M8 17v-3',
+  };
+  const sevRank = { '#ef4444': 0, '#eab308': 1, '#a855f7': 2, '#00d4ff': 3, '#10b981': 4 };
+  const lossPct = (score, weight) => Math.round(weight * (1 - score / 100) * 10) / 10;
+  const trendArrow = (t) => (t > 0 ? `<span class="rep-trend up">▲ ${t}</span>` : t < 0 ? `<span class="rep-trend down">▼ ${Math.abs(t)}</span>` : '<span class="rep-trend flat">▬</span>');
+
+  function normalize(day) {
+    const parts = String(day.day || '').split('-').map(Number);
+    const date = new Date(parts[0], (parts[1] || 1) - 1, parts[2] || 1);
+    const metrics = day.metrics || {};
+    const events = day.events || {};
+    const factors = (day.health && day.health.factors) || [];
+    const fByName = {};
+    factors.forEach((f) => { fByName[f.name] = f; });
+    const m = (k, s) => (metrics[k] && metrics[k][s] != null ? metrics[k][s] : null);
+    const stf = fByName['Storage runway'];
+    return {
+      date, day: day.day, partial: !!day.partial,
+      overall: (day.health && day.health.overall) || 0,
+      metrics, events, factors, fByName,
+      peakTemp: m('temp.cpu', 'max'), tempPeakHour: m('temp.cpu', 'peakHour'),
+      memPeak: m('mem.percent', 'max'), memPeakHour: m('mem.percent', 'peakHour'),
+      cpuAvg: m('cpu.usage', 'avg'), memAvg: m('mem.percent', 'avg'),
+      alerts: (events['alert.fired'] || 0),
+      throttle: (events['throttle.active'] || 0) + (events['undervoltage'] || 0),
+      serviceDown: (events['service.down'] || 0),
+      storageUsed: stf ? Math.round(100 - stf.score) : null,
+    };
   }
 
-  function sparkline(values, col = '#00d4ff') {
-    if (!values.length) return '';
-    const max = Math.max(...values), min = Math.min(...values), rng = max - min || 1;
-    const w = 120, h = 28;
-    const pts = values.map((v, i) => `${(i / (values.length - 1 || 1)) * w},${h - ((v - min) / rng) * h}`).join(' ');
-    return `<svg viewBox="0 0 ${w} ${h}" class="rep-spark"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5"/></svg>`;
+  function dayFeed(nd) {
+    const out = [];
+    const hh = (h) => (h == null ? '' : (String(h).padStart(2, '0') + ':00'));
+    if (nd.peakTemp != null) out.push([nd.peakTemp >= 65 ? '#eab308' : '#00d4ff', hh(nd.tempPeakHour), 'Thermal peak', `${fix(nd.peakTemp)} °C in the peak window`]);
+    if (nd.throttle > 0) out.push(['#ef4444', '', 'Throttle / undervoltage', `${nd.throttle} event(s) logged`]);
+    if (nd.alerts > 0) out.push(['#eab308', '', 'Alerts fired', `${nd.alerts} alert(s) during the day`]);
+    if (nd.memPeak != null && nd.memPeak >= 70) out.push(['#a855f7', hh(nd.memPeakHour), 'Memory pressure', `peak ${fix(nd.memPeak)}%`]);
+    if (nd.serviceDown > 0) out.push(['#ef4444', '', 'Service check failed', `${nd.serviceDown} failure(s)`]);
+    return out;
+  }
+  function periodFeed(grp) {
+    const out = [];
+    grp.forEach((d) => dayFeed(d).forEach((e) => out.push([e[0], e[1], e[2], e[3], fmtMD(d.date)])));
+    out.sort((x, y) => (sevRank[x[0]] ?? 9) - (sevRank[y[0]] ?? 9));
+    return out.slice(0, 7);
   }
 
-  async function load(host) {
-    if (view === 'daily') {
-      let data;
-      try { data = await api('/reports/daily?days=30'); } catch { return; }
-      const days = data.days;
-      if (!days.length) {
-        $('[data-rep=body]', host).innerHTML = '<p class="sess-empty">No daily summaries yet. Reports build overnight; click Rebuild to generate now.</p>';
-        return;
-      }
-      const latest = days[days.length - 1];
-      const health = latest.health || { overall: 0, factors: [] };
-      // sparkline series across days per metric
-      const series = {};
-      for (const m of Object.keys(METRIC_LABEL)) series[m] = days.map((d) => d.metrics?.[m]?.avg).filter((v) => v != null);
-
-      $('[data-rep=body]', host).innerHTML = `
-        <div class="rep-health">
-          <div class="rep-health-ring">${healthRing(health.overall)}<div class="rep-health-cap">Health · ${esc(latest.day)}${latest.partial ? ' <span class="rep-live">live</span>' : ''}</div></div>
-          <div class="rep-health-factors">
-            ${(health.factors || []).map((f) => `
-              <div class="rep-factor">
-                <span class="rep-factor-name">${esc(f.name)}</span>
-                <span class="rep-factor-bar"><span style="width:${f.score}%;background:${f.score >= 80 ? '#10b981' : f.score >= 60 ? '#eab308' : '#ef4444'}"></span></span>
-                <span class="rep-factor-detail">${esc(f.detail || '')}</span>
-              </div>`).join('')}
-          </div>
-        </div>
-        <h4 class="sess-h">Metric trends (30 days, daily avg)</h4>
-        <div class="rep-metrics">
-          ${Object.entries(METRIC_LABEL).map(([m, label]) => {
-            const s = latest.metrics?.[m];
-            if (!s) return '';
-            return `<div class="rep-metric">
-              <div class="rep-metric-head"><b>${esc(label)}</b>${sparkline(series[m])}</div>
-              <div class="rep-metric-stats"><span>min ${fix(s.min)}</span><span>avg ${fix(s.avg)}</span><span>max ${fix(s.max)}</span><span>p95 ${fix(s.p95)}</span></div>
-            </div>`;
-          }).join('')}
-        </div>`;
-    } else {
-      let data;
-      try { data = await api(`/reports/${view}`); } catch { return; }
-      if (!data.days?.length) { $('[data-rep=body]', host).innerHTML = '<p class="sess-empty">Not enough daily data yet for this view.</p>'; return; }
-      $('[data-rep=body]', host).innerHTML = `
-        <div class="rep-health">
-          <div class="rep-health-ring">${healthRing(data.health?.overall || 0)}<div class="rep-health-cap">Avg health · ${view}</div></div>
-          <div class="rep-health-factors">
-            ${Object.entries(data.metrics).map(([m, s]) => `
-              <div class="rep-factor">
-                <span class="rep-factor-name">${esc(METRIC_LABEL[m] || m)}</span>
-                <span class="rep-factor-detail">min ${fix(s.min)} · avg ${fix(s.avg)} · max ${fix(s.max)} ${s.trend ? `· trend ${s.trend > 0 ? '▲' : '▼'} ${fix(Math.abs(s.trend))}` : ''}</span>
-              </div>`).join('')}
-          </div>
-        </div>
-        <p class="net-hint">Aggregated from ${data.days.length} daily summaries.</p>`;
+  function aggDays(days) {
+    const overall = Math.round(days.reduce((a, d) => a + d.overall, 0) / days.length);
+    const fmap = {}, fweight = {};
+    days.forEach((d) => d.factors.forEach((f) => { (fmap[f.name] = fmap[f.name] || []).push(f.score); fweight[f.name] = f.weight; }));
+    const factorScores = {};
+    Object.keys(fmap).forEach((n) => { factorScores[n] = Math.round(fmap[n].reduce((a, b) => a + b, 0) / fmap[n].length); });
+    const maxNN = (arr) => { const v = arr.filter((x) => x != null); return v.length ? Math.max(...v) : null; };
+    const avgNN = (arr) => { const v = arr.filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    return {
+      overall, factorScores, fweight,
+      peakTemp: maxNN(days.map((d) => d.peakTemp)),
+      memPeak: maxNN(days.map((d) => d.memPeak)),
+      cpuAvg: avgNN(days.map((d) => d.cpuAvg)),
+      memAvg: avgNN(days.map((d) => d.memAvg)),
+      alerts: days.reduce((a, d) => a + d.alerts, 0),
+      throttle: days.reduce((a, d) => a + d.throttle, 0),
+      storageUsed: days[days.length - 1].storageUsed,
+      days,
+    };
+  }
+  function bucketFromDay(d, idx) {
+    const factorScores = {}, fweight = {};
+    d.factors.forEach((f) => { factorScores[f.name] = f.score; fweight[f.name] = f.weight; });
+    return {
+      overall: d.overall, factorScores, fweight,
+      peakTemp: d.peakTemp, memPeak: d.memPeak, cpuAvg: d.cpuAvg, memAvg: d.memAvg,
+      alerts: d.alerts, throttle: d.throttle, storageUsed: d.storageUsed, days: [d], isDay: true,
+      heading: `${fmtMD(d.date)} · ${verdict(d.overall)}${d.partial ? ' · live' : ''}`,
+      cellLabel: String(d.date.getDate()),
+      monthMark: (d.date.getDate() === 1 || idx === 0) ? fmtMon(d.date) : '',
+      wide: false, legend: fmtMD(d.date), feed: dayFeed(d),
+    };
+  }
+  function bucketFromAgg(grp, kind) {
+    const a = aggDays(grp); const start = grp[0].date;
+    return Object.assign(a, {
+      isDay: false,
+      heading: kind === 'weekly' ? `Week of ${fmtMD(start)} · ${verdict(a.overall)}` : `${fmtMonY(start)} · ${verdict(a.overall)}`,
+      cellLabel: kind === 'weekly' ? String(start.getDate()) : fmtMon(start),
+      monthMark: kind === 'weekly' ? (start.getDate() <= 7 ? fmtMon(start) : '') : '',
+      wide: kind === 'monthly', legend: kind === 'weekly' ? `Week of ${fmtMD(start)}` : fmtMonY(start),
+      feed: periodFeed(grp),
+    });
+  }
+  function buildBuckets(v) {
+    if (!allDays.length) return [];
+    if (v === 'daily') { const slice = allDays.slice(-30); return slice.map((d, i) => bucketFromDay(d, i)); }
+    if (v === 'weekly') {
+      const span = allDays.slice(-84); const out = [];
+      for (let i = 0; i < span.length; i += 7) { const g = span.slice(i, i + 7); if (g.length) out.push(bucketFromAgg(g, 'weekly')); }
+      return out;
     }
+    const groups = {}, order = [];
+    allDays.forEach((d) => { const k = d.date.getFullYear() + '-' + d.date.getMonth(); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(d); });
+    return order.slice(-6).map((k) => bucketFromAgg(groups[k], 'monthly'));
+  }
+
+  function detailFor(name, b) {
+    switch (name) {
+      case 'Thermal headroom': return b.peakTemp != null ? `peak ${fix(b.peakTemp)} °C` : '';
+      case 'Throttle / undervoltage': return b.throttle === 0 ? 'none' : `${b.throttle} event(s)`;
+      case 'CPU load': return b.cpuAvg != null ? `avg ${Math.round(b.cpuAvg)}%` : '';
+      case 'Memory': return b.memAvg != null ? `avg ${Math.round(b.memAvg)}%` : '';
+      case 'Storage runway': return b.storageUsed != null ? `${b.storageUsed}% used` : '';
+      case 'Alert activity': return b.alerts === 0 ? 'quiet' : `${b.alerts} fired`;
+      default: return b.isDay && b.days[0].fByName[name] ? (b.days[0].fByName[name].detail || '') : '';
+    }
+  }
+  function leadFor(name, b) {
+    if (name === 'Thermal headroom' && b.peakTemp != null) return `Pi 5 begins soft-throttling near 80 to 85 °C. The peak this period was ${fix(b.peakTemp)} °C, leaving about ${Math.round(85 - b.peakTemp)} °C of headroom.`;
+    if (name === 'Throttle / undervoltage') return b.throttle === 0 ? 'No throttling or undervoltage transitions were logged in this period.' : `${b.throttle} throttle or undervoltage transition(s) were logged; check the PSU and cooling.`;
+    if (name === 'CPU load' && b.cpuAvg != null) return `Average CPU was about ${Math.round(b.cpuAvg)}% over the period, with brief spikes during maintenance jobs.`;
+    if (name === 'Memory' && b.memAvg != null) return `RAM averaged about ${Math.round(b.memAvg)}% with peaks toward ${b.memPeak != null ? fix(b.memPeak) : '?'}% on the 1 GB Pi 5.`;
+    if (name === 'Storage runway' && b.storageUsed != null) return `Data directory at ${b.storageUsed}% used; growth is projected to stay within the archive horizon.`;
+    if (name === 'Alert activity') return b.alerts === 0 ? 'No alerts fired in this period.' : `${b.alerts} alert(s) fired and resolved within the sustain window.`;
+    return detailFor(name, b) || 'Factor detail.';
+  }
+
+  function ring(score) {
+    const size = 150, r = size / 2 - 13, c = 2 * Math.PI * r, off = c * (1 - score / 100), col = colFor(score);
+    return `<svg viewBox="0 0 ${size} ${size}" style="width:${size}px;height:${size}px">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--border-color)" stroke-width="11"/>
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${col}" stroke-width="11" stroke-linecap="round"
+        stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size / 2} ${size / 2})"/></svg>
+      <div class="rep-ring-c"><div class="rep-ring-n" style="color:${col}">${score}</div><div class="rep-ring-d">/ 100</div></div>`;
+  }
+  function axisChart(values, col, opts) {
+    opts = opts || {};
+    const w = opts.w || 560, h = opts.h || 160, pl = opts.pl == null ? 42 : opts.pl, pb = 22, pt = 8, pr = 10, iw = w - pl - pr, ih = h - pt - pb;
+    const mx = opts.ymax == null ? Math.max(...values) : opts.ymax, mn = opts.ymin == null ? Math.min(...values) : opts.ymin, rng = (mx - mn) || 1;
+    const X = (i) => pl + (i / (values.length - 1 || 1)) * iw, Y = (v) => pt + ih - ((v - mn) / rng) * ih;
+    const pts = values.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+    const area = `${pl},${pt + ih} ${pts} ${w - pr},${pt + ih}`;
+    const fmt = opts.fmt || ((v) => Math.round(v));
+    const yt = [mn, mn + rng / 2, mx];
+    const yGrid = yt.map((v) => `<line x1="${pl}" y1="${Y(v)}" x2="${w - pr}" y2="${Y(v)}" stroke="rgba(255,255,255,.06)"/>
+      <text x="${pl - 6}" y="${Y(v) + 3}" text-anchor="end" font-size="9" fill="rgba(255,255,255,.45)">${fmt(v)}</text>`).join('');
+    const xt = opts.xticks || [{ f: 0, l: 'start', a: 'start' }, { f: 0.5, l: 'mid', a: 'middle' }, { f: 1, l: 'now', a: 'end' }];
+    const xLab = xt.map((t) => `<text x="${(pl + t.f * iw).toFixed(0)}" y="${h - 6}" text-anchor="${t.a || 'middle'}" font-size="9" fill="rgba(255,255,255,.45)">${t.l}</text>`).join('');
+    const yTitle = opts.yTitle ? `<text x="11" y="${pt + ih / 2}" transform="rotate(-90 11 ${pt + ih / 2})" text-anchor="middle" font-size="9" fill="rgba(255,255,255,.4)">${opts.yTitle}</text>` : '';
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;max-width:${w}px;height:auto" preserveAspectRatio="xMidYMid meet">
+      ${yGrid}<polygon points="${area}" fill="${col}1f"/>
+      <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8"/>
+      <line x1="${pl}" y1="${pt + ih}" x2="${w - pr}" y2="${pt + ih}" stroke="rgba(255,255,255,.12)"/>${xLab}${yTitle}</svg>`;
+  }
+  const xticksFor = () => (view === 'daily'
+    ? [{ f: 0, l: '30d ago', a: 'start' }, { f: 0.5, l: '15d', a: 'middle' }, { f: 1, l: 'today', a: 'end' }]
+    : view === 'weekly'
+      ? [{ f: 0, l: '12w ago', a: 'start' }, { f: 0.5, l: '6w', a: 'middle' }, { f: 1, l: 'now', a: 'end' }]
+      : [{ f: 0, l: 'oldest', a: 'start' }, { f: 1, l: 'now', a: 'end' }]);
+
+  const $r = (key) => hostRef.querySelector(`[data-rep="${key}"]`);
+
+  function renderTimeline() {
+    $r('tlHead').textContent = view === 'daily' ? '30-day health timeline - click a day'
+      : view === 'weekly' ? '12-week health timeline - click a week' : 'Health by month - click a month';
+    const strip = $r('strip');
+    strip.innerHTML = buckets.map((b, idx) => {
+      const a = 0.30 + 0.70 * ((b.overall - 38) / 60);
+      return `<div class="rep-cellcol ${b.wide ? 'wide' : ''} ${idx === sel ? 'sel' : ''}" data-i="${idx}">
+        <div class="rep-mlbl">${b.monthMark || ''}</div>
+        <div class="rep-cell" style="background:${colFor(b.overall)};opacity:${Math.max(0.25, Math.min(1, a))}" title="${esc(b.legend)}: ${b.overall}"></div>
+        <div class="rep-dlbl">${esc(b.cellLabel)}</div></div>`;
+    }).join('');
+    strip.querySelectorAll('.rep-cellcol').forEach((c) => { c.onclick = () => { sel = +c.dataset.i; openF = -1; renderAll(); }; });
+  }
+  function renderHero() {
+    const b = buckets[sel];
+    $r('heroDate').textContent = b.heading;
+    const pill = $r('heroPill'); pill.className = 'rep-pill ' + pillCls(b.overall); pill.textContent = `● ${b.overall} / 100`;
+    const prev = buckets[sel - 1]; const dEl = $r('heroDelta');
+    if (prev) { const dd = b.overall - prev.overall; dEl.className = 'rep-delta ' + (dd > 0 ? 'up' : dd < 0 ? 'down' : 'flat'); dEl.textContent = dd > 0 ? `▲ ${dd} vs previous` : dd < 0 ? `▼ ${Math.abs(dd)} vs previous` : 'no change vs previous'; }
+    else { dEl.textContent = ''; dEl.className = 'rep-delta'; }
+    $r('ring').innerHTML = ring(b.overall);
+    const ded = FACTOR_ORDER.filter((n) => b.factorScores[n] != null)
+      .map((n) => ({ n, loss: lossPct(b.factorScores[n], b.fweight[n] || 0) }))
+      .filter((x) => x.loss > 0).sort((a, c) => c.loss - a.loss).slice(0, 2);
+    const names = ded.map((x) => `<b style="color:${colFor(b.factorScores[x.n])}">${esc(x.n.toLowerCase())}</b>`);
+    $r('heroSummary').innerHTML = ded.length
+      ? `${b.overall >= 80 ? 'Running comfortably.' : 'Some pressure this period.'} The score is held back mainly by ${names.join(' and ')}.${b.throttle === 0 ? ' No throttling or undervoltage.' : ''}`
+      : 'Everything in range with no meaningful deductions.';
+    const st = $r('statThrottle'); st.textContent = b.throttle; st.style.color = b.throttle === 0 ? 'var(--accent-green, #10b981)' : '#ef4444';
+    $r('statAlerts').textContent = b.alerts;
+    $r('statTemp').textContent = b.peakTemp != null ? `${fix(b.peakTemp)} °C` : '-';
+    $r('statStorage').textContent = b.storageUsed != null ? `${b.storageUsed}% used` : '-';
+    $r('selDay').textContent = b.legend;
+  }
+  function renderFactors() {
+    const b = buckets[sel], prev = buckets[sel - 1], fg = $r('factors');
+    const order = FACTOR_ORDER.filter((n) => b.factorScores[n] != null);
+    fg.innerHTML = order.map((name, i) => {
+      const sc = b.factorScores[name], wt = b.fweight[name] || 0, loss = lossPct(sc, wt);
+      const tr = prev && prev.factorScores[name] != null ? Math.round(sc - prev.factorScores[name]) : 0;
+      return `<div class="rep-fcard" data-i="${i}">
+        <div class="rep-fh"><span class="rep-fname">${esc(name)}${trendArrow(tr)}</span>
+          <span class="rep-fh-r"><span class="rep-floss" style="color:${loss > 0 ? '#ef4444' : '#10b981'}">${loss > 0 ? '-' + loss + '%' : '0%'}</span>
+            <svg class="rep-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></div>
+        <div class="rep-fbar"><span style="width:${sc}%;background:${colFor(sc)}"></span></div>
+        <div class="rep-fdetail"><span>score ${sc} · weight ${wt}%</span><span>${esc(detailFor(name, b))}</span></div>
+      </div>`;
+    }).join('') + '<div class="rep-drill" data-rep="drill"></div>';
+    fg.querySelectorAll('.rep-fcard').forEach((c) => { c.onclick = () => toggleFactor(+c.dataset.i, c, order); });
+  }
+  function toggleFactor(i, card, order) {
+    const drill = $r('drill'), b = buckets[sel], name = order[i];
+    $r('factors').querySelectorAll('.rep-fcard').forEach((c) => c.classList.remove('open'));
+    if (openF === i) { openF = -1; drill.classList.remove('show'); return; }
+    openF = i; card.classList.add('open');
+    const sc = b.factorScores[name], wt = b.fweight[name] || 0, loss = lossPct(sc, wt);
+    const series = buckets.map((bk) => bk.factorScores[name]).filter((v) => v != null);
+    const evts = name === 'Thermal headroom' || name === 'Memory' || name === 'Throttle / undervoltage' || name === 'Alert activity'
+      ? (b.feed.filter((e) => e[2].toLowerCase().includes(name.split(' ')[0].toLowerCase())) )
+      : [];
+    const evtRows = (evts.length ? evts : b.feed.slice(0, 3)).map((e) => `<div class="rep-evt"><span class="rep-dot" style="background:${e[0]}"></span><span class="rep-evt-t">${esc(b.isDay ? (e[1] || '·') : (e[4] || '·'))}</span><span>${esc(e[2])}${e[3] ? ' · ' + esc(e[3]) : ''}</span></div>`).join('') || '<div class="rep-evt"><span class="rep-evt-t">·</span><span>No contributing events this period.</span></div>';
+    drill.innerHTML = `
+      <h4>${esc(name)} <span class="rep-drill-sub">· score ${sc}/100 · ${loss > 0 ? '-' + loss + '%' : '0%'} off</span></h4>
+      <p class="rep-drill-lead">${esc(leadFor(name, b))}</p>
+      <div class="rep-dgrid">
+        <div><div class="rep-cap">${view === 'daily' ? '30-DAY' : view === 'weekly' ? '12-WEEK' : 'MONTHLY'} HISTORY</div>
+          <div class="rep-chart">${axisChart(series.length ? series : [sc], colFor(sc), { w: 560, h: 160, ymin: Math.min(...series, 40), ymax: 100, yTitle: 'score', xticks: xticksFor() })}</div></div>
+        <div><div class="rep-cap">CONTRIBUTING EVENTS</div>${evtRows}</div>
+      </div>
+      <div class="rep-hint"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.5.4.8 1 .8 1.6V17h6.4v-.7c0-.6.3-1.2.8-1.6A7 7 0 0 0 12 2z"/></svg><span>${esc(FHINT[name] || 'Watch this factor over the coming days.')}</span></div>`;
+    drill.classList.add('show'); card.after(drill);
+  }
+  function renderFeed() {
+    const b = buckets[sel], feed = $r('feed'), items = b.feed || [];
+    if (!items.length) { feed.innerHTML = '<div class="rep-feed-empty">No notable events in this period.</div>'; return; }
+    feed.innerHTML = items.map((e) => {
+      const col = e[0], when = b.isDay ? (e[1] || '') : `${e[4] || ''} ${e[1] || ''}`.trim();
+      return `<div class="rep-feed-item"><div class="rep-feed-ic" style="background:${col}22;border:1px solid ${col}55">
+        <svg viewBox="0 0 24 24" style="stroke:${col};fill:none;stroke-width:2"><path d="${ICONS[col] || ICONS['#00d4ff']}"/></svg></div>
+        <div class="rep-feed-it"><div><div class="rep-feed-a">${esc(e[2])}</div><div class="rep-feed-b">${esc(e[3] || '')}</div></div><div class="rep-feed-when">${esc(when)}</div></div></div>`;
+    }).join('');
+  }
+  function renderMetrics() {
+    const last30 = allDays.slice(-30);
+    const cards = Object.keys(METRIC_META).map((key) => {
+      const meta = METRIC_META[key];
+      const vals = last30.map((d) => (d.metrics[key] ? d.metrics[key].avg : null)).filter((v) => v != null);
+      if (!vals.length) return '';
+      const mn = Math.min(...vals), mx = Math.max(...vals), avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const sorted = [...vals].sort((a, b) => a - b), p95 = sorted[Math.floor(0.95 * (sorted.length - 1))];
+      return `<div class="rep-metric"><div class="rep-metric-head"><b>${esc(meta.label)}</b></div>
+        <div class="rep-mchart">${axisChart(vals, '#00d4ff', { w: 240, h: 96, pl: 34, ymin: mn, ymax: mx, fmt: (v) => fix(v), xticks: [{ f: 0, l: '30d', a: 'start' }, { f: 1, l: 'now', a: 'end' }], yTitle: meta.unit })}</div>
+        <div class="rep-metric-stats"><span>min ${fix(mn)}</span><span>avg ${fix(avg)}</span><span>max ${fix(mx)}</span><span>p95 ${fix(p95)}</span></div></div>`;
+    }).join('');
+    $r('metrics').innerHTML = cards || '<p class="sess-empty">No metric history yet.</p>';
+  }
+  function renderAll() { renderTimeline(); renderHero(); renderFactors(); renderFeed(); }
+
+  function buildShell() {
+    $r('root').innerHTML = `
+      <div class="card"><div class="card-body">
+        <div class="rep-hero-head"><h2 data-rep="heroDate"></h2><span class="rep-pill" data-rep="heroPill"></span><span class="rep-delta" data-rep="heroDelta"></span></div>
+        <div class="rep-hero"><div class="rep-ringwrap" data-rep="ring"></div>
+          <div class="rep-hero-meta"><p class="rep-summary" data-rep="heroSummary"></p>
+            <div class="rep-stats">
+              <div class="rep-stat"><div class="rep-stat-k">Throttle events</div><div class="rep-stat-v" data-rep="statThrottle"></div></div>
+              <div class="rep-stat"><div class="rep-stat-k">Alerts fired</div><div class="rep-stat-v" data-rep="statAlerts"></div></div>
+              <div class="rep-stat"><div class="rep-stat-k">Peak temp</div><div class="rep-stat-v" data-rep="statTemp"></div></div>
+              <div class="rep-stat"><div class="rep-stat-k">Storage</div><div class="rep-stat-v" data-rep="statStorage"></div></div>
+            </div></div></div>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <h4 class="sess-h" data-rep="tlHead"></h4>
+        <div class="rep-strip" data-rep="strip"></div>
+        <div class="rep-legend"><span>Lower</span><i style="background:#ef4444"></i><i style="background:#eab308"></i><i style="background:#10b981"></i><span>Higher</span><span class="rep-legend-sel">Showing: <b data-rep="selDay"></b></span></div>
+      </div></div>
+      <div class="card"><div class="card-body"><h4 class="sess-h">Score breakdown - click a factor to dig in</h4><div class="rep-factors" data-rep="factors"></div></div></div>
+      <div class="card"><div class="card-body"><h4 class="sess-h">Notable events &amp; peaks</h4><div class="rep-feed" data-rep="feed"></div></div></div>
+      <div class="card"><div class="card-body"><h4 class="sess-h">Metric trends · 30 days (daily avg)</h4><div class="rep-metrics" data-rep="metrics"></div></div></div>`;
+  }
+
+  async function loadData() {
+    let data;
+    try { data = await api('/reports/daily?days=90'); } catch { return; }
+    const src = (data.days || []).slice().sort((a, b) => (a.day < b.day ? -1 : 1));
+    allDays = src.map(normalize);
+    if (!allDays.length) {
+      $r('root').innerHTML = '<p class="sess-empty">No daily summaries yet. Reports build overnight; click Rebuild now to generate.</p>';
+      return;
+    }
+    const lastFactors = (allDays[allDays.length - 1].factors || []).map((f) => f.name);
+    FACTOR_ORDER = lastFactors.length ? lastFactors : ['Thermal headroom', 'Throttle / undervoltage', 'CPU load', 'Memory', 'Storage runway', 'Alert activity'];
+    buildShell();
+    view = 'daily'; buckets = buildBuckets('daily'); sel = buckets.length - 1; openF = -1;
+    renderAll(); renderMetrics();
   }
 
   return {
     mount(host) {
+      hostRef = host;
+      const ICO = {
+        rebuild: '<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+        dl: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+        print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"/>',
+      };
+      const svg = (p) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${p}</svg>`;
       host.innerHTML = `
-      <div class="page-lead">${pageHeader('reports', 'Reports')}</div>
-      <div class="rapisys-grid">
-        <div class="card sess-span">
-          <div class="card-header">
-            <div class="rep-tabs">
-              <button class="rep-tab active" data-rep-tab="daily">Daily</button>
-              <button class="rep-tab" data-rep-tab="weekly">Weekly</button>
-              <button class="rep-tab" data-rep-tab="monthly">Monthly</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="rep-actions">
-              <button class="net-toggle" data-rep="rebuild">Rebuild now</button>
-              <a class="net-toggle keep-case" href="/api/reports/export.csv?days=30" download>Export CSV</a>
-              <a class="net-toggle keep-case" href="/api/reports/export.json?days=30" download>Export JSON</a>
-              <button class="net-toggle keep-case" data-rep="print">Export PDF (print)</button>
-            </div>
-            <div data-rep="body"></div>
+        <div class="page-lead">${pageHeader('reports', 'Reports')}</div>
+        <div class="rep-actions">
+          <button class="net-toggle" data-rep="rebuild">${svg(ICO.rebuild)}Rebuild now</button>
+          <a class="net-toggle keep-case" href="/api/reports/export.csv?days=90" download>${svg(ICO.dl)}CSV</a>
+          <a class="net-toggle keep-case" href="/api/reports/export.json?days=90" download>${svg(ICO.dl)}JSON</a>
+          <button class="net-toggle keep-case" data-rep="print">${svg(ICO.print)}PDF (print)</button>
+          <div class="rep-tabs" data-rep="tabs">
+            <button class="rep-tab active" data-view="daily">Daily</button>
+            <button class="rep-tab" data-view="weekly">Weekly</button>
+            <button class="rep-tab" data-view="monthly">Monthly</button>
           </div>
         </div>
-      </div>`;
-      host.querySelectorAll('[data-rep-tab]').forEach((b) => b.onclick = () => {
-        view = b.dataset.repTab;
-        host.querySelectorAll('[data-rep-tab]').forEach((x) => x.classList.toggle('active', x === b));
-        load(host);
+        <div class="rep-wrap" data-rep="root"><p class="sess-empty">Loading reports...</p></div>`;
+      host.querySelectorAll('[data-rep="tabs"] .rep-tab').forEach((b) => {
+        b.onclick = () => {
+          if (!allDays.length) return;
+          host.querySelectorAll('[data-rep="tabs"] .rep-tab').forEach((x) => x.classList.toggle('active', x === b));
+          view = b.dataset.view; buckets = buildBuckets(view); sel = buckets.length - 1; openF = -1; renderAll();
+        };
       });
-      $('[data-rep=rebuild]', host).onclick = async () => {
-        const btn = $('[data-rep=rebuild]', host); btn.textContent = 'Rebuilding…'; btn.disabled = true;
-        try { await api('/reports/rebuild', { method: 'POST', body: {} }); toast('success', 'Reports', 'Summaries rebuilt'); load(host); }
+      $r('rebuild').onclick = async () => {
+        const btn = $r('rebuild'); btn.disabled = true; btn.classList.add('is-busy');
+        try { await api('/reports/rebuild', { method: 'POST', body: {} }); toast('success', 'Reports', 'Summaries rebuilt'); await loadData(); }
         catch (e) { toast('error', 'Reports', e.message); }
-        finally { btn.textContent = 'Rebuild now'; btn.disabled = false; }
+        finally { const b2 = $r('rebuild'); if (b2) { b2.disabled = false; b2.classList.remove('is-busy'); } }
       };
-      $('[data-rep=print]', host).onclick = () => window.print();
-      load(host);
+      $r('print').onclick = () => window.print();
+      loadData();
     },
-    unmount() {},
+    unmount() { hostRef = null; allDays = []; buckets = []; },
   };
 })();
 
