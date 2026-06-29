@@ -5218,7 +5218,7 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .rep-tab { font-size: 12px; font-weight: 600; padding: 6px 15px; border-radius: 999px; background: none;
   border: 1px solid var(--border-color); color: var(--text-secondary); cursor: pointer; font-family: inherit; }
 .rep-tab.active { color: var(--accent-cyan); border-color: var(--accent-cyan); background: rgba(0,212,255,0.06); }
-.rep-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.rep-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; max-width: 1180px; }
 .rep-actions a.net-toggle { text-decoration: none; display: inline-flex; }
 .rep-actions .net-toggle.is-busy { opacity: 0.5; cursor: progress; }
 .rep-wrap { max-width: 1180px; }
