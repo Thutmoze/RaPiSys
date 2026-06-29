@@ -6385,3 +6385,5 @@ body.rapisys-popout .rt-vnc { height: calc(100vh - 70px); }
 .dk-catpick label:hover{background:rgba(255,255,255,.02)}
 .dk-catpick input{accent-color:var(--accent-cyan);width:16px;height:16px}
 .dk-sz{margin-left:auto;color:var(--text-tertiary,#6b7280);font-size:12px}
+
+.dk-page{max-width:1120px;margin:0 auto}

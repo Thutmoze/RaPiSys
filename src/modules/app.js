@@ -4761,7 +4761,7 @@ pageRenderers.disk = (() => {
 
   return {
     async mount(host) {
-      host.innerHTML = `
+      host.innerHTML = `<div class="dk-page">
         ${pageHeader('disk', 'Disk Management')}
         <p class="dk-sub">Detect and reclaim stale, temporary and unneeded files — scanned and explained before anything is removed.</p>
         <div class="dk-grid">
@@ -4784,7 +4784,7 @@ pageRenderers.disk = (() => {
           <div class="card-header dk-cathead"><div class="dk-ct">${clockIconSvg()}<span class="card-title">Auto-clean schedule</span></div>
             <button class="set-btn set-btn-edit dk-edit" data-disk="sched-edit">${EDIT_ICON}<span>Edit</span></button></div>
           <div data-disk="sched"></div>
-        </div>`;
+        </div></div>`;
       $('[data-disk=rescan]', host).onclick = rescanOnly;
       $('[data-disk=scan]', host).onclick = rescanOnly;
       $('[data-disk=clean]', host).onclick = () => { const ids = [...selected]; if (!ids.length) return toast('error', 'Disk', 'No categories selected'); runClean(ids, { purgeAll: false }); };
