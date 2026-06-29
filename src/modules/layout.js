@@ -47,6 +47,10 @@ export function setToast(fn) { if (typeof fn === 'function') toast = fn; }
 // inline-SVG path strings; the dashboard tabs and glyph picker use these.
 let GLYPHS = {};
 export function setGlyphs(obj) { if (obj && typeof obj === 'object') GLYPHS = obj; }
+// Button glyphs (match the app-wide icon convention used by the confirm dialog).
+const CHECK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+const PLUS_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 function glyphSvg(key, size = 15) {
   const p = GLYPHS[key]; if (!p) return '';
   return `<svg class="dash-tab-glyph" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -420,7 +424,7 @@ function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) =
 
 // Modal dialog for creating/editing a dashboard: name field + glyph picker.
 // Returns { name, glyph } on save, or null on cancel.
-function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save' }) {
+function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save', confirmIcon = CHECK_ICON, clearDefault = false }) {
   return new Promise((resolve) => {
     const ov = document.createElement('div');
     ov.className = 'wizard-overlay dash-dialog-overlay';
@@ -440,8 +444,8 @@ function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save'
             ${chips}
           </div>
           <div class="wz-row">
-            <button class="action-btn wz-primary" data-dlg="ok">${escHtml(confirmLabel)}</button>
-            <button class="action-btn set-btn-cancel" data-dlg="cancel">Cancel</button>
+            <button class="action-btn wz-primary" data-dlg="ok">${confirmIcon}<span>${escHtml(confirmLabel)}</span></button>
+            <button class="action-btn set-btn-cancel" data-dlg="cancel">${CANCEL_ICON}<span>Cancel</span></button>
           </div>
         </div>
       </div>`;
@@ -460,12 +464,24 @@ function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save'
       done({ name: n, glyph: sel || null });
     };
     ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && e.target === nameInput) ov.querySelector('[data-dlg=ok]').click(); });
-    setTimeout(() => nameInput.focus(), 50);
+    // For a new dashboard the default name is pre-selected and cleared the
+    // moment the user starts typing, so they don't have to backspace it. When
+    // editing an existing dashboard (clearDefault=false) the name is untouched.
+    let pristine = clearDefault;
+    nameInput.addEventListener('keydown', (e) => {
+      if (!pristine) return;
+      const printable = e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+      if (printable) { nameInput.value = ''; pristine = false; }
+      else if (e.key === 'Backspace' || e.key === 'Delete') { pristine = false; }
+    });
+    nameInput.addEventListener('input', () => { pristine = false; });
+    setTimeout(() => { nameInput.focus(); if (clearDefault) nameInput.select(); }, 50);
   });
 }
 
 async function addDashboard() {
-  const out = await dashboardDialog({ title: 'New dashboard', name: 'New dashboard', confirmLabel: 'Create' });
+  const wasEditing = editing;
+  const out = await dashboardDialog({ title: 'New dashboard', name: 'New dashboard', confirmLabel: 'Create', confirmIcon: PLUS_ICON, clearDefault: true });
   if (!out) return;
   try {
     const res = await fetch('/api/layouts/dashboards', {
@@ -475,8 +491,10 @@ async function addDashboard() {
     if (!res.ok) { const e = await res.json().catch(() => ({})); toast('error', 'Dashboard', e.error || 'Could not create'); return; }
     const { dashboard } = await res.json();
     dashboards.push({ id: dashboard.id, name: out.name, glyph: out.glyph });
-    toast('success', 'Dashboard', `“${out.name}” created — it starts empty; use Edit to add cards.`);
-    switchDashboard(dashboard.id);
+    toast('success', 'Dashboard', `“${out.name}” created — add cards from the palette below.`);
+    // switchDashboard() bails while editing, so use the editing-aware navigator:
+    // land on the new (empty) tab and stay in edit mode so cards can be added.
+    await gotoDashboard(dashboard.id, wasEditing);
   } catch (err) { toast('error', 'Dashboard', err.message); }
 }
 
@@ -535,7 +553,13 @@ async function enterEditMode() {
     if (me.mode === 'monitor') { toast('info', 'Monitor-only mode', 'Layout editing is disabled.'); return; }
     if (!me.authenticated) { toast('info', 'Sign in required', 'Sign in as admin to edit the layout.'); return; }
   } catch { /* save will reject if truly unauthorized */ }
+  startEditor();
+}
 
+// Build the editable grid + toolbar for the current dashboard. Shared by
+// enterEditMode (after the auth check) and gotoDashboard (when creating a tab
+// while already editing), so the two paths can't drift apart.
+function startEditor() {
   editing = true;
   document.body.classList.add('layout-editing');
   renderDashTabs();   // reveal add/rename/delete affordances
@@ -554,6 +578,28 @@ async function enterEditMode() {
       if (wi) wi.value = n.w; if (hi) hi.value = n.h;
     }
   });
+}
+
+// Navigate to a dashboard regardless of edit state. switchDashboard() refuses to
+// switch while editing (to protect unsaved edits via the tab bar); this is the
+// deliberate path used right after creating a tab — land on it, optionally in
+// edit mode so the empty dashboard can be filled immediately.
+async function gotoDashboard(id, edit) {
+  currentDash = id;
+  try { await fetch(`/api/layouts/dashboards/${id}/select`, { method: 'POST', credentials: 'same-origin' }); } catch { /* */ }
+  if (grid) { teardownGrid(); grid = null; }     // restores prior widgets to home
+  document.getElementById('layout-parking')?.remove();
+  removeEmptyHint();
+  savedLayout = await fetchLayout();
+  // A freshly created dashboard has no stored layout → treat as empty, not the
+  // all-widgets default (which only applies to the built-in 'default').
+  if (savedLayout == null && currentDash !== 'default') savedLayout = [];
+  if (edit) {
+    startEditor();
+  } else {
+    renderDashTabs();
+    if (savedLayout || currentDash !== 'default') { grid = buildGrid({ editable: false }); maybeShowEmptyHint(); }
+  }
 }
 
 function wireSizeInputs() {
