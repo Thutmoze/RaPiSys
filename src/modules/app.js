@@ -4027,7 +4027,7 @@ pageRenderers.reports = (() => {
     else { dEl.textContent = ''; dEl.className = 'rep-delta'; }
     $r('ring').innerHTML = ring(b.overall);
     const ded = FACTOR_ORDER.filter((n) => b.factorScores[n] != null)
-      .map((n) => ({ n, loss: lossPct(b.factorScores[n], b.fweight[n] || 0) }))
+      .map((n) => ({ n, loss: lossPct(b.factorScores[n], (b.fweight[n] || 0) * 100) }))
       .filter((x) => x.loss > 0).sort((a, c) => c.loss - a.loss).slice(0, 2);
     const names = ded.map((x) => `<b style="color:${colFor(b.factorScores[x.n])}">${esc(x.n.toLowerCase())}</b>`);
     $r('heroSummary').innerHTML = ded.length
@@ -4043,14 +4043,14 @@ pageRenderers.reports = (() => {
     const b = buckets[sel], prev = buckets[sel - 1], fg = $r('factors');
     const order = FACTOR_ORDER.filter((n) => b.factorScores[n] != null);
     fg.innerHTML = order.map((name, i) => {
-      const sc = b.factorScores[name], wt = b.fweight[name] || 0, loss = lossPct(sc, wt);
+      const sc = b.factorScores[name], wt = (b.fweight[name] || 0) * 100, loss = lossPct(sc, wt);
       const tr = prev && prev.factorScores[name] != null ? Math.round(sc - prev.factorScores[name]) : 0;
       return `<div class="rep-fcard" data-i="${i}">
         <div class="rep-fh"><span class="rep-fname">${esc(name)}${trendArrow(tr)}</span>
           <span class="rep-fh-r"><span class="rep-floss" style="color:${loss > 0 ? '#ef4444' : '#10b981'}">${loss > 0 ? '-' + loss + '%' : '0%'}</span>
             <svg class="rep-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></div>
-        <div class="rep-fbar"><span style="width:${sc}%;background:${colFor(sc)}"></span></div>
-        <div class="rep-fdetail"><span>score ${sc} · weight ${wt}%</span><span>${esc(detailFor(name, b))}</span></div>
+        <div class="rep-fbar"><span style="width:${Math.round(sc)}%;background:${colFor(sc)}"></span></div>
+        <div class="rep-fdetail"><span>score ${Math.round(sc)} · weight ${Math.round(wt)}%</span><span>${esc(detailFor(name, b))}</span></div>
       </div>`;
     }).join('') + '<div class="rep-drill" data-rep="drill"></div>';
     fg.querySelectorAll('.rep-fcard').forEach((c) => { c.onclick = () => toggleFactor(+c.dataset.i, c, order); });
@@ -4060,14 +4060,14 @@ pageRenderers.reports = (() => {
     $r('factors').querySelectorAll('.rep-fcard').forEach((c) => c.classList.remove('open'));
     if (openF === i) { openF = -1; drill.classList.remove('show'); return; }
     openF = i; card.classList.add('open');
-    const sc = b.factorScores[name], wt = b.fweight[name] || 0, loss = lossPct(sc, wt);
+    const sc = b.factorScores[name], wt = (b.fweight[name] || 0) * 100, loss = lossPct(sc, wt);
     const series = buckets.map((bk) => bk.factorScores[name]).filter((v) => v != null);
     const evts = name === 'Thermal headroom' || name === 'Memory' || name === 'Throttle / undervoltage' || name === 'Alert activity'
       ? (b.feed.filter((e) => e[2].toLowerCase().includes(name.split(' ')[0].toLowerCase())) )
       : [];
     const evtRows = (evts.length ? evts : b.feed.slice(0, 3)).map((e) => `<div class="rep-evt"><span class="rep-dot" style="background:${e[0]}"></span><span class="rep-evt-t">${esc(b.isDay ? (e[1] || '·') : (e[4] || '·'))}</span><span>${esc(e[2])}${e[3] ? ' · ' + esc(e[3]) : ''}</span></div>`).join('') || '<div class="rep-evt"><span class="rep-evt-t">·</span><span>No contributing events this period.</span></div>';
     drill.innerHTML = `
-      <h4>${esc(name)} <span class="rep-drill-sub">· score ${sc}/100 · ${loss > 0 ? '-' + loss + '%' : '0%'} off</span></h4>
+      <h4>${esc(name)} <span class="rep-drill-sub">· score ${Math.round(sc)}/100 · ${loss > 0 ? '-' + loss + '%' : '0%'} off</span></h4>
       <p class="rep-drill-lead">${esc(leadFor(name, b))}</p>
       <div class="rep-dgrid">
         <div><div class="rep-cap">${view === 'daily' ? '30-DAY' : view === 'weekly' ? '12-WEEK' : 'MONTHLY'} HISTORY</div>
