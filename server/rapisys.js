@@ -53,6 +53,8 @@ import { tailscaleRouter } from './routes/tailscale.js';
 import { authRouter } from './routes/auth.js';
 import { createPironmanClient } from './collectors/pironman.js';
 import { pironmanRouter } from './routes/pironman.js';
+import { createDiskCollector } from './collectors/disk.js';
+import { diskRouter } from './routes/disk.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -191,6 +193,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   });
   reports.backfill(14);
   const inventory = createInventoryCollector();
+  const disk = createDiskCollector();
   const inventoryRepoFacade = new Proxy({}, { get: (_, m) => (...a) => inventoryRepo[m](...a) });
   const layoutsRepoFacade = new Proxy({}, { get: (_, m) => (...a) => layoutsRepo[m](...a) });
   const updatesRepoFacade = new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) });
@@ -331,6 +334,44 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     try { await tls.renewIfNeeded(app); } catch (e) { console.error('[tls] renew failed:', e.message); }
   });
 
+  // Auto-clean: a 5-minute tick that fires the disk cleanup (or a scan-only
+  // pass) when the user-configured schedule is due. Off unless enabled in
+  // Settings. Frequency gates against lastRunAt so it runs once per day/week/
+  // month within a 5-min window after the configured time.
+  scheduler.register('disk-autoclean', 300e3, async () => {
+    let s; try { s = await loadSettings(); } catch { return; }
+    const cfg = s.rapisys?.diskClean;
+    if (!cfg || !cfg.enabled) return;
+    const now = new Date();
+    const [hh, mm] = String(cfg.time || '03:00').split(':').map(Number);
+    const targetMin = (hh || 0) * 60 + (mm || 0);
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    if (nowMin < targetMin || nowMin >= targetMin + 5) return;          // outside run window
+    if (new Date(cfg.lastRunAt || 0).toDateString() === now.toDateString()) return; // already today
+    if (cfg.frequency === 'weekly' && now.getDay() !== (cfg.dayOfWeek ?? 0)) return;
+    if (cfg.frequency === 'monthly' && now.getDate() !== (cfg.dayOfMonth ?? 1)) return;
+    try {
+      const cats = (cfg.categories || []).filter(Boolean);
+      if (cfg.mode === 'clean' && cats.length) {
+        const out = await disk.clean({ categories: cats, journalTargetMB: cfg.journalTargetMB || 200 });
+        eventsFacade.add('disk.autoclean', 'info', { mode: 'clean', categories: out.cleaned || cats, reclaimedBytes: out.reclaimedBytes || 0 });
+      } else {
+        const scan = await disk.scan(cfg.journalTargetMB || 200);
+        eventsFacade.add('disk.autoclean', 'info', { mode: 'scan', reclaimableBytes: scan.totalDefaultBytes || 0 });
+      }
+    } catch (e) {
+      eventsFacade.add('disk.autoclean.failed', 'warning', { error: e.message });
+    }
+    try {
+      await withFileLock(async () => {
+        const s2 = await loadSettings();
+        s2.rapisys = s2.rapisys || {};
+        s2.rapisys.diskClean = { ...(s2.rapisys.diskClean || {}), lastRunAt: Date.now() };
+        await saveSettings(s2);
+      });
+    } catch { /* */ }
+  });
+
   // ---- routes ----------------------------------------------------------------------
   // requireConfig: open in monitor mode, auth-required in full mode.
   const rc = auth.requireConfig;
@@ -436,6 +477,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     loadSettings, saveSettings, withFileLock, refreshPironmanConfig }));
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/disk', rc, diskRouter({ disk, requireControl: auth.requireControl, loadSettings, saveSettings, withFileLock, events: eventsFacade }));
   app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   app.use('/api/tailscale', rc, tailscaleRouter({ requireControl: auth.requireControl }));
