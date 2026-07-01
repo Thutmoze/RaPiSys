@@ -128,6 +128,17 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       const res = await securityScan(toScan, installedMap, (p) => onProgress?.({ phase: 'scanning', total: p.total, done: p.done, pkg: p.pkg }));
       for (const u of updates) { const r = res[u.package]; if (r && r.scanned) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; u.releaseDate = r.releaseDate; } }
     }
+    // Backfill release dates for packages carried forward from an earlier scan
+    // (unchanged candidate, so never re-parsed) by reading the already-cached
+    // changelog — no re-download. Populates the "Released" column retroactively.
+    for (const u of updates) {
+      if (u.releaseDate) continue;
+      const cc = updatesRepo?.getCachedChangelog?.(u.package);
+      if (cc && cc.changelog) {
+        const rd = parseChangelogReleaseDate(cc.changelog);
+        if (rd) { u.releaseDate = rd; updatesRepo?.saveReleaseDate?.(u.package, u.candidate, rd); }
+      }
+    }
     updatesRepo?.saveCache(updates);
     // report packages whose changelog still isn't cached (large pkgs whose
     // range-fetch couldn't reach the changelog). getChangelog handles the

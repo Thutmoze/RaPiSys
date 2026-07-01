@@ -5202,7 +5202,7 @@ pageRenderers.updates = (() => {
       + ACTION_BTN('security', ICN.shield, sec ? `Install security updates (${sec})` : 'No security updates', 'up-act-sec', !sec)
       + ACTION_BTN('selected', ICN.download, 'Update selected (0)', 'up-btn-sel', selected.size === 0)
       + ACTION_BTN('full', ICN.rocket, `Full Upgrade (${updates.length})`, 'up-act-danger', !updates.length)
-      + ACTION_BTN('firmware', ICN.chip, fw ? 'Update Firmware (1)' : 'Firmware (0)', 'up-act-fw', !fw);
+      + ACTION_BTN('firmware', ICN.chip, (fwPkgs || fw) ? `Update Firmware (${fwPkgs})` : 'Firmware (0)', 'up-act-fw', !(fwPkgs || fw));
     wireActions(host);
 
     $('[data-up=table]', host).innerHTML = updates.length ? `
@@ -5281,7 +5281,7 @@ pageRenderers.updates = (() => {
     const full = $('[data-up=full]', host);
     if (full) full.onclick = () => confirmFull(host);
     const fw = $('[data-up=firmware]', host);
-    if (fw) fw.onclick = () => startFirmware(host);
+    if (fw) fw.onclick = () => updateFirmware(host);
   }
 
   function wireTable(host) {
@@ -5556,7 +5556,7 @@ pageRenderers.updates = (() => {
     setTimeout(() => typed.focus(), 50);
   }
 
-  async function confirmUpgrade(host, { packages, label }) {
+  async function confirmUpgrade(host, { packages, label, onComplete = null }) {
     if (!packages || !packages.length) { toast('info', 'Updates', 'Nothing selected'); return; }
     const selectedSet = new Set(packages);
     // Run apt's dry-run first so we can show the FULL set of packages that will
@@ -5607,7 +5607,7 @@ pageRenderers.updates = (() => {
       msg += `<br><br><div class="up-cascade-list">${packages.slice(0, 30).map((p) => `<span class="up-cascade-pkg">${esc(p)}</span>`).join('')}</div><br>apt will also pull in any required dependencies.`;
     }
     if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true })) return;
-    startUpgrade(host, { packages, label });
+    startUpgrade(host, { packages, label, onComplete });
   }
 
   // Parse `apt-get -s` plan text into the packages it would install/upgrade/remove.
@@ -5624,7 +5624,7 @@ pageRenderers.updates = (() => {
     return out;
   }
 
-  function startUpgrade(host, { packages = null, full = false, label }) {
+  function startUpgrade(host, { packages = null, full = false, label, onComplete = null }) {
     if (streaming) { toast('info', 'Updates', 'An upgrade is already running'); return; }
     if (!full && (!packages || !packages.length)) return;
     streaming = true;
@@ -5669,6 +5669,22 @@ pageRenderers.updates = (() => {
     closeBtn.onclick = closeAndRefresh;
     ov.addEventListener('click', (e) => { if (e.target === ov && finished) closeAndRefresh(); });
 
+    // Shared completion: shows the result state + close button and releases the
+    // streaming lock. Reused by the apt phase and any chained follow-up phase.
+    const finalize = (ok, d = {}) => {
+      card.querySelector('.up-spinner')?.remove();
+      barEl.style.width = '100%';
+      barEl.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
+      statusEl.textContent = ok ? 'Done' : `Finished with errors${d.code != null ? ` (code ${d.code})` : ''}`;
+      resultEl.removeAttribute('hidden');
+      resultEl.innerHTML = ok
+        ? '<span class="up-install-success">✓ Completed successfully</span>'
+        : `<span class="up-install-fail">✗ Finished with errors${d.code != null ? ` (code ${d.code})` : ''}</span>`;
+      closeBtn.hidden = false; finished = true;
+      toast(ok ? 'success' : 'error', 'Updates', ok ? 'Upgrade complete' : 'Upgrade had errors');
+      streaming = false; selected.clear();
+    };
+
     const qs = full ? 'full=1' : `packages=${encodeURIComponent(pkgList.join(','))}`;
     const ev = new EventSource(`/api/updates/stream?${qs}`);
     ev.addEventListener('line', (e) => {
@@ -5682,17 +5698,16 @@ pageRenderers.updates = (() => {
     });
     ev.addEventListener('done', (e) => {
       const d = JSON.parse(e.data);
-      card.querySelector('.up-spinner')?.remove();
-      barEl.style.width = '100%';
-      barEl.classList.add(d.ok ? 'up-install-bar-ok' : 'up-install-bar-err');
-      statusEl.textContent = d.ok ? 'Done' : `Finished with errors (code ${d.code})`;
-      resultEl.removeAttribute('hidden');
-      resultEl.innerHTML = d.ok
-        ? '<span class="up-install-success">✓ Completed successfully</span>'
-        : `<span class="up-install-fail">✗ Finished with errors (code ${d.code})</span>`;
-      closeBtn.hidden = false; finished = true;
-      toast(d.ok ? 'success' : 'error', 'Updates', d.ok ? 'Upgrade complete' : 'Upgrade had errors');
-      ev.close(); streaming = false; selected.clear();
+      ev.close();
+      // If a follow-up phase is queued (e.g. bootloader EEPROM flash) and the apt
+      // phase succeeded, continue in the SAME card instead of finalizing.
+      if (onComplete && d.ok) {
+        logEl.textContent += '\n— firmware packages updated —\n';
+        statusEl.textContent = 'Flashing bootloader EEPROM…';
+        onComplete(host, { card, logEl, barEl, statusEl, resultEl, closeBtn, finalize });
+        return;
+      }
+      finalize(d.ok, d);
     });
     ev.addEventListener('failed', (e) => {
       if (finished) return;
@@ -5721,13 +5736,41 @@ pageRenderers.updates = (() => {
     });
   }
 
-  function startFirmware(host) {
+  // The "Update Firmware" action button folds both firmware paths: it upgrades
+  // the firmware apt packages (streamed, with the same dependency-analysis
+  // confirm as Update Selected) and, if the bootloader EEPROM flash is also
+  // pending, flashes it at the end of the same run. Falls back to a bare
+  // bootloader flash when there are no firmware packages to upgrade.
+  function updateFirmware(host) {
+    if (streaming) return;
+    const fwPkgs = updates.filter((u) => u.firmware).map((u) => u.package);
+    const eepromPending = !!(firmware && firmware.updateAvailable);
+    if (fwPkgs.length) {
+      confirmUpgrade(host, { packages: fwPkgs, label: 'firmware packages', onComplete: eepromPending ? flashBootloaderInCard : null });
+    } else if (eepromPending) {
+      flashBootloader(host);
+    }
+  }
+
+  // Chained bootloader flash that continues inside an existing upgrade card,
+  // appending to its log and finalizing it when the flash completes.
+  function flashBootloaderInCard(host, refs) {
+    const { logEl, statusEl, finalize } = refs;
+    const ev = new EventSource('/api/updates/firmware/stream');
+    ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
+    ev.addEventListener('done', (e) => { const d = JSON.parse(e.data); logEl.textContent += `\n✓ ${d.note || 'bootloader staged'}\n`; ev.close(); statusEl.textContent = d.note || 'Bootloader staged'; finalize(true, d); });
+    ev.addEventListener('error', () => { logEl.textContent += '\n✗ bootloader flash error\n'; ev.close(); finalize(false, {}); });
+  }
+
+  // Standalone bootloader flash (no firmware packages to upgrade) using the
+  // inline progress panel.
+  function flashBootloader(host) {
     if (streaming) return;
     streaming = true;
     const panel = $('[data-up=progress]', host);
     panel.style.display = 'block';
     panel.className = 'up-progress';
-    panel.innerHTML = `<div class="up-progress-head"><b>Updating firmware (rpi-eeprom)</b><span class="up-spinner"></span></div><pre class="up-log" data-up="log"></pre>`;
+    panel.innerHTML = `<div class="up-progress-head"><b>Flashing bootloader EEPROM (rpi-eeprom)</b><span class="up-spinner"></span></div><pre class="up-log" data-up="log"></pre>`;
     const logEl = panel.querySelector('[data-up=log]');
     const ev = new EventSource('/api/updates/firmware/stream');
     ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
