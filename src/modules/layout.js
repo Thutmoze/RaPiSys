@@ -51,6 +51,9 @@ export function setGlyphs(obj) { if (obj && typeof obj === 'object') GLYPHS = ob
 const CHECK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const PLUS_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const GRIP_ICON = '<svg viewBox="0 0 24 24" width="14" height="16" fill="currentColor"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>';
+const MINUS_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+const EXPAND_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
 function glyphSvg(key, size = 15) {
   const p = GLYPHS[key]; if (!p) return '';
   return `<svg class="dash-tab-glyph" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -667,25 +670,96 @@ function addWidget(id) {
 }
 
 let toolbarEl = null;
+let toolbarPos = null;        // {left,top} remembered across edit sessions this page load
+let toolbarCollapsed = false; // remembered collapse state
 function buildEditToolbar() {
   toolbarEl?.remove();
   toolbarEl = document.createElement('div');
   toolbarEl.className = 'layout-toolbar';
   toolbarEl.innerHTML = `
     <div class="layout-toolbar-inner">
-      <span class="layout-toolbar-title">Editing — drag the title bar, resize from the corner</span>
+      <button class="lt-grip" data-lt-grip aria-label="Drag to move" title="Drag to move">${GRIP_ICON}</button>
+      <span class="lt-tag">Editing</span>
+      <span class="layout-toolbar-title">drag cards by their title bar, resize from the corner</span>
       <div class="layout-palette" data-palette></div>
       <div class="layout-toolbar-actions">
-        <button class="lt-btn lt-save" data-lt="save">Save</button>
+        <button class="lt-btn lt-save" data-lt="save">${CHECK_ICON}<span>Save</span></button>
         <button class="lt-btn lt-reset" data-lt="reset">Reset to default</button>
-        <button class="lt-btn" data-lt="cancel">Cancel</button>
+        <button class="lt-btn" data-lt="cancel">${CANCEL_ICON}<span>Cancel</span></button>
       </div>
+      <button class="lt-toggle" data-lt="toggle" aria-label="Collapse" title="Collapse"><span class="ic-collapse">${MINUS_ICON}</span><span class="ic-expand">${EXPAND_ICON}</span></button>
     </div>`;
   document.body.appendChild(toolbarEl);
   toolbarEl.querySelector('[data-lt=save]').onclick = saveLayout;
   toolbarEl.querySelector('[data-lt=reset]').onclick = resetLayout;
   toolbarEl.querySelector('[data-lt=cancel]').onclick = cancelEdit;
+
+  // Collapse toggle: shrink to a grip + "Editing" pill so it clears the widgets.
+  const toggleBtn = toolbarEl.querySelector('[data-lt=toggle]');
+  const applyCollapsed = () => {
+    toolbarEl.classList.toggle('collapsed', toolbarCollapsed);
+    const label = toolbarCollapsed ? 'Expand' : 'Collapse';
+    toggleBtn.title = label; toggleBtn.setAttribute('aria-label', label);
+  };
+  toggleBtn.onclick = () => { toolbarCollapsed = !toolbarCollapsed; applyCollapsed(); clampToolbar(); };
+  applyCollapsed();
+
+  // Restore remembered position (switch from centered to explicit left/top).
+  if (toolbarPos) {
+    toolbarEl.style.left = `${toolbarPos.left}px`;
+    toolbarEl.style.top = `${toolbarPos.top}px`;
+    toolbarEl.style.bottom = 'auto';
+    toolbarEl.style.transform = 'none';
+    clampToolbar();
+  }
+  makeToolbarDraggable(toolbarEl.querySelector('[data-lt-grip]'));
   refreshToolbarPalette();
+}
+
+// Keep the toolbar fully inside the viewport (8px inset). Also converts the
+// initial centered position to explicit left/top the first time it's needed.
+function clampToolbar() {
+  if (!toolbarEl) return;
+  const r = toolbarEl.getBoundingClientRect();
+  const maxL = Math.max(8, window.innerWidth - r.width - 8);
+  const maxT = Math.max(8, window.innerHeight - r.height - 8);
+  const left = Math.min(Math.max(8, r.left), maxL);
+  const top = Math.min(Math.max(8, r.top), maxT);
+  toolbarEl.style.left = `${left}px`;
+  toolbarEl.style.top = `${top}px`;
+  toolbarEl.style.bottom = 'auto';
+  toolbarEl.style.transform = 'none';
+  toolbarPos = { left, top };
+}
+
+// Drag the toolbar by its grip. Pointer capture keeps move/up scoped to the grip
+// (recreated each build), so no window listeners accumulate across edit sessions.
+function makeToolbarDraggable(grip) {
+  if (!grip) return;
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false;
+  grip.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    const r = toolbarEl.getBoundingClientRect();
+    ox = r.left; oy = r.top; sx = e.clientX; sy = e.clientY;
+    toolbarEl.style.left = `${r.left}px`; toolbarEl.style.top = `${r.top}px`;
+    toolbarEl.style.bottom = 'auto'; toolbarEl.style.transform = 'none';
+    grip.setPointerCapture?.(e.pointerId);
+    document.body.classList.add('lt-dragging');
+    e.preventDefault();
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const r = toolbarEl.getBoundingClientRect();
+    const maxL = Math.max(8, window.innerWidth - r.width - 8);
+    const maxT = Math.max(8, window.innerHeight - r.height - 8);
+    const left = Math.min(Math.max(8, ox + (e.clientX - sx)), maxL);
+    const top = Math.min(Math.max(8, oy + (e.clientY - sy)), maxT);
+    toolbarEl.style.left = `${left}px`; toolbarEl.style.top = `${top}px`;
+    toolbarPos = { left, top };
+  });
+  const end = () => { if (dragging) { dragging = false; document.body.classList.remove('lt-dragging'); } };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
 }
 
 function refreshToolbarPalette() {

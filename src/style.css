@@ -5773,6 +5773,32 @@ body.layout-editing .gs-hide-btn:hover { color: #ef4444; background: rgba(239,68
 .layout-toolbar-actions .lt-save:hover { filter: brightness(1.1); color: #04121a; }
 .layout-toolbar-actions .lt-reset { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
 
+/* Floating toolbar: draggable grip, short tag, and collapse-to-pill toggle. */
+.layout-toolbar .lt-grip {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; padding: 2px; margin: -2px 0;
+  color: var(--text-muted); cursor: grab; touch-action: none; flex-shrink: 0;
+}
+.layout-toolbar .lt-grip:hover { color: var(--text-secondary); }
+.layout-toolbar .lt-grip:active { cursor: grabbing; }
+body.lt-dragging, body.lt-dragging * { user-select: none; cursor: grabbing !important; }
+.layout-toolbar .lt-tag { font-size: 12px; font-weight: 600; color: var(--text-primary); flex-shrink: 0; }
+.layout-toolbar-actions .lt-btn { display: inline-flex; align-items: center; gap: 6px; }
+.layout-toolbar-actions .lt-btn svg { flex-shrink: 0; }
+.layout-toolbar .lt-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; cursor: pointer;
+  border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-secondary);
+}
+.layout-toolbar .lt-toggle:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.layout-toolbar .lt-toggle .ic-expand { display: none; }
+.layout-toolbar.collapsed .lt-toggle .ic-expand { display: inline-flex; }
+.layout-toolbar.collapsed .lt-toggle .ic-collapse { display: none; }
+.layout-toolbar.collapsed .layout-toolbar-title,
+.layout-toolbar.collapsed .layout-palette,
+.layout-toolbar.collapsed .layout-toolbar-actions { display: none; }
+.layout-toolbar.collapsed .layout-toolbar-inner { padding: 8px 12px; gap: 10px; }
+
 
 
 /* When a grid layout is active (saved or editing), use the full viewport width
