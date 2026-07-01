@@ -5747,11 +5747,15 @@ body.layout-editing .gs-hide-btn:hover { color: #ef4444; background: rgba(239,68
   z-index: 1000; max-width: calc(100vw - 32px);
 }
 .layout-toolbar-inner {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  display: flex; flex-direction: column; gap: 10px;
+  width: min(720px, calc(100vw - 32px));
   background: var(--bg-card); border: 1px solid var(--accent-cyan);
   border-radius: 14px; padding: 10px 16px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5); backdrop-filter: blur(12px);
 }
+.layout-toolbar .lt-row { display: flex; align-items: center; gap: 10px; }
+.layout-toolbar .lt-row-sub { flex-wrap: wrap; }
+.layout-toolbar .lt-spacer { flex: 1; min-width: 8px; }
 .layout-toolbar-title { font-size: 12px; color: var(--text-secondary); }
 .layout-palette { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .layout-palette-label { font-size: 11px; color: var(--text-muted); }
@@ -5794,10 +5798,10 @@ body.lt-dragging, body.lt-dragging * { user-select: none; cursor: grabbing !impo
 .layout-toolbar .lt-toggle .ic-expand { display: none; }
 .layout-toolbar.collapsed .lt-toggle .ic-expand { display: inline-flex; }
 .layout-toolbar.collapsed .lt-toggle .ic-collapse { display: none; }
-.layout-toolbar.collapsed .layout-toolbar-title,
-.layout-toolbar.collapsed .layout-palette,
+.layout-toolbar.collapsed .lt-row-sub,
+.layout-toolbar.collapsed .lt-spacer,
 .layout-toolbar.collapsed .layout-toolbar-actions { display: none; }
-.layout-toolbar.collapsed .layout-toolbar-inner { padding: 8px 12px; gap: 10px; }
+.layout-toolbar.collapsed .layout-toolbar-inner { width: auto; padding: 8px 12px; gap: 10px; }
 
 
 

@@ -678,16 +678,21 @@ function buildEditToolbar() {
   toolbarEl.className = 'layout-toolbar';
   toolbarEl.innerHTML = `
     <div class="layout-toolbar-inner">
-      <button class="lt-grip" data-lt-grip aria-label="Drag to move" title="Drag to move">${GRIP_ICON}</button>
-      <span class="lt-tag">Editing</span>
-      <span class="layout-toolbar-title">drag cards by their title bar, resize from the corner</span>
-      <div class="layout-palette" data-palette></div>
-      <div class="layout-toolbar-actions">
-        <button class="lt-btn lt-save" data-lt="save">${CHECK_ICON}<span>Save</span></button>
-        <button class="lt-btn lt-reset" data-lt="reset">Reset to default</button>
-        <button class="lt-btn" data-lt="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+      <div class="lt-row lt-row-main">
+        <button class="lt-grip" data-lt-grip aria-label="Drag to move" title="Drag to move">${GRIP_ICON}</button>
+        <span class="lt-tag">Editing</span>
+        <span class="lt-spacer"></span>
+        <div class="layout-toolbar-actions">
+          <button class="lt-btn lt-save" data-lt="save">${CHECK_ICON}<span>Save</span></button>
+          <button class="lt-btn lt-reset" data-lt="reset">Reset to default</button>
+          <button class="lt-btn" data-lt="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+        </div>
+        <button class="lt-toggle" data-lt="toggle" aria-label="Collapse" title="Collapse"><span class="ic-collapse">${MINUS_ICON}</span><span class="ic-expand">${EXPAND_ICON}</span></button>
       </div>
-      <button class="lt-toggle" data-lt="toggle" aria-label="Collapse" title="Collapse"><span class="ic-collapse">${MINUS_ICON}</span><span class="ic-expand">${EXPAND_ICON}</span></button>
+      <div class="lt-row lt-row-sub">
+        <span class="layout-toolbar-title">drag cards by their title bar, resize from the corner</span>
+        <div class="layout-palette" data-palette></div>
+      </div>
     </div>`;
   document.body.appendChild(toolbarEl);
   toolbarEl.querySelector('[data-lt=save]').onclick = saveLayout;
