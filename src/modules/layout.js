@@ -164,7 +164,14 @@ function measureRows(widget) {
   const node = findNode(widget);
   if (!node) return 6;
   const h = node.getBoundingClientRect().height || 280;
-  return Math.max(3, Math.ceil((h + MARGIN) / (CELL + MARGIN)));
+  // GridStack renders each row at CELL px; MARGIN is the gap *between* cells, not
+  // inside one. The old formula divided by CELL+MARGIN, under-counting rows by
+  // ~45%, so cells came out far too short and scale-to-fit crushed the card
+  // (a 405px card → 23 rows → a 230px cell → 0.42 scale, floating in dead space;
+  // section widgets collapsed the same way). Divide by the real per-row height so
+  // the default cell fits the card at full size (scale ≈ 1). Saved layouts are
+  // unaffected — they load stored heights and never call this.
+  return Math.max(3, Math.ceil((h + MARGIN) / CELL));
 }
 
 /** Compute placements: saved layout if present, else sensible defaults. */
