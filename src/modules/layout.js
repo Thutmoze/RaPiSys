@@ -189,7 +189,10 @@ function computePlacements() {
   // defaults: stat cards 3-wide in a row, sections 12-wide stacked, measured h
   const out = [];
   let y = 0;
-  const stats = OVERVIEW_WIDGETS.filter((w) => w.group === 'stats' && findNode(w));
+  // Summary widgets share group 'stats' but are opt-in from the palette (per
+  // their registry comment), so they're excluded here — the default Overview
+  // mirrors what renders natively: the real stat cards plus the sections below.
+  const stats = OVERVIEW_WIDGETS.filter((w) => w.group === 'stats' && !w.summary && findNode(w));
   stats.forEach((w, i) => out.push({ widget: w, x: i * 3, y: 0, w: 3, h: measureRows(w) }));
   y = Math.max(0, ...out.map((o) => o.h)) || 4;
   for (const w of OVERVIEW_WIDGETS.filter((w) => w.group === 'section' && findNode(w))) {
