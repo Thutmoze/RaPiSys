@@ -52,6 +52,16 @@ function highestUrgency(text) {
   return all.sort((a, b) => (URGENCY_RANK[b] ?? -1) - (URGENCY_RANK[a] ?? -1))[0];
 }
 
+// The candidate's release date is the trailer date of the TOP (newest) entry in
+// its changelog: a line like " -- Maintainer <email>  Thu, 26 Jun 2026 …". We
+// take the first such line and parse it to epoch ms; null if unparseable.
+function parseChangelogReleaseDate(text) {
+  const m = String(text || '').match(/^ -- .+?<[^>]*>\s{2,}(.+?)\s*$/m);
+  if (!m) return null;
+  const t = Date.parse(m[1]);
+  return Number.isFinite(t) ? t : null;
+}
+
 function vercmp(x, y, defaultEpoch = 0) {
   const a = parseVer(x), b = parseVer(y);
   // Changelog entry headers often omit the epoch; inherit the candidate's so
@@ -107,7 +117,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     const toScan = [];
     for (const u of updates) {
       const k = known[u.package];
-      if (k && k.candidate === u.candidate) { u.security = u.security || k.security; u.cves = k.cves; u.urgency = k.urgency; }
+      if (k && k.candidate === u.candidate) { u.security = u.security || k.security; u.cves = k.cves; u.urgency = k.urgency; u.releaseDate = k.releaseDate; }
       else toScan.push(u.package);
     }
     // deep security scan via partial range-fetch (cheap now)
@@ -116,7 +126,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       const installedMap = {};
       for (const u of updates) installedMap[u.package] = u.installed;
       const res = await securityScan(toScan, installedMap, (p) => onProgress?.({ phase: 'scanning', total: p.total, done: p.done, pkg: p.pkg }));
-      for (const u of updates) { const r = res[u.package]; if (r && r.scanned) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; } }
+      for (const u of updates) { const r = res[u.package]; if (r && r.scanned) { u.security = r.security; u.cves = r.cves; u.urgency = r.urgency; u.releaseDate = r.releaseDate; } }
     }
     updatesRepo?.saveCache(updates);
     // report packages whose changelog still isn't cached (large pkgs whose
@@ -135,8 +145,9 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
     const urgency = highestUrgency(head);
     const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
-    updatesRepo?.saveSecurityTag?.(pkg, { candidate, security, cves, urgency });
-    return { security, cves, urgency };
+    const releaseDate = parseChangelogReleaseDate(changelogText);
+    updatesRepo?.saveSecurityTag?.(pkg, { candidate, security, cves, urgency, releaseDate });
+    return { security, cves, urgency, releaseDate };
   }
 
   function cached() {
@@ -149,7 +160,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     const updates = (c.updates || []).map((u) => {
       const t = tags[u.package];
       if (t && (!t.candidate || strip(t.candidate) === strip(u.candidate))) {
-        return { ...u, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency };
+        return { ...u, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency, releaseDate: t.releaseDate || u.releaseDate || null };
       }
       return u;
     });
@@ -180,7 +191,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       // 2) range-fetch (cheap); store on success.
       try {
         const r = await agentCall('apt.changelogRange', { pkg }, null, 50000);
-        if (r && r.changelog) { updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || cand, r.changelog); return r; }
+        if (r && r.changelog) { updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || cand, r.changelog); updatesRepo?.saveReleaseDate?.(pkg, r.candidateVersion || cand, parseChangelogReleaseDate(r.changelog)); return r; }
       } catch { /* fall through */ }
     }
     // local installed changelog (instant fallback; NOT stored as candidate)
@@ -193,7 +204,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     const r = await agentCall('apt.changelogFull', { pkg },
       (line) => { try { onProgress?.(JSON.parse(line)); } catch { /* */ } }, 200000);
     // persist so future views reuse it instantly with the proper format
-    if (r && r.changelog) updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || candidateOf(pkg), r.changelog);
+    if (r && r.changelog) { updatesRepo?.saveChangelog?.(pkg, r.candidateVersion || candidateOf(pkg), r.changelog); updatesRepo?.saveReleaseDate?.(pkg, r.candidateVersion || candidateOf(pkg), parseChangelogReleaseDate(r.changelog)); }
     // record a sentinel when the package genuinely has no changelog (even after
     // the source-package fallback) so we don't re-download it every view.
     else if (r && r.source === 'none') updatesRepo?.markNoChangelog?.(pkg, candidateOf(pkg));
@@ -215,8 +226,9 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
           const cves = new Set((head.match(/CVE-\d{4}-\d+/g) || [])).size;
           const urgency = highestUrgency(head);
           const security = /-security;/.test(head) || cves > 0 || urgency === 'high' || urgency === 'critical' || urgency === 'emergency';
-          out[pkg] = { security, cves, urgency, scanned: true };
-          updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency, changelog: r.changelog });
+          const releaseDate = parseChangelogReleaseDate(r.changelog);
+          out[pkg] = { security, cves, urgency, releaseDate, scanned: true };
+          updatesRepo?.saveSecurityTag?.(pkg, { candidate: r.candidateVersion, security, cves, urgency, changelog: r.changelog, releaseDate });
           updatesRepo?.saveChangelog?.(pkg, r.candidateVersion, r.changelog);
         } else {
           // range-fetch couldn't reach the changelog (docs past budget = large pkg)

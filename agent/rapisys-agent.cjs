@@ -1938,9 +1938,16 @@ WantedBy=multi-user.target
         if (zm && curPkg && sizeMap[curPkg] == null) sizeMap[curPkg] = parseInt(zm[1], 10);
       }
     }
+    // Firmware classification (mirrors the `kernel` flag). A package counts as
+    // Raspberry Pi firmware when its name matches a known firmware/bootloader/
+    // EEPROM prefix OR its dpkg summary literally mentions "firmware" (e.g. the
+    // "Raspberry Pi Firmware …" EEPROM/crypto libraries and tools). Kept strict:
+    // this does NOT tag EEPROM/OTP HAT tooling like raspi-utils-eeprom.
+    const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
     for (const u of updates) {
       u.description = desc[u.package] || '';
       u.sizeBytes = sizeMap[u.package] || null;
+      u.firmware = FIRMWARE_RE.test(u.package) || /firmware/i.test(u.description);
       try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
       catch { u.installedAt = null; }
     }

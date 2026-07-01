@@ -5392,6 +5392,7 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-filter-active { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); font-weight: 600; }
 .up-filter-active.up-chip-sec { background: #f59e0b; color: #1a1204; border-color: #f59e0b; }
 .up-filter-active.up-chip-kern { background: #a855f7; color: #120420; border-color: #a855f7; }
+.up-filter-active.up-chip-fw { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); }
 .up-checked-fresh { color: var(--text-secondary); }
 .up-checked-stale { color: var(--text-muted); opacity: 0.6; }
 .up-chip-sec { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
@@ -5409,6 +5410,7 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
   text-transform: capitalize; font-weight: 700; }
 .up-tag-sec { color: #f59e0b; border: 1px solid rgba(245,158,11,0.4); }
 .up-tag-kern { color: #a855f7; border: 1px solid rgba(168,85,247,0.4); }
+.up-tag-fw { color: var(--accent-cyan); border: 1px solid rgba(0,212,255,0.4); background: rgba(0,212,255,0.08); }
 .up-link { background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 12px; font-family: inherit; padding: 0; }
 .up-link:hover { text-decoration: underline; }
 .up-progress { margin: 14px 0; padding: 14px; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); }
@@ -5444,6 +5446,7 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-chip.up-filter.up-filter-active { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); font-weight: 600; }
 .up-chip.up-filter.up-filter-active.up-chip-sec { background: #f59e0b; color: #1a1204; border-color: #f59e0b; }
 .up-chip.up-filter.up-filter-active.up-chip-kern { background: #a855f7; color: #120420; border-color: #a855f7; }
+.up-chip.up-filter.up-filter-active.up-chip-fw { background: var(--accent-cyan); color: #04121a; border-color: var(--accent-cyan); }
 .up-confirm-list { display: inline-block; font-size: 12px; color: var(--text-secondary);
   line-height: 1.6; word-break: break-word; max-height: 120px; overflow-y: auto; }
 /* update cascade preview groups in the confirm dialog */

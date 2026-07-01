@@ -22,15 +22,30 @@ export function createUpdatesRepo(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS update_sectags (package TEXT PRIMARY KEY, candidate TEXT, security INTEGER, cves INTEGER, urgency TEXT, changelog TEXT)`);
   // add changelog column if upgrading from an older schema
   try { db.exec(`ALTER TABLE update_sectags ADD COLUMN changelog TEXT`); } catch { /* already exists */ }
-  function saveSecurityTag(pkg, { candidate, security, cves, urgency, changelog }) {
-    db.prepare(`INSERT INTO update_sectags (package, candidate, security, cves, urgency, changelog) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, security=excluded.security, cves=excluded.cves, urgency=excluded.urgency, changelog=COALESCE(excluded.changelog, update_sectags.changelog)`)
-      .run(pkg, candidate || null, security ? 1 : 0, cves || 0, urgency || null, changelog || null);
+  // candidate release date (epoch ms), parsed from the top changelog entry
+  try { db.exec(`ALTER TABLE update_sectags ADD COLUMN release_date INTEGER`); } catch { /* already exists */ }
+  function saveSecurityTag(pkg, { candidate, security, cves, urgency, changelog, releaseDate }) {
+    db.prepare(`INSERT INTO update_sectags (package, candidate, security, cves, urgency, changelog, release_date) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(package) DO UPDATE SET candidate=excluded.candidate, security=excluded.security, cves=excluded.cves, urgency=excluded.urgency, changelog=COALESCE(excluded.changelog, update_sectags.changelog), release_date=COALESCE(excluded.release_date, update_sectags.release_date)`)
+      .run(pkg, candidate || null, security ? 1 : 0, cves || 0, urgency || null, changelog || null, releaseDate || null);
     // also reflect into the cached list so the table updates on next load
     try {
       const c = getCache();
       const u = c.updates.find((x) => x.package === pkg);
-      if (u) { u.security = !!security; u.cves = cves || 0; u.urgency = urgency || null; saveCache(c.updates); }
+      if (u) { u.security = !!security; u.cves = cves || 0; u.urgency = urgency || null; if (releaseDate) u.releaseDate = releaseDate; saveCache(c.updates); }
+    } catch { /* */ }
+  }
+  // Persist only a candidate release date without disturbing security fields
+  // (used when a changelog is fetched outside the bulk security scan).
+  function saveReleaseDate(pkg, candidate, releaseDate) {
+    if (!releaseDate) return;
+    db.prepare(`INSERT INTO update_sectags (package, candidate, security, cves, urgency, release_date) VALUES (?, ?, 0, 0, NULL, ?)
+                ON CONFLICT(package) DO UPDATE SET candidate=COALESCE(excluded.candidate, update_sectags.candidate), release_date=excluded.release_date`)
+      .run(pkg, candidate || null, releaseDate);
+    try {
+      const c = getCache();
+      const u = c.updates.find((x) => x.package === pkg);
+      if (u) { u.releaseDate = releaseDate; saveCache(c.updates); }
     } catch { /* */ }
   }
   function getCachedChangelog(pkg) {
@@ -72,9 +87,9 @@ export function createUpdatesRepo(db) {
       .run(pkg, candidate || null, NONE_MARKER, Date.now());
   }
   function getSecurityTags() {
-    const rows = db.prepare(`SELECT package, candidate, security, cves, urgency FROM update_sectags`).all();
+    const rows = db.prepare(`SELECT package, candidate, security, cves, urgency, release_date AS releaseDate FROM update_sectags`).all();
     const out = {};
-    for (const r of rows) out[r.package] = { candidate: r.candidate, security: !!r.security, cves: r.cves, urgency: r.urgency };
+    for (const r of rows) out[r.package] = { candidate: r.candidate, security: !!r.security, cves: r.cves, urgency: r.urgency, releaseDate: r.releaseDate || null };
     return out;
   }
 
@@ -124,5 +139,5 @@ export function createUpdatesRepo(db) {
     }
     return rows;
   }
-  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog, markNoChangelog };
+  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, saveReleaseDate, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog, markNoChangelog };
 }

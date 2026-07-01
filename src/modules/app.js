@@ -5152,7 +5152,7 @@ pageRenderers.updates = (() => {
   function filteredUpdates() {
     if (activeFilter === 'security') return updates.filter((u) => u.security);
     if (activeFilter === 'kernel') return updates.filter((u) => u.kernel);
-    if (activeFilter === 'firmware') return [];   // firmware isn't a package row
+    if (activeFilter === 'firmware') return updates.filter((u) => u.firmware);
     return updates;
   }
 
@@ -5179,7 +5179,8 @@ pageRenderers.updates = (() => {
   function render(host) {
     const sec = updates.filter((u) => u.security).length;
     const kern = updates.filter((u) => u.kernel).length;
-    const fw = firmware?.updateAvailable;
+    const fwPkgs = updates.filter((u) => u.firmware).length;   // firmware apt packages (chip filter)
+    const fw = firmware?.updateAvailable;                       // bootloader EEPROM (action button)
 
     // "checked" is fresh (normal colour) if < 24h old, else dimmed/stale.
     const checkedFresh = lastChecked && (Date.now() - lastChecked) < 86400e3;
@@ -5188,7 +5189,7 @@ pageRenderers.updates = (() => {
       <button class="up-chip up-filter" data-filter="all">All (${updates.length})</button>
       <button class="up-chip up-filter up-chip-sec" data-filter="security">Security (${sec})</button>
       <button class="up-chip up-filter up-chip-kern" data-filter="kernel">Kernel (${kern})</button>
-      <button class="up-chip up-filter ${fw ? 'up-chip-fw' : ''}" data-filter="firmware">Firmware ${fw ? `(1)` : '(0)'}</button>
+      <button class="up-chip up-filter up-chip-fw" data-filter="firmware">Firmware (${fwPkgs})</button>
       ${piholeUpd?.updateAvailable ? `<button class="up-chip up-chip-pihole" data-up="piholego" title="${esc(piholeUpd.currentVersion || '')}${piholeUpd.latestVersion ? ' → ' + esc(piholeUpd.latestVersion) : ''}">Pi-hole (1)</button>` : ''}
       ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}
       ${autoCheck ? `<span class="up-checked up-autocheck" title="Last automatic background check: ${autoCheck.checked} updates, ${autoCheck.security} security">Auto-checked ${fmtChecked(autoCheck.ts)}</span>` : ''}`;
@@ -5208,8 +5209,8 @@ pageRenderers.updates = (() => {
       <p class="up-sec-hint">Security tags (CVEs / urgency) are detected during \u201cCheck for updates\u201d by scanning each changelog directly from the archive \u2014 no full package download.</p>
       <div class="up-table-scroll">
       <table class="inv-table up-table inv-table-fixed">
-        <colgroup><col style="width:34px"><col style="width:13%"><col style="width:22%"><col style="width:15%"><col style="width:15%"><col style="width:70px"><col style="width:9%"><col style="width:10%"><col style="width:7%"><col style="width:58px"></colgroup>
-        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>View</th></tr></thead>
+        <colgroup><col style="width:34px"><col style="width:12%"><col style="width:19%"><col style="width:12%"><col style="width:12%"><col style="width:64px"><col style="width:9%"><col style="width:9%"><col style="width:10%"><col style="width:7%"><col style="width:52px"></colgroup>
+        <thead><tr><th><input type="checkbox" data-up="all"></th><th>Package</th><th>Description</th><th>Installed</th><th>Available</th><th>Size</th><th>Released</th><th>Last updated</th><th>Tags</th><th>Urgency</th><th>View</th></tr></thead>
         <tbody>${filteredUpdates().map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
@@ -5218,8 +5219,9 @@ pageRenderers.updates = (() => {
             <td class="inv-dim up-ver">${esc(u.installed || '—')}</td>
             <td class="up-new up-ver">${esc(u.candidate)}</td>
             <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
+            <td class="inv-dim">${u.releaseDate ? rapisysFmtDate(u.releaseDate) : '—'}</td>
             <td class="inv-dim">${u.installedAt ? rapisysFmtDate(u.installedAt) : '—'}</td>
-            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}</div></td>
+            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}</div></td>
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
           </tr>`).join('')}</tbody>
