@@ -5225,7 +5225,13 @@ pageRenderers.updates = (() => {
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
           </tr>`).join('')}</tbody>
-      </table></div>` : '<p class="sess-empty">System is up to date. 🎉</p>';
+      </table></div>` : `
+      <div class="up-uptodate">
+        <div class="up-uptodate-ring">${ICN.check || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'}</div>
+        <div class="up-uptodate-title">System is up to date \u{1F389}</div>
+        <div class="up-uptodate-sub">No package, security, kernel, or firmware updates are pending.</div>
+        ${lastChecked ? `<div class="up-uptodate-meta">Last checked ${fmtChecked(lastChecked)}</div>` : ''}
+      </div>`;
     wireTable(host);
   }
 

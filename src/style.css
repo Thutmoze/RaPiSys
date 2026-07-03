@@ -5486,6 +5486,20 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-scan-status { padding: 20px 0; }
 .up-scan-label { color: var(--text-secondary); font-size: 13px; margin: 12px 0 0; text-align: center; }
 .up-sec-hint { font-size: 11px; color: var(--text-muted); margin: 0 0 12px; font-style: italic; }
+/* Prominent "System is up to date" empty state (no pending updates). */
+.up-uptodate { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 52px 20px; gap: 14px; }
+.up-uptodate-ring { width: 84px; height: 84px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; background: rgba(16,185,129,0.12); border: 1.5px solid rgba(16,185,129,0.5);
+  box-shadow: var(--glow-green); }
+.up-uptodate-ring svg { width: 44px; height: 44px; color: var(--accent-green); }
+.up-uptodate-title { font-size: 22px; font-weight: 700; color: var(--text-primary); }
+.up-uptodate-sub { font-size: 13.5px; color: var(--text-secondary); max-width: 420px; line-height: 1.55; }
+.up-uptodate-meta { font-size: 12px; color: var(--text-muted); }
+body.compact .up-uptodate, body.ultra .up-uptodate { padding: 32px 16px; gap: 10px; }
+body.compact .up-uptodate-ring, body.ultra .up-uptodate-ring { width: 64px; height: 64px; }
+body.compact .up-uptodate-ring svg, body.ultra .up-uptodate-ring svg { width: 34px; height: 34px; }
+body.compact .up-uptodate-title, body.ultra .up-uptodate-title { font-size: 18px; }
 
 /* Updates: full-download progress + needs-full prompt */
 .up-needfull p { font-size: 12px; color: var(--text-secondary); margin: 0 0 10px; }
