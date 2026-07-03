@@ -5800,15 +5800,17 @@ pageRenderers.updates = (() => {
         // row). Older rows predating this have null flags — fall back to the
         // best-effort log/name heuristic for those only.
         const tags = [];
-        if (e.security != null || e.cves != null || e.kernel != null) {
+        if (e.security != null || e.cves != null || e.kernel != null || e.firmware != null) {
           if (e.security) tags.push('<span class="up-tag up-tag-sec">Security</span>');
           if (e.cves) tags.push(`<span class="up-tag up-tag-cve">${e.cves} CVE${e.cves > 1 ? 's' : ''}</span>`);
           if (e.kernel) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+          if (e.firmware) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
         } else {
           const log = (e.log || '').toLowerCase();
           if (/security|-security/.test(log)) tags.push('<span class="up-tag up-tag-sec">Security</span>');
           if (/cve-\d/.test(log)) tags.push('<span class="up-tag up-tag-cve">CVE</span>');
           if (/linux-image|kernel/.test(log) || /kernel/i.test(e.package)) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+          if (/^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/.test(e.package) || /firmware/i.test(e.description || '')) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
         }
         return `<tr>
         <td class="inv-dim">${rapisysFmtTime(e.ts)}</td>
