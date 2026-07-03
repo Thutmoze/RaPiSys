@@ -5359,10 +5359,15 @@ pageRenderers.updates = (() => {
   // Conservative: only emits a link for known vendor families we can map safely.
   function upstreamReleaseLink(pkg) {
     const p = String(pkg || '');
+    const link = (url, label) => `Upstream release notes: <a href="${url}" target="_blank" rel="noopener" class="up-cl-extlink">${label} ↗</a>`;
     // Docker's distributed plugins/components → moby/docker GitHub releases.
-    if (/^docker-/.test(p) || p === 'docker-ce' || p === 'containerd.io') {
-      return `Upstream release notes: <a href="https://github.com/docker/docker/releases" target="_blank" rel="noopener" class="up-cl-extlink">Docker releases ↗</a>`;
-    }
+    if (/^docker-/.test(p) || p === 'docker-ce' || p === 'containerd.io') return link('https://github.com/docker/docker/releases', 'Docker releases');
+    // Vendor packages installed from their own apt repos that ship no Debian
+    // changelog — link to each project's own release notes / changelog.
+    if (p === 'tailscale') return link('https://tailscale.com/changelog', 'Tailscale changelog');
+    if (p === 'gh') return link('https://github.com/cli/cli/releases', 'GitHub CLI releases');
+    if (p === 'code' || p === 'code-insiders') return link('https://code.visualstudio.com/updates', 'VS Code release notes');
+    if (p === 'cloudflared') return link('https://github.com/cloudflare/cloudflared/releases', 'cloudflared releases');
     return 'Check the project\'s own release page for what changed.';
   }
 
@@ -5390,7 +5395,8 @@ pageRenderers.updates = (() => {
       if (data.error) return `<p class="up-cl-empty">${esc(data.error)}</p>`;
       if (data.noChangelog) {
         return `<div class="up-cl-needfull">
-            <p class="up-cl-empty">No changelog available for this package.</p>
+            <p class="up-cl-empty">This package doesn't ship a bundled changelog.</p>
+            <p class="up-cl-stubnote">${upstreamReleaseLink(pkg)}</p>
             <button class="up-cl-retry" data-cl="retry">Try again</button>
             <div class="up-cl-dlprog" data-cl="dlprog" style="display:none"></div>
           </div>`;
