@@ -129,12 +129,14 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
   // ---- auth on WS upgrade ----------------------------------------------------
   // Reuse the same admin session cookie that protects the REST API. Control-mode
   // is required (read-only/monitor sessions cannot open a shell or desktop).
-  function upgradeAuthorized(req) {
+  async function upgradeAuthorized(req) {
     try {
       const token = auth.cookieToken({ headers: req.headers });
       if (!auth.validateSession(token)) return false;
-      // monitor-only deployments must not get interactive control
-      if (typeof auth.getMode === 'function' && auth.getMode() === 'monitor') return false;
+      // monitor-only deployments must not get interactive control. getMode() is
+      // async, so it MUST be awaited — comparing the returned Promise to a string
+      // is always false, which previously let monitor sessions open a shell/desktop.
+      if (typeof auth.getMode === 'function' && (await auth.getMode()) === 'monitor') return false;
       return true;
     } catch { return false; }
   }
@@ -149,11 +151,11 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
     const wssSsh = new WebSocketServer({ noServer: true });
     const wssVnc = new WebSocketServer({ noServer: true });
 
-    server.on('upgrade', (req, socket, head) => {
+    server.on('upgrade', async (req, socket, head) => {
       let pathname = '';
       try { pathname = new URL(req.url, 'http://localhost').pathname; } catch { pathname = req.url || ''; }
       if (pathname !== '/api/remote/ws/ssh' && pathname !== '/api/remote/ws/vnc') return; // not ours
-      if (!upgradeAuthorized(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
+      if (!(await upgradeAuthorized(req))) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return; }
       if (pathname === '/api/remote/ws/ssh') {
         wssSsh.handleUpgrade(req, socket, head, (ws) => bridgeSsh(ws));
       } else {

@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
   notAfter: null, dnsName: null, provisionedAt: null,
 };
 
-export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
+export function createTlsService({ loadSettings, saveSettings, withFileLock, attachUpgrades }) {
   let httpsServer = null;
 
   // Publish a redirect descriptor consumed by the HTTP listener's early
@@ -103,6 +103,17 @@ export function createTlsService({ loadSettings, saveSettings, withFileLock }) {
       return { listening: false, reason: `cannot read key: ${e.message}` };
     }
     httpsServer = https.createServer(creds, app);
+    // The HTTPS server is a SEPARATE http.Server from the plain-HTTP listener,
+    // with its own 'upgrade' event. WebSocket bridges (in-browser SSH/VNC) are
+    // registered per-server, so they must be re-attached to each HTTPS server we
+    // create here — otherwise wss:// upgrades over :3443 are never handled and
+    // the terminal/desktop show "Disconnected" even though the feature is enabled.
+    // Runs on every (re)start (boot + cert renewal), before listen() so no
+    // upgrade can race in unhandled.
+    if (typeof attachUpgrades === 'function') {
+      try { await attachUpgrades(httpsServer); }
+      catch (e) { console.error('[tls] failed to attach WebSocket bridges to HTTPS server:', e.message); }
+    }
     return new Promise((resolve) => {
       httpsServer.once('error', (e) => { console.error('[tls] https listen error:', e.message); resolve({ listening: false, reason: e.message }); });
       httpsServer.listen(cfg.port, () => {

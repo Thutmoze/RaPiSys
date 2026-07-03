@@ -482,7 +482,12 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   app.use('/api/tailscale', rc, tailscaleRouter({ requireControl: auth.requireControl }));
   // TLS / HTTPS: self-signed or Tailscale certs, provisioned via the host agent.
-  const tls = createTlsService({ loadSettings, saveSettings, withFileLock });
+  const tls = createTlsService({
+    loadSettings, saveSettings, withFileLock,
+    // Re-attach the in-browser SSH/VNC WebSocket bridges to each HTTPS server
+    // the TLS service creates, so remote access works over wss://…:3443 too.
+    attachUpgrades: (server) => remoteAccess.attach(server),
+  });
   // /api/tls/status must be readable WITHOUT auth: the login modal checks it
   // (over plain HTTP, before any session) to guide the user to the secure URL.
   // The rest of the TLS router stays behind requireConfig.
