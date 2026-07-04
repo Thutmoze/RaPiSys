@@ -22,7 +22,7 @@ import crypto from 'crypto';
 import net from 'net';
 import { agentCall } from '../core/agent-client.js';
 
-export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, secrets, auth, events }) {
+export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, secrets, auth, events, sessionsRepo }) {
   const SSH_KEY_SECRET = 'remote.ssh.privkey';
   const VNC_PW_SECRET = 'remote.vnc.password';
 
@@ -32,10 +32,30 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
   let bridgeSeq = 0;
   function openBridge(kind, username) {
     const id = `br${++bridgeSeq}`;
-    liveBridges.set(id, { kind, username: username || kind, source: 'dashboard (browser)', startedAt: Date.now() });
+    const startedAt = Date.now();
+    const source = 'dashboard (browser)';
+    // Record the session in session_log immediately (event-driven), so it shows
+    // up in Login History even if it opens and closes between the 60s session-
+    // tracker ticks. We reuse the tracker's `bridge:<id>` key convention, so the
+    // tracker dedupes against this row (touches it, never duplicates) and closes
+    // any row we somehow leave open (e.g. after a server restart). Best-effort:
+    // a logging hiccup must never break the live connection.
+    let rowId = null;
+    try {
+      rowId = sessionsRepo?.open(kind, `bridge:${id}`, username || kind, source, startedAt,
+        { bridge: true, via: 'dashboard' });
+    } catch { /* logging is best-effort */ }
+    liveBridges.set(id, { kind, username: username || kind, source, startedAt, rowId });
     return id;
   }
-  function closeBridge(id) { if (id) liveBridges.delete(id); }
+  function closeBridge(id) {
+    if (!id) return;
+    const b = liveBridges.get(id);
+    liveBridges.delete(id);
+    if (b && b.rowId != null) {
+      try { sessionsRepo?.close(b.rowId, Date.now()); } catch { /* best-effort */ }
+    }
+  }
   // Snapshot for the sessions collector to merge in.
   function liveSessions() {
     return [...liveBridges.entries()].map(([id, s]) => ({

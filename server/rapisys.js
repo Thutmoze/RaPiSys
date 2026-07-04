@@ -216,7 +216,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // ---- in-browser remote access (SSH terminal + VNC desktop) -----------------
   const remoteAccess = createRemoteAccess({
     loadSettings, saveSettings, withFileLock,
-    secrets: secretsFacade, auth, events: eventsFacade,
+    secrets: secretsFacade, auth, events: eventsFacade, sessionsRepo,
   });
   remoteAccessRef = remoteAccess;
   // Take over the LEGACY requireAuth as well: in full mode the session
