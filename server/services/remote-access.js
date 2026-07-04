@@ -293,5 +293,19 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
     return res;
   }
 
-  return { getConfig, setConfig, generateKey, installKey, attach, liveSessions };
+  // Enable a standard VNC server (wayvnc) on the Pi via the agent, then point
+  // the dashboard's VNC at it in transparent 'raw' mode. GUI-driven one-click.
+  async function enableVnc() {
+    const res = await agentCall('remote.enableVnc', {}, null, 20000);
+    if (!res || res.ok !== true) throw new Error((res && res.error) || 'Enable VNC failed');
+    const host = res.host || '127.0.0.1';
+    const port = res.port || 5900;
+    // wayvnc on loopback with no auth → transparent raw passthrough to noVNC;
+    // access is gated by the dashboard's own authenticated bridge.
+    await setConfig({ enabled: true, vnc: { enabled: true, auth: 'raw', host, port } });
+    events?.add?.('remote.vnc.enabled', 'info', { host, port, running: !!res.running });
+    return res;
+  }
+
+  return { getConfig, setConfig, generateKey, installKey, enableVnc, attach, liveSessions };
 }

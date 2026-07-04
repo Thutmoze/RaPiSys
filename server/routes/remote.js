@@ -30,5 +30,11 @@ export function remoteRouter({ remoteAccess, requireControl }) {
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Start wayvnc on the Pi (loopback) and point the dashboard at it. Control-only.
+  r.post('/vnc/enable', requireControl, async (req, res) => {
+    try { res.json(await remoteAccess.enableVnc()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   return r;
 }

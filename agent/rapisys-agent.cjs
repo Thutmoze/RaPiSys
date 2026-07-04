@@ -563,6 +563,82 @@ const OPS = {
     return { ok: true, installed: true, alreadyPresent: false, user: username };
   },
 
+  // Start wayvnc in the active Wayland desktop session, bound to loopback, so
+  // the in-browser VNC bridge has a standard RFB server to reach. GUI-driven;
+  // the web container can't do this (unprivileged, no desktop session). RealVNC
+  // is left untouched. Idempotent — a no-op if wayvnc is already listening.
+  async 'remote.enableVnc'({ host = '127.0.0.1', port = 5900 } = {}) {
+    assert(/^[0-9.]{7,15}$/.test(String(host)), 'invalid host');
+    port = Number(port) || 5900;
+    assert(port >= 1 && port <= 65535, 'invalid port');
+
+    // Find the active Wayland session: the uid that owns a wayland-<n> socket.
+    let uid = null, runtimeDir = null, wl = null, dirs = [];
+    try { dirs = fs.readdirSync('/run/user'); } catch { /* */ }
+    for (const d of dirs) {
+      if (!/^\d+$/.test(d)) continue;
+      const rd = `/run/user/${d}`;
+      let socks = [];
+      try { socks = fs.readdirSync(rd).filter((f) => /^wayland-\d+$/.test(f)); } catch { continue; }
+      if (socks.length) { uid = parseInt(d, 10); runtimeDir = rd; wl = socks[0]; break; }
+    }
+    assert(uid != null, 'no active Wayland desktop session (is the Pi booted to the desktop?)');
+
+    const ent = await run('getent', ['passwd', String(uid)], 5000);
+    assert(ent.code === 0 && ent.stdout.trim(), `no account for uid ${uid}`);
+    const parts = ent.stdout.trim().split(':');
+    const user = parts[0], gid = parseInt(parts[3], 10), home = parts[5];
+
+    const which = await run('sh', ['-c', 'command -v wayvnc || true'], 5000);
+    const wayvncPath = (which.stdout || '').trim();
+    assert(wayvncPath, 'wayvnc is not installed on the Pi');
+
+    // Persistence: add wayvnc to the labwc autostart (idempotent) so it comes
+    // back after a reboot, running inside the desktop session.
+    const cfgDir = path.join(home, '.config', 'labwc');
+    const autostart = path.join(cfgDir, 'autostart');
+    const marker = '# RaPiSys wayvnc';
+    try {
+      if (!fs.existsSync(cfgDir)) fs.mkdirSync(cfgDir, { recursive: true });
+      let cur = '';
+      try { cur = fs.readFileSync(autostart, 'utf-8'); } catch { /* none yet */ }
+      if (!cur.includes(marker)) {
+        const prefix = cur && !cur.endsWith('\n') ? '\n' : '';
+        fs.appendFileSync(autostart, `${prefix}${wayvncPath} ${host} ${port} &  ${marker}\n`);
+      }
+      try { fs.chownSync(path.join(home, '.config'), uid, gid); } catch { /* */ }
+      try { fs.chownSync(cfgDir, uid, gid); } catch { /* */ }
+      try { fs.chownSync(autostart, uid, gid); } catch { /* */ }
+      try { fs.chmodSync(autostart, 0o755); } catch { /* */ }
+    } catch { /* persistence is best-effort */ }
+
+    const listening = () => new Promise((resolve) => {
+      const s = net.connect({ host, port });
+      const done = (v) => { try { s.destroy(); } catch { /* */ } resolve(v); };
+      s.setTimeout(800);
+      s.once('connect', () => done(true));
+      s.once('error', () => done(false));
+      s.once('timeout', () => done(false));
+    });
+
+    // Start it now (unless already up). As root we can drop straight to the
+    // desktop user and hand it the session env so it finds the compositor.
+    let running = await listening();
+    if (!running) {
+      const child = spawn(wayvncPath, [host, String(port)], {
+        uid, gid,
+        env: { HOME: home, XDG_RUNTIME_DIR: runtimeDir, WAYLAND_DISPLAY: wl, PATH: '/usr/bin:/bin' },
+        detached: true, stdio: 'ignore',
+      });
+      child.unref();
+      for (let i = 0; i < 12 && !running; i++) {
+        await new Promise((r) => setTimeout(r, 300));
+        running = await listening();
+      }
+    }
+    return { ok: true, host, port, user, running, persisted: true };
+  },
+
   // ---- vcgencmd telemetry (read-only) -------------------------------------
   async 'vc.read'({ cmd }) {
     assert(VC_ALLOWED.has(cmd), `vcgencmd subcommand not allowed: ${cmd}`);
