@@ -307,5 +307,26 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
     return res;
   }
 
-  return { getConfig, setConfig, generateKey, installKey, enableVnc, attach, liveSessions };
+  // Report whether a VNC server is actually listening (server-side probe — works
+  // even if the agent is down) and whether wayvnc is installed (via agent, best-
+  // effort). Feeds the Enable-VNC box's three-state display.
+  async function vncStatus() {
+    const cfg = await getConfig();
+    const host = (cfg.vnc && cfg.vnc.host) || '127.0.0.1';
+    const port = Number(cfg.vnc && cfg.vnc.port) || 5900;
+    const running = await new Promise((resolve) => {
+      const s = net.connect({ host, port });
+      const done = (v) => { try { s.destroy(); } catch { /* */ } resolve(v); };
+      s.setTimeout(800);
+      s.once('connect', () => done(true));
+      s.once('error', () => done(false));
+      s.once('timeout', () => done(false));
+    });
+    let installed = null;
+    try { const r = await agentCall('remote.vncInstalled', {}, null, 5000); installed = !!(r && r.installed); }
+    catch { installed = null; }  // agent unreachable → leave install state unknown
+    return { host, port, running, installed };
+  }
+
+  return { getConfig, setConfig, generateKey, installKey, enableVnc, vncStatus, attach, liveSessions };
 }

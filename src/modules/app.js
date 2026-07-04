@@ -3191,13 +3191,8 @@ pageRenderers.settings = (() => {
             <label style="flex:1">Password <input data-rm="vncpass" type="password" placeholder="${cfg.vncPasswordConfigured ? '•••••••• (stored)' : 'your login password'}" autocomplete="new-password"></label>
           </div>
           <p class="up-sec-hint">wayvnc (the Raspberry Pi OS default) and RealVNC use encrypted VeNCrypt/TLS — the dashboard terminates that for the browser using your Pi <b>login</b> (PAM) credentials. Leave password blank to keep the stored one.</p>
-          <div class="rm-keybox" style="margin-top:12px">
-            <div class="rm-key-head"><b>Enable VNC on the Pi</b></div>
-            <p class="up-sec-hint">No standard VNC server running? This starts <b>wayvnc</b> in your desktop session on <code>127.0.0.1:5900</code> (loopback-only — reachable through this dashboard, not the LAN), sets it to start with the desktop, and points VNC here in raw mode. RealVNC is left untouched.</p>
-            <div class="set-actions" style="border:0;padding-top:0">
-              <button class="set-btn set-btn-primary" data-rm="enablevnc"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/></svg><span>Enable VNC</span></button>
-              <span class="rm-msg" data-rm="vncmsg"></span>
-            </div>
+          <div class="rm-keybox" style="margin-top:12px" data-rm="vncbox">
+            <div class="rm-key-head"><span class="inv-dim">Checking VNC server…</span></div>
           </div>
         </div>
 
@@ -3216,26 +3211,52 @@ pageRenderers.settings = (() => {
     const vncAuthRow = $('[data-rm-vncauth]', host);
     if (vncAuthSel && vncAuthRow) vncAuthSel.addEventListener('change', () => { vncAuthRow.hidden = vncAuthSel.value !== 'auto'; });
 
-    const enableVncBtn = $('[data-rm=enablevnc]', host);
-    if (enableVncBtn) enableVncBtn.onclick = async () => {
-      const msg = $('[data-rm=vncmsg]', host);
-      const orig = enableVncBtn.innerHTML;
-      enableVncBtn.disabled = true; enableVncBtn.innerHTML = '<span>Enabling…</span>';
-      if (msg) { msg.textContent = ''; msg.className = 'rm-msg'; }
-      try {
-        const r = await api('/remote/vnc/enable', { method: 'POST', body: {} });
-        if (r.running) {
-          toast('success', 'Remote Access', `wayvnc running on ${r.host}:${r.port}`);
-        } else {
-          toast('info', 'Remote Access', 'wayvnc enabled — it may take a few seconds to come up');
+    const POWER_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/></svg>';
+    function wireEnableVnc() {
+      const enableVncBtn = $('[data-rm=enablevnc]', host);
+      if (!enableVncBtn) return;
+      enableVncBtn.onclick = async () => {
+        const msg = $('[data-rm=vncmsg]', host);
+        const orig = enableVncBtn.innerHTML;
+        enableVncBtn.disabled = true; enableVncBtn.innerHTML = '<span>Enabling…</span>';
+        if (msg) { msg.textContent = ''; msg.className = 'rm-msg'; }
+        try {
+          const r = await api('/remote/vnc/enable', { method: 'POST', body: {} });
+          if (r.running) toast('success', 'Remote Access', `wayvnc running on ${r.host}:${r.port}`);
+          else toast('info', 'Remote Access', 'wayvnc enabled — it may take a few seconds to come up');
+          editRemote = true; loadRemote(host);
+        } catch (err) {
+          toast('error', 'Remote Access', err.message);
+          if (msg) { msg.textContent = err.message; msg.classList.add('inv-dim'); }
+          enableVncBtn.disabled = false; enableVncBtn.innerHTML = orig;
         }
-        editRemote = true; loadRemote(host);
-      } catch (err) {
-        toast('error', 'Remote Access', err.message);
-        if (msg) { msg.textContent = err.message; msg.classList.add('inv-dim'); }
-        enableVncBtn.disabled = false; enableVncBtn.innerHTML = orig;
+      };
+    }
+    async function renderVncBox() {
+      const boxEl = $('[data-rm=vncbox]', host);
+      if (!boxEl) return;
+      let st = null;
+      try { st = await api('/remote/vnc/status'); } catch { st = null; }
+      const h = (st && st.host) || '127.0.0.1';
+      const p = (st && st.port) || 5900;
+      if (st && st.running) {
+        boxEl.innerHTML = `<div class="rm-key-head"><b class="set-ok">✓ wayvnc running on ${esc(h)}:${p}</b></div>
+          <p class="up-sec-hint">The in-browser VNC desktop is live. It’s bound to loopback — reachable only through this dashboard, not the LAN.</p>`;
+        return;
       }
-    };
+      if (st && st.installed === false) {
+        boxEl.innerHTML = `<div class="rm-key-head"><b>wayvnc is not installed</b></div>
+          <p class="up-sec-hint">The one-click enable needs the <b>wayvnc</b> package. Install it on the Pi with <code>sudo apt install wayvnc</code>, then this box will offer to enable it.</p>
+          <div class="set-actions" style="border:0;padding-top:0"><button class="set-btn" disabled>${POWER_SVG}<span>Enable VNC</span></button></div>`;
+        return;
+      }
+      const badge = (st && st.installed) ? ' <span class="inv-dim">wayvnc installed</span>' : '';
+      boxEl.innerHTML = `<div class="rm-key-head"><b>No VNC server running</b>${badge}</div>
+        <p class="up-sec-hint">Start <b>wayvnc</b> in your desktop session on <code>${esc(h)}:${p}</code> (loopback-only — reachable through this dashboard, not the LAN), set it to start with the desktop, and point VNC here in raw mode. RealVNC is left untouched.</p>
+        <div class="set-actions" style="border:0;padding-top:0"><button class="set-btn set-btn-primary" data-rm="enablevnc">${POWER_SVG}<span>Enable VNC</span></button><span class="rm-msg" data-rm="vncmsg"></span></div>`;
+      wireEnableVnc();
+    }
+    renderVncBox();
 
     $('[data-rm=genkey]', host).onclick = async () => {
       const btn = $('[data-rm=genkey]', host); btn.disabled = true; btn.textContent = 'Generating…';

@@ -639,6 +639,13 @@ const OPS = {
     return { ok: true, host, port, user, running, persisted: true };
   },
 
+  // Read-only: is wayvnc installed on the host? (feeds the VNC status box.)
+  async 'remote.vncInstalled'() {
+    const which = await run('sh', ['-c', 'command -v wayvnc || true'], 5000);
+    const p = (which.stdout || '').trim();
+    return { installed: !!p, path: p || null };
+  },
+
   // ---- vcgencmd telemetry (read-only) -------------------------------------
   async 'vc.read'({ cmd }) {
     assert(VC_ALLOWED.has(cmd), `vcgencmd subcommand not allowed: ${cmd}`);

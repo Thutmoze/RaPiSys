@@ -36,5 +36,11 @@ export function remoteRouter({ remoteAccess, requireControl }) {
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // VNC server state (running? installed?) for the Enable-VNC box. Read-only.
+  r.get('/vnc/status', async (req, res) => {
+    try { res.json(await remoteAccess.vncStatus()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   return r;
 }
