@@ -511,6 +511,58 @@ const OPS = {
     return { pong: true, version: '1.0.0', pid: process.pid };
   },
 
+  // ---- In-browser remote access -------------------------------------------
+  // Authorize the dashboard's SSH public key on the host so the in-browser
+  // terminal can log in — GUI-driven, so the user never edits authorized_keys
+  // by hand. Writes to the *configured* SSH account's ~/.ssh/authorized_keys
+  // (the web container can't: it runs unprivileged with the host rootfs mounted
+  // read-only). Strictly validated and idempotent.
+  async 'remote.installSshKey'({ username, pubkey } = {}) {
+    assert(typeof username === 'string' && /^[a-z_][a-z0-9_-]{0,31}$/.test(username),
+      'invalid username');
+    assert(typeof pubkey === 'string' && pubkey.length > 0, 'missing public key');
+    // Reject embedded newlines/NULs/control chars up front so nothing extra can
+    // be smuggled onto its own line (or as options) in authorized_keys.
+    assert(!/[\r\n\x00-\x1f]/.test(pubkey) && pubkey.length <= 8192, 'malformed public key');
+    const line = pubkey.trim();
+    // Single well-formed OpenSSH public key: <type> <base64> [comment].
+    const m = line.match(/^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\s+([A-Za-z0-9+/]+={0,3})(?:\s+\S.*)?$/);
+    assert(m, 'not a valid OpenSSH public key');
+    const keyType = m[1], keyBody = m[2];
+
+    // Resolve the target account's home directory and ownership.
+    const ent = await run('getent', ['passwd', username], 5000);
+    assert(ent.code === 0 && ent.stdout.trim(), `user '${username}' not found on this host`);
+    const parts = ent.stdout.trim().split(':');
+    const uid = parseInt(parts[2], 10), gid = parseInt(parts[3], 10), home = parts[5];
+    assert(Number.isInteger(uid) && Number.isInteger(gid) && home && fs.existsSync(home),
+      `home directory for '${username}' not found`);
+
+    const sshDir = path.join(home, '.ssh');
+    const akFile = path.join(sshDir, 'authorized_keys');
+
+    // Ensure ~/.ssh exists, owned by the user, mode 700 (sshd StrictModes).
+    if (!fs.existsSync(sshDir)) {
+      fs.mkdirSync(sshDir, { recursive: true, mode: 0o700 });
+      try { fs.chownSync(sshDir, uid, gid); } catch { /* best effort */ }
+    }
+    try { fs.chmodSync(sshDir, 0o700); } catch { /* best effort */ }
+
+    // Idempotent: match on the key material (ignore the comment) so re-runs
+    // are no-ops and we never append a duplicate.
+    let existing = '';
+    try { existing = fs.readFileSync(akFile, 'utf-8'); } catch { /* no file yet */ }
+    if (existing.split('\n').some((l) => l.includes(keyBody))) {
+      return { ok: true, installed: false, alreadyPresent: true, user: username };
+    }
+
+    const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+    fs.appendFileSync(akFile, `${prefix}${keyType} ${keyBody} rapisys@dashboard\n`);
+    try { fs.chownSync(akFile, uid, gid); } catch { /* best effort */ }
+    try { fs.chmodSync(akFile, 0o600); } catch { /* best effort */ }
+    return { ok: true, installed: true, alreadyPresent: false, user: username };
+  },
+
   // ---- vcgencmd telemetry (read-only) -------------------------------------
   async 'vc.read'({ cmd }) {
     assert(VC_ALLOWED.has(cmd), `vcgencmd subcommand not allowed: ${cmd}`);

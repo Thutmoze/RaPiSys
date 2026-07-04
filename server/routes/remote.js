@@ -23,5 +23,12 @@ export function remoteRouter({ remoteAccess, requireControl }) {
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Authorize the dashboard's public key on the Pi (appends to the configured
+  // SSH user's ~/.ssh/authorized_keys via the host agent). Control-mode only.
+  r.post('/ssh/install-key', requireControl, async (req, res) => {
+    try { res.json(await remoteAccess.installKey()); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   return r;
 }

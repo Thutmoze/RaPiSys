@@ -20,6 +20,7 @@
 
 import crypto from 'crypto';
 import net from 'net';
+import { agentCall } from '../core/agent-client.js';
 
 export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, secrets, auth, events }) {
   const SSH_KEY_SECRET = 'remote.ssh.privkey';
@@ -257,5 +258,20 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
     }).catch((err) => { closeBridge(vBridgeId); events?.add?.('remote.vnc.error', 'warning', { error: err.message }); try { ws.close(); } catch { /* */ } });
   }
 
-  return { getConfig, setConfig, generateKey, attach, liveSessions };
+  // Install the dashboard's public key into the configured SSH account's
+  // ~/.ssh/authorized_keys on the host, via the privileged agent — so the whole
+  // flow is GUI-driven and the user never touches a shell. Idempotent.
+  async function installKey() {
+    const cfg = await getConfig();
+    const username = (cfg.ssh && cfg.ssh.username || '').trim();
+    const pubkey = cfg.sshPublicKey;
+    if (!username) throw new Error('Set the SSH username first');
+    if (!pubkey) throw new Error('Generate the SSH key first');
+    const res = await agentCall('remote.installSshKey', { username, pubkey }, null, 10000);
+    if (!res || res.ok !== true) throw new Error((res && res.error) || 'Key install failed');
+    events?.add?.('remote.key.installed', 'info', { user: username, installed: !!res.installed });
+    return res;
+  }
+
+  return { getConfig, setConfig, generateKey, installKey, attach, liveSessions };
 }

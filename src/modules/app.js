@@ -3161,11 +3161,13 @@ pageRenderers.settings = (() => {
           </div>
           <div class="rm-keybox">
             <div class="rm-key-head"><b>Dashboard SSH key</b> <span class="${cfg.sshKeyConfigured ? 'set-ok' : 'inv-dim'}">${cfg.sshKeyConfigured ? '✓ generated' : 'not generated'}</span></div>
-            <p class="up-sec-hint">Add this public key to <code>~/.ssh/authorized_keys</code> on the Pi so the terminal can log in.</p>
+            <p class="up-sec-hint">Click <b>Install on Pi</b> to authorize this key for the SSH user automatically — or add it to <code>~/.ssh/authorized_keys</code> on the Pi by hand.</p>
             <pre class="rm-pubkey" data-rm="pubkey">${cfg.sshPublicKey ? esc(cfg.sshPublicKey) : '(generate a key to see it here)'}</pre>
             <div class="set-actions" style="border:0;padding-top:0">
               <button class="set-btn" data-rm="genkey">${cfg.sshKeyConfigured ? 'Regenerate Key' : 'Generate Key'}</button>
               ${cfg.sshPublicKey ? '<button class="set-btn" data-rm="copykey">Copy Public Key</button>' : ''}
+              ${cfg.sshPublicKey ? `<button class="set-btn set-btn-primary" data-rm="installkey">${INSTALL_ICON}<span>Install on Pi</span></button>` : ''}
+              <span class="rm-msg" data-rm="keymsg"></span>
             </div>
           </div>
 
@@ -3238,6 +3240,28 @@ pageRenderers.settings = (() => {
         setTimeout(() => { copyBtn.classList.remove('set-btn-test'); copyBtn.innerHTML = orig; }, 1600);
       } else {
         toast('info', 'Remote Access', 'Could not copy — select the key text and copy manually');
+      }
+    };
+    const installKeyBtn = $('[data-rm=installkey]', host);
+    if (installKeyBtn) installKeyBtn.onclick = async () => {
+      const msg = $('[data-rm=keymsg]', host);
+      const orig = installKeyBtn.innerHTML;
+      installKeyBtn.disabled = true; installKeyBtn.innerHTML = '<span>Installing…</span>';
+      if (msg) { msg.textContent = ''; msg.className = 'rm-msg'; }
+      try {
+        const r = await api('/remote/ssh/install-key', { method: 'POST', body: {} });
+        if (r.alreadyPresent) {
+          toast('info', 'Remote Access', `Key already authorized for ${r.user}`);
+          if (msg) { msg.textContent = 'Already authorized'; msg.classList.add('inv-dim'); }
+        } else {
+          toast('success', 'Remote Access', `Key authorized for ${r.user} — re-open the SSH terminal`);
+          if (msg) { msg.textContent = `✓ Authorized for ${r.user}`; msg.classList.add('set-ok'); }
+        }
+      } catch (err) {
+        toast('error', 'Remote Access', err.message);
+        if (msg) { msg.textContent = err.message; msg.classList.add('inv-dim'); }
+      } finally {
+        installKeyBtn.disabled = false; installKeyBtn.innerHTML = orig;
       }
     };
 
