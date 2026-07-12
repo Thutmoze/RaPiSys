@@ -139,7 +139,7 @@ async function saveSettings(settings) {
   await fs.promises.writeFile(CONFIG.settingsPath, JSON.stringify(settings, null, 2));
 }
 
-async function loadServices() {
+export async function loadServices() {
   const settings = await loadSettings();
   return (settings.services || []).filter(s => s.enabled !== false);
 }
@@ -365,7 +365,7 @@ function checkInterfaceService(service) {
 }
 
 // Main check dispatcher
-function checkService(service) {
+export function checkService(service) {
   switch (service.checkType) {
     case 'tcp':
       return checkTcpService(service);
@@ -1065,6 +1065,7 @@ let serverRef = null;
 import('./rapisys.js')
   .then(({ initRapisys }) => initRapisys({
     app, loadSettings, saveSettings, withFileLock, requireAuth,
+    loadServices, checkService,
   }))
   .then((rapisys) => {
     console.log('[rapisys] modules initialised');

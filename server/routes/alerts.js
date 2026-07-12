@@ -1,11 +1,13 @@
 /** RaPiSys — /api/alerts: rule CRUD, active alerts, incident history. */
 
 import express from 'express';
+import { describeMetric, GROUP_ORDER } from '../core/metric-catalog.js';
 
 const VALID_OPS = ['>', '<', '>=', '<='];
 const VALID_SEV = ['info', 'warning', 'critical'];
+const VALID_CHANNELS = ['ui', 'email', 'telegram'];
 
-export function alertsRouter({ alertsRepo, metricsRepo, requireAuth }) {
+export function alertsRouter({ alertsRepo, metricsRepo, requireAuth, sampler }) {
   const r = express.Router();
 
   function validate(body) {
@@ -18,7 +20,7 @@ export function alertsRouter({ alertsRepo, metricsRepo, requireAuth }) {
     const sustain = Number(body.sustain_s ?? 60), cooldown = Number(body.cooldown_s ?? 900);
     if (sustain < 0 || sustain > 86400) e.push('sustain_s out of range');
     if (cooldown < 0 || cooldown > 86400 * 7) e.push('cooldown_s out of range');
-    const channels = Array.isArray(body.channels) ? body.channels.filter((c) => ['ui', 'email'].includes(c)) : ['ui'];
+    const channels = Array.isArray(body.channels) ? body.channels.filter((c) => VALID_CHANNELS.includes(c)) : ['ui'];
     return { errors: e, rule: {
       name: String(body.name), metric: String(body.metric), op: body.op,
       threshold: Number(body.threshold), sustain_s: sustain,
@@ -51,7 +53,13 @@ export function alertsRouter({ alertsRepo, metricsRepo, requireAuth }) {
 
   r.get('/active', (req, res) => res.json({ active: alertsRepo.active() }));
   r.get('/history', (req, res) => res.json({ history: alertsRepo.history(Math.min(Number(req.query.limit) || 100, 500)) }));
-  r.get('/metrics', (req, res) => res.json({ metrics: metricsRepo.listMetrics() }));
+  r.get('/metrics', (req, res) => {
+    const live = sampler ? sampler.getLiveNames() : {};
+    const metrics = metricsRepo.listMetrics()
+      .map((key) => describeMetric(key, live))
+      .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.label.localeCompare(b.label));
+    res.json({ metrics });
+  });
 
   return r;
 }

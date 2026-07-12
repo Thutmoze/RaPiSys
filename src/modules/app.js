@@ -1224,6 +1224,82 @@ pageRenderers.alerts = (() => {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const SEV_CLASS = { info: 'sev-info', warning: 'sev-warning', critical: 'sev-critical' };
 
+  function metricKind(key) {
+    if (/^service\..+\.up$/.test(key)) return 'service';
+    if (/^docker\..+\.up$/.test(key)) return 'container';
+    if (/^net\..+\.(rx|tx)$/.test(key)) return 'net';
+    return 'num';
+  }
+
+  // Shows the right condition inputs for the selected metric (numeric
+  // op+threshold, or a plain Down/Back-up select for service & container
+  // status), and keeps the underlying op/threshold in sync either way so the
+  // submit handler never needs to special-case status rules.
+  function syncCondition(host, { fromEdit = false } = {}) {
+    const key = $('[data-new=metric]', host).value;
+    const kind = metricKind(key);
+    const condNum = $('[data-new=condnum]', host);
+    const condState = $('[data-new=condstate]', host);
+    const hint = $('[data-new=unithint]', host);
+    const stateSel = $('[data-new=state]', host);
+    const opSel = $('[data-new=op]', host);
+    const thrInput = $('[data-new=threshold]', host);
+    const isStatus = kind === 'service' || kind === 'container';
+
+    condNum.style.display = isStatus ? 'none' : '';
+    condState.style.display = isStatus ? '' : 'none';
+
+    if (isStatus) {
+      stateSel.options[0].textContent = kind === 'container' ? 'Not running' : 'Down';
+      stateSel.options[1].textContent = kind === 'container' ? 'Running again' : 'Back up';
+      hint.style.display = 'block';
+      hint.textContent = kind === 'container'
+        ? 'Fires when the container is stopped, crashed, or removed. A fully removed container is still reported down for 30 minutes before RaPiSys stops tracking it.'
+        : 'Fires when the service check on its port stops answering — this keeps working even if the underlying container is removed.';
+      if (fromEdit) {
+        const op = opSel.value, thr = Number(thrInput.value);
+        stateSel.value = (op === '>=' || op === '>') && thr >= 1 ? 'up' : 'down';
+      } else {
+        stateSel.value = 'down';
+        opSel.value = '<'; thrInput.value = '1';
+      }
+    } else if (kind === 'net') {
+      hint.style.display = 'block';
+      hint.textContent = 'Rate in bytes/second on this interface.';
+    } else {
+      hint.style.display = 'none';
+      hint.textContent = '';
+    }
+    renderPreview(host);
+  }
+
+  function renderPreview(host) {
+    const el = $('[data-new=preview]', host);
+    if (!el) return;
+    const msel = $('[data-new=metric]', host);
+    const key = msel.value;
+    if (!key) { el.textContent = ''; return; }
+    const kind = metricKind(key);
+    const label = msel.selectedOptions[0]?.textContent || key;
+    const name = $('[data-new=name]', host).value.trim() || '(unnamed rule)';
+    const sustain = $('[data-new=sustain]', host).value || '0';
+    const sev = $('[data-new=severity]', host).value;
+    const chans = ['in the dashboard'];
+    if ($('[data-new=email]', host).checked) chans.push('email');
+    if ($('[data-new=telegram]', host).checked) chans.push('Telegram');
+    const chanTxt = chans.length === 1 ? chans[0] : `${chans.slice(0, -1).join(', ')} and ${chans[chans.length - 1]}`;
+    let cond;
+    if (kind === 'service' || kind === 'container') {
+      const down = $('[data-new=state]', host).value === 'down';
+      const word = down ? (kind === 'container' ? 'is not running' : 'is down') : 'is back up';
+      cond = `${kind === 'container' ? 'Container' : 'Service'} "${label}" ${word}`;
+    } else {
+      const opWord = { '>': 'rises above', '>=': 'reaches', '<': 'drops below', '<=': 'falls to' }[$('[data-new=op]', host).value] || 'crosses';
+      cond = `${label} ${opWord} ${$('[data-new=threshold]', host).value || '—'}`;
+    }
+    el.textContent = `${name} — alert (${sev}) when ${cond}, sustained for ${sustain}s. Notify ${chanTxt}.`;
+  }
+
   // Reflect add-vs-edit state in the rule form (title, button label, cancel).
   function updateFormMode(host) {
     const title = $('[data-new=formtitle]', host);
@@ -1251,6 +1327,7 @@ pageRenderers.alerts = (() => {
     const email = $('[data-new=email]', host); if (email) email.checked = false;
     const tgch = $('[data-new=telegram]', host); if (tgch) tgch.checked = false;
     enhanceSelects(host);
+    syncCondition(host, { fromEdit: false });
     updateFormMode(host);
   }
 
@@ -1293,11 +1370,25 @@ pageRenderers.alerts = (() => {
       ? active.active.map((a) => `<div class="al-banner ${SEV_CLASS[a.severity]}">⚠ <b>${esc(a.name)}</b> — firing since ${new Date(a.since).toLocaleTimeString()}</div>`).join('')
       : '';
 
-    // rules table
+    // rules table — friendly condition text, reusing the same metric catalog
+    // data as the dropdown so "service.dns.up < 1" reads as "DNS is down".
+    const metricByKey = Object.fromEntries(metrics.metrics.map((m) => [m.key, m]));
+    const OPWORD = { '>': 'rises above', '>=': 'reaches', '<': 'drops below', '<=': 'falls to' };
+    function ruleCondText(r) {
+      const m = metricByKey[r.metric];
+      const kind = metricKind(r.metric);
+      const label = m ? m.label : r.metric;
+      if (kind === 'service' || kind === 'container') {
+        const down = r.op === '<' || (r.op === '<=' && r.threshold < 1);
+        const noun = kind === 'container' ? 'Container' : 'Service';
+        return `${noun}: ${label} is ${down ? (kind === 'container' ? 'not running' : 'down') : 'back up'}`;
+      }
+      return `${label} ${OPWORD[r.op] || r.op} ${r.threshold}`;
+    }
     $('[data-al=rules]', host).innerHTML = rules.rules.map((r) => `
       <div class="al-rule ${r.enabled ? '' : 'al-disabled'}">
         <span class="al-sev ${SEV_CLASS[r.severity]}">${esc(r.severity)}</span>
-        <span class="al-name"><b>${esc(r.name)}</b><br><small>${esc(r.metric)} ${esc(r.op)} ${r.threshold} for ${r.sustain_s}s · ${(r.channels || []).join('+')}</small></span>
+        <span class="al-name"><b>${esc(r.name)}</b><br><small>${esc(ruleCondText(r))} for ${r.sustain_s}s · ${(r.channels || []).join('+')}</small></span>
         <span class="al-actions">
           <button class="inv-act" data-edit="${r.id}" title="Edit rule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
           <button class="inv-act" data-toggle="${r.id}" data-enabled="${r.enabled}" title="${r.enabled ? 'Disable rule' : 'Enable rule'}">${r.enabled
@@ -1307,13 +1398,19 @@ pageRenderers.alerts = (() => {
         </span>
       </div>`).join('') || '<p class="sess-empty">No rules — add one below.</p>';
 
-    // metric dropdown: populate from the live metric list, preserving the
-    // current choice (options are read live by the custom dropdown on open)
+    // metric dropdown: populate from the live, friendly-labelled metric list
+    // (server groups+labels them via the metric catalog), preserving the
+    // current choice.
     const msel = $('[data-new=metric]', host);
     const keep = msel.value;
+    const groups = {};
+    for (const m of metrics.metrics) (groups[m.group] ||= []).push(m);
     msel.innerHTML = '<option value="">Choose a metric…</option>'
-      + metrics.metrics.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+      + Object.keys(groups).map((g) => `<optgroup label="${esc(g)}">${
+        groups[g].map((m) => `<option value="${esc(m.key)}">${esc(m.label)}</option>`).join('')
+      }</optgroup>`).join('');
     if (keep) msel.value = keep;
+    syncCondition(host, { fromEdit: true });
 
     // history
     $('[data-al=hist]', host).innerHTML = history.history.length
@@ -1342,6 +1439,7 @@ pageRenderers.alerts = (() => {
       $('[data-new=telegram]', host).checked = (rule.channels || []).includes('telegram');
       // re-sync any enhanced selects, then reflect edit mode in the form
       enhanceSelects(host);
+      syncCondition(host, { fromEdit: true });
       updateFormMode(host);
       $('[data-new=name]', host).scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
@@ -1377,20 +1475,27 @@ pageRenderers.alerts = (() => {
             <div class="al-form wz-form">
               <label>Name <input data-new="name" placeholder="High CPU temperature" maxlength="80"></label>
               <div class="al-form-row">
-                <label>Metric <select data-new="metric"><option value="">Choose a metric…</option></select></label>
+                <label>What to watch <select data-new="metric"><option value="">Choose a metric…</option></select></label>
+              </div>
+              <p class="hw-hint" data-new="unithint" style="display:none"></p>
+              <div class="al-form-row" data-new="condnum">
                 <label>Op <select data-new="op"><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option></select></label>
                 <label>Threshold <input data-new="threshold" type="number" step="any" placeholder="80"></label>
+              </div>
+              <div class="al-form-row" data-new="condstate" style="display:none">
+                <label>Alert when <select data-new="state"><option value="down">Down</option><option value="up">Back up</option></select></label>
               </div>
               <div class="al-form-row">
                 <label>Sustain (s) <input data-new="sustain" type="number" value="120"></label>
                 <label>Severity <select data-new="severity"><option>warning</option><option>critical</option><option>info</option></select></label>
                 <label>Cooldown (s) <input data-new="cooldown" type="number" value="900"></label>
               </div>
+              <p class="hw-hint" data-new="preview"></p>
               <label class="wz-inline"><input type="checkbox" data-new="email"> Also send email</label>
               <label class="wz-inline"><input type="checkbox" data-new="telegram"> Also send Telegram</label>
               <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn set-btn-cancel" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
             </div>
-            <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s.</p>
+            <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s. Service and container conditions reuse the same live checks as the Services and Containers cards — a service check keeps watching its port even if the container is removed, so a "DNS" rule still fires. A container that's fully removed is reported down for 30 minutes before RaPiSys stops tracking it, so a rebuild/redeploy won't falsely trigger an alert.</p>
           </div>
           <div class="card-body" data-pane="history" style="display:none">
             <div class="card-body" data-al="hist"></div>
@@ -1398,6 +1503,19 @@ pageRenderers.alerts = (() => {
         </div>
       </div>`;
       wirePageTabs(host);
+
+      $('[data-new=metric]', host).onchange = () => syncCondition(host, { fromEdit: false });
+      $('[data-new=state]', host).onchange = () => {
+        const down = $('[data-new=state]', host).value === 'down';
+        $('[data-new=op]', host).value = down ? '<' : '>=';
+        $('[data-new=threshold]', host).value = '1';
+        renderPreview(host);
+      };
+      ['name', 'op', 'threshold', 'sustain', 'severity', 'email', 'telegram'].forEach((k) => {
+        const el = $(`[data-new=${k}]`, host);
+        if (el) el.addEventListener('input', () => renderPreview(host));
+      });
+      syncCondition(host, { fromEdit: false });
 
       $('[data-new=add]', host).onclick = async () => {
         const stat = $('[data-new=status]', host);

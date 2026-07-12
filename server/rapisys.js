@@ -58,7 +58,7 @@ import { diskRouter } from './routes/disk.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export async function initRapisys({ app, loadSettings, saveSettings, withFileLock, requireAuth }) {
+export async function initRapisys({ app, loadSettings, saveSettings, withFileLock, requireAuth, loadServices, checkService }) {
   // ---- storage -------------------------------------------------------------
   const settings = await loadSettings();
   const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
@@ -154,7 +154,12 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   // ---- collectors & services -------------------------------------------------
   const hardware = createHardwareCollector();
-  const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware });
+  // Reuses the exact same live checks the Services card uses, so a
+  // service.<name>.up alert metric matches what's shown on-screen. Guarded
+  // in case a future refactor of index.js drops these exports — the sampler
+  // simply won't produce service.* metrics rather than failing to start.
+  const servicesApi = (loadServices && checkService) ? { loadServices, checkService } : null;
+  const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware, servicesApi });
   const retention = createRetention({
     metricsRepo: metricsFacade,
     eventsRepo: eventsFacade,
@@ -384,7 +389,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // (inventory, network, reports, …) were unguarded and readable without login in
   // full mode. Mutating routes keep their stricter requireControl on top.
   app.use('/api/hardware', rc, hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
-  app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig }));
+  app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig, sampler }));
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,
     loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig }));
