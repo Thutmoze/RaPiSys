@@ -21,6 +21,14 @@ export function createMailer({ getSmtpSettings, secrets, events }) {
     const cfg = await getSmtpSettings();
     if (!cfg || !cfg.host) throw new Error('SMTP is not configured');
     const password = secrets.get('smtp.password');
+    // nodemailer's own error here is a cryptic 'Missing credentials for
+    // "PLAIN"' — this happened in practice because the password field is
+    // write-only and simply wasn't (re-)saved, and the send silently kept
+    // failing with no clue why. Fail fast with a message that says what to
+    // actually do about it.
+    if (cfg.user && !password) {
+      throw new Error('SMTP password is not set — open Settings → Email, re-enter the password/SMTP key, and save.');
+    }
     return nodemailer.createTransport({
       host: cfg.host,
       port: Number(cfg.port) || 587,

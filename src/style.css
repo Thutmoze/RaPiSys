@@ -4741,7 +4741,8 @@ body.ultra .sess-row.sess-hist-row { grid-template-columns: 1.4fr 1fr 1.4fr 1.4f
 .al-name b { color: var(--text-primary); }
 .al-name small { color: var(--text-muted); }
 .al-sev { font-size: 10px; text-transform: uppercase; font-weight: 700;
-  padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-color); }
+  padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border-color);
+  justify-self: start; width: fit-content; }
 .al-sev.sev-info { color: var(--accent-cyan); border-color: rgba(0,212,255,0.4); }
 .al-sev.sev-warning { color: var(--accent-orange, #f97316); border-color: rgba(249,115,22,0.4); }
 .al-sev.sev-critical { color: var(--accent-red, #ef4444); border-color: rgba(239,68,68,0.5); }

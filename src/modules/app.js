@@ -1420,13 +1420,22 @@ pageRenderers.alerts = (() => {
     if (keep) msel.value = keep;
     syncCondition(host, { fromEdit: true });
 
-    // history
+    // history — same friendly label + up/down wording as the rule list and
+    // notifications (a status-metric incident showing raw "service.dns.up"
+    // and "peak 0" was the same underlying bug as the Telegram message).
+    function histPeakText(h) {
+      if (h.peak_value == null) return '—';
+      if (metricKind(h.metric) === 'service' || metricKind(h.metric) === 'container') {
+        return h.peak_value >= 1 ? 'up' : 'down';
+      }
+      return Math.round(h.peak_value * 10) / 10;
+    }
     $('[data-al=hist]', host).innerHTML = history.history.length
       ? history.history.map((h) => `
         <div class="sess-row">
           <span class="al-sev ${SEV_CLASS[h.severity] || ''}">${esc(h.severity || '')}</span>
-          <span><b>${esc(h.name || 'deleted rule')}</b> <small>${esc(h.metric || '')}</small></span>
-          <span>peak ${h.peak_value != null ? Math.round(h.peak_value * 10) / 10 : '—'}</span>
+          <span><b>${esc(h.name || 'deleted rule')}</b> <small>${esc(metricByKey[h.metric]?.label || h.metric || '')}</small></span>
+          <span>peak ${histPeakText(h)}</span>
           <span>${rapisysFmtTime(h.fired_at)}${h.resolved_at ? '' : ' · <span class="sess-live">ongoing</span>'}</span>
         </div>`).join('')
       : '<p class="sess-empty">No incidents recorded</p>';
