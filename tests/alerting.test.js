@@ -71,6 +71,51 @@ describe('alert engine state machine', () => {
     expect(f.alertsRepo.history().length).toBe(0);
   });
 
+  it('renders service/container status metrics as up/down, not a raw number', async () => {
+    const f = fixture();
+    const id = f.alertsRepo.createRule({ name: 'DNS resolver down', metric: 'service.dns.up', op: '<', threshold: 1,
+      sustain_s: 0, severity: 'critical', enabled: 1, cooldown_s: 900, escalate_after_s: null, channels: ['ui', 'email'] });
+    const t0 = Date.now();
+
+    f.metricsRepo.writeBatch(t0, [{ metric: 'service.dns.up', value: 0 }]);
+    await f.engine.evaluateOnce(t0);                        // ok -> pending
+    expect(f.alertsRepo.getState(id).state).toBe('pending');
+    await f.engine.evaluateOnce(t0 + 1000);                  // pending -> firing (sustain_s: 0)
+    expect(f.alertsRepo.getState(id).state).toBe('firing');
+    expect(f.sent.length).toBe(1);
+    expect(f.sent[0].text).toContain('is down');
+    expect(f.sent[0].text).not.toMatch(/<\s*0/);   // the original bug: literal "< 0" in the body
+
+    f.metricsRepo.writeBatch(t0 + 2000, [{ metric: 'service.dns.up', value: 1 }]);
+    await f.engine.evaluateOnce(t0 + 3000);
+    expect(f.alertsRepo.getState(id).state).toBe('ok');
+    expect(f.sent[1].text).toContain('is up again');
+  });
+
+  it('logs a visible event instead of silently no-op-ing when email is selected but SMTP is unconfigured', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-al2-'));
+    const { db } = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });
+    const metricsRepo = createMetricsRepo(db);
+    const eventsRepo = createEventsRepo(db);
+    const alertsRepo = createAlertsRepo(db);
+    const sent = [];
+    const mailer = { send: async (m) => sent.push(m) };
+    const engine = createAlertEngine({
+      alertsRepo, metricsRepo, eventsRepo, mailer,
+      getSettings: async () => ({ rapisys: {} }),   // no smtp configured
+    });
+    const id = alertsRepo.createRule({ name: 'hot', metric: 'temp.cpu', op: '>', threshold: 80,
+      sustain_s: 0, severity: 'critical', enabled: 1, cooldown_s: 900, escalate_after_s: null, channels: ['ui', 'email'] });
+    const t0 = Date.now();
+    metricsRepo.writeBatch(t0, [{ metric: 'temp.cpu', value: 85 }]);
+    await engine.evaluateOnce(t0);                  // ok -> pending
+    await engine.evaluateOnce(t0 + 1000);            // pending -> firing (sustain_s: 0)
+    expect(alertsRepo.getState(id).state).toBe('firing');
+    expect(sent.length).toBe(0);   // still no email — SMTP isn't configured
+    const skipped = eventsRepo.recent(50, 'alert.email_skipped');
+    expect(skipped.length).toBe(1);
+  });
+
   it('seeds default rules exactly once', () => {
     const f = fixture();
     f.engine.seedDefaults();

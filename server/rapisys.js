@@ -208,7 +208,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   });
   const alertEngine = createAlertEngine({
     alertsRepo: alertsFacade, metricsRepo: metricsFacade,
-    eventsRepo: eventsFacade, mailer, telegram, getSettings: loadSettings,
+    eventsRepo: eventsFacade, mailer, telegram, getSettings: loadSettings, sampler,
   });
   alertEngine.seedDefaults();
   const sessionTracker = createSessionTracker({

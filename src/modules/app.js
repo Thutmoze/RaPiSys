@@ -1300,6 +1300,14 @@ pageRenderers.alerts = (() => {
     el.textContent = `${name} — alert (${sev}) when ${cond}, sustained for ${sustain}s. Notify ${chanTxt}.`;
   }
 
+  // The rule form is collapsed by default; shown via the "+ Add rule"
+  // button, an edit click, or kept open on a submit error so the person
+  // can fix it — collapsed again after a successful add/update or Cancel.
+  function setFormVisible(host, visible) {
+    const wrap = $('[data-new=formwrap]', host);
+    if (wrap) wrap.style.display = visible ? '' : 'none';
+  }
+
   // Reflect add-vs-edit state in the rule form (title, button label, cancel).
   function updateFormMode(host) {
     const title = $('[data-new=formtitle]', host);
@@ -1441,6 +1449,7 @@ pageRenderers.alerts = (() => {
       enhanceSelects(host);
       syncCondition(host, { fromEdit: true });
       updateFormMode(host);
+      setFormVisible(host, true);
       $('[data-new=name]', host).scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
     host.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => {
@@ -1469,8 +1478,12 @@ pageRenderers.alerts = (() => {
             <div data-al="active"></div>
           </div>
           <div class="card-body" data-pane="rules" style="display:none">
-            <h4 class="sess-h">Rules</h4>
+            <div class="al-rules-head">
+              <h4 class="sess-h" style="margin:0">Rules</h4>
+              <button class="set-btn set-btn-primary" data-new="opennew" style="padding:7px 14px;font-size:12.5px"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button>
+            </div>
             <div data-al="rules"></div>
+            <div data-new="formwrap" style="display:none">
             <h4 class="sess-h" data-new="formtitle">Add rule</h4>
             <div class="al-form wz-form">
               <label>Name <input data-new="name" placeholder="High CPU temperature" maxlength="80"></label>
@@ -1496,6 +1509,7 @@ pageRenderers.alerts = (() => {
               <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn set-btn-cancel" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
             </div>
             <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s. Service and container conditions reuse the same live checks as the Services and Containers cards — a service check keeps watching its port even if the container is removed, so a "DNS" rule still fires. A container that's fully removed is reported down for 30 minutes before RaPiSys stops tracking it, so a rebuild/redeploy won't falsely trigger an alert.</p>
+            </div>
           </div>
           <div class="card-body" data-pane="history" style="display:none">
             <div class="card-body" data-al="hist"></div>
@@ -1517,6 +1531,13 @@ pageRenderers.alerts = (() => {
       });
       syncCondition(host, { fromEdit: false });
 
+      $('[data-new=opennew]', host).onclick = () => {
+        editingId = null;
+        resetForm(host);
+        setFormVisible(host, true);
+        $('[data-new=name]', host).focus();
+      };
+
       $('[data-new=add]', host).onclick = async () => {
         const stat = $('[data-new=status]', host);
         const body = {
@@ -1532,19 +1553,20 @@ pageRenderers.alerts = (() => {
             ...($('[data-new=telegram]', host).checked ? ['telegram'] : [])],
         };
         try {
+          const wasEditing = !!editingId;
           if (editingId) {
             await api(`/alerts/rules/${editingId}`, { method: 'PUT', body });
-            setStatus(stat, true, '✓ rule updated');
           } else {
             await api('/alerts/rules', { method: 'POST', body });
-            setStatus(stat, true, '✓ rule added');
           }
+          toast('success', 'Alerts', wasEditing ? '✓ Rule updated' : '✓ Rule added');
           editingId = null;
           resetForm(host);
+          setFormVisible(host, false);
           refresh(host);
         } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
       };
-      $('[data-new=cancel]', host).onclick = () => { editingId = null; resetForm(host); };
+      $('[data-new=cancel]', host).onclick = () => { editingId = null; resetForm(host); setFormVisible(host, false); };
 
       refresh(host);
       timer = setInterval(() => refresh(host), 15000);

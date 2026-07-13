@@ -12,6 +12,8 @@
  *  - channels: "ui" (event log → toast/banner), "email" (mailer), "telegram"
  */
 
+import { describeMetric, isStatusMetric } from '../core/metric-catalog.js';
+
 // Escape values interpolated into Telegram HTML-parse-mode messages.
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -24,22 +26,27 @@ const OPS = {
   '<=': (a, b) => a <= b,
 };
 
-const METRIC_LABELS = {
-  'cpu.usage': 'CPU usage', 'mem.percent': 'Memory usage', 'temp.cpu': 'CPU temperature',
-  'fan.rpm': 'Fan speed', 'power.watts': 'Board power', 'load.avg1': 'Load (1m)',
-};
-
-export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer, telegram, getSettings }) {
+export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer, telegram, getSettings, sampler }) {
 
   async function notify(rule, kind, value) {
     const channels = safeChannels(rule.channels);
-    const label = METRIC_LABELS[rule.metric] || rule.metric;
+    // Same catalog + live name cache the Alerts UI dropdown uses, so a
+    // notification says "DNS" / "pihole" rather than "service.dns.up".
+    const live = sampler ? sampler.getLiveNames() : {};
+    const label = describeMetric(rule.metric, live).label;
+    const statusMetric = isStatusMetric(rule.metric);
     const title = kind === 'fired'
       ? `[${rule.severity.toUpperCase()}] ${rule.name}`
       : `[RESOLVED] ${rule.name}`;
-    const body = kind === 'fired'
-      ? `${label} is ${fmt(value)} (threshold: ${rule.op} ${rule.threshold}).`
-      : `${label} is back to ${fmt(value)}.`;
+    // Service/container metrics are 1 (up) or 0 (down) — say so in words
+    // instead of showing the raw number, which is what was happening before.
+    const body = statusMetric
+      ? (kind === 'fired'
+          ? `${label} is ${value >= 1 ? 'up' : 'down'}.`
+          : `${label} is ${value >= 1 ? 'up' : 'down'} again.`)
+      : (kind === 'fired'
+          ? `${label} is ${fmt(value)} (threshold: ${rule.op} ${rule.threshold}).`
+          : `${label} is back to ${fmt(value)}.`);
 
     // UI channel: persisted event drives the toast/banner/badge.
     eventsRepo.add(`alert.${kind}`, kind === 'fired' ? rule.severity : 'info',
@@ -57,6 +64,13 @@ export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer,
               <h3 style="margin:0 0 12px;color:${kind === 'fired' ? (rule.severity === 'critical' ? '#ef4444' : '#f97316') : '#10b981'}">${title}</h3>
               <p style="margin:0">${body}</p></div>`,
           });
+        } else {
+          // Previously silent: a rule with "email" checked but no SMTP host
+          // configured just did nothing, with no way to tell why an email
+          // never showed up. Now it's a visible event on the Alerts/Events
+          // feed pointing at Settings → Email.
+          eventsRepo.add('alert.email_skipped', 'warning',
+            { ruleId: rule.id, name: rule.name, reason: 'SMTP not configured — set it up in Settings → Email' });
         }
       } catch (err) {
         eventsRepo.add('alert.email_failed', 'warning', { ruleId: rule.id, error: err.message });
