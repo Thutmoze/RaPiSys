@@ -5620,6 +5620,10 @@ pageRenderers.updates = (() => {
     const close = () => ov.remove();
     const expanded = new Set();        // version indices currently expanded
     let activeIdx = null;
+    let settled = false;               // true once the changelog fetch has resolved (any outcome)
+    const headerActions = () => `${settled
+      ? `<button class="up-btn up-act-fw" data-cl="update" title="Update this package now">${ICN.download}<span>Update</span></button>`
+      : ''}<button class="up-link" data-cl="close">close ✕</button>`;
     const renderBody = () => {
       if (data.error) return `<p class="up-cl-empty">${esc(data.error)}</p>`;
       if (data.noChangelog) {
@@ -5689,13 +5693,15 @@ pageRenderers.updates = (() => {
     ov.innerHTML = `<div class="wizard card up-cl-modal">
         <div class="up-cl-head">
           <div><b>${esc(pkg)}</b> <span class="inv-dim">changelog</span>${data.candidateVersion ? ` <span class="up-cl-ver">→ ${esc(decodeURIComponent(data.candidateVersion))}</span>` : ''}${instTitle}</div>
-          <button class="up-link" data-cl="close">close ✕</button>
+          <div class="up-cl-head-actions" data-cl="headactions">${headerActions()}</div>
         </div>
         <div class="up-cl-main" data-cl="main">${data.changelog || data.needsFull || data.error ? renderBody() : '<div class="up-log-loading"><span class="up-spinner-sm"></span>Loading changelog…</div>'}</div>
       </div>`;
     document.body.appendChild(ov);
     const wire = () => {
       ov.querySelector('[data-cl=close]').onclick = close;
+      const upd = ov.querySelector('[data-cl=update]');
+      if (upd) upd.onclick = () => { close(); confirmUpgrade(host, { packages: [pkg], label: pkg }); };
       // sidebar nav: set active, expand it, scroll to it
       ov.querySelectorAll('[data-nav]').forEach((b) => b.onclick = () => {
         const i = Number(b.dataset.nav);
@@ -5719,7 +5725,12 @@ pageRenderers.updates = (() => {
     wire();
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
     ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-    ov._rerender = (newData) => { Object.assign(data, newData); activeIdx = null; expanded.clear(); ov.querySelector('[data-cl=main]').innerHTML = renderBody(); wire(); };
+    ov._rerender = (newData) => {
+      Object.assign(data, newData); settled = true; activeIdx = null; expanded.clear();
+      ov.querySelector('[data-cl=headactions]').innerHTML = headerActions();
+      ov.querySelector('[data-cl=main]').innerHTML = renderBody();
+      wire();
+    };
     return ov;
   }
 

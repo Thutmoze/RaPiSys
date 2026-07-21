@@ -5587,6 +5587,7 @@ body.compact .up-uptodate-title, body.ultra .up-uptodate-title { font-size: 18px
 .up-cl-modal { max-width: 920px; width: 92vw; max-height: 86vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .up-cl-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px;
   border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+.up-cl-head-actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 .up-cl-ver { color: var(--accent-cyan); font-weight: 600; }
 .up-cl-main { flex: 1; overflow: hidden; display: flex; min-height: 200px; }
 .up-cl-layout { display: flex; width: 100%; overflow: hidden; }
