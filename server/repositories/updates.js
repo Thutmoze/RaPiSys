@@ -100,6 +100,7 @@ export function createUpdatesRepo(db) {
   try { db.exec(`ALTER TABLE update_history ADD COLUMN cves INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN kernel INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN firmware INTEGER`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE update_history ADD COLUMN rpi INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN description TEXT`); } catch { /* exists */ }
 
   // Firmware classification — mirrors the agent's rule (name prefix or a dpkg
@@ -107,19 +108,25 @@ export function createUpdatesRepo(db) {
   // Updates tag for the same package.
   const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
   const isFirmwarePkg = (name, desc) => FIRMWARE_RE.test(String(name || '')) || /firmware/i.test(String(desc || ''));
+  // Raspberry Pi ecosystem classification — mirrors the agent's rule. Only
+  // applies when the package isn't already kernel/firmware, so History never
+  // shows two overlapping Pi tags on the same row.
+  const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-imager|rpi-connect|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
+  const isRpiPkg = (name, kernel, fw) => !kernel && !fw && RPI_RE.test(String(name || ''));
 
   function record({ ts, packageName, fromV, toV, result, log, description }) {
     // capture the package's known security tags at the moment of the upgrade
-    let sec = null, cves = null, kern = null, fw = null;
+    let sec = null, cves = null, kern = null, fw = null, rpi = null;
     try {
       const t = db.prepare(`SELECT security, cves FROM update_sectags WHERE package=?`).get(packageName);
       if (t) { sec = t.security ? 1 : 0; cves = t.cves || 0; }
       kern = (/linux-image|^linux-headers|kernel/i.test(packageName)) ? 1 : 0;
       fw = isFirmwarePkg(packageName, description) ? 1 : 0;
+      rpi = isRpiPkg(packageName, kern, fw) ? 1 : 0;
     } catch { /* best-effort */ }
-    db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel, firmware, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(ts, packageName, fromV || null, toV || null, result, (log || '').slice(0, 20000), sec, cves, kern, fw, description || null);
+    db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel, firmware, rpi, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(ts, packageName, fromV || null, toV || null, result, (log || '').slice(0, 20000), sec, cves, kern, fw, rpi, description || null);
   }
   function recordBatch(entries) {
     const tx = db.transaction((rows) => { for (const r of rows) record(r); });
@@ -127,7 +134,7 @@ export function createUpdatesRepo(db) {
   }
   function recent(limit = 50) {
     const rows = db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log,
-                              security, cves, kernel, firmware, description
+                              security, cves, kernel, firmware, rpi, description
                        FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
     // Backfill rows that predate per-row tag capture (security IS NULL): if the
     // package still has a tag in update_sectags, surface it so older history
@@ -147,6 +154,9 @@ export function createUpdatesRepo(db) {
       // Firmware is derivable purely from the package name/description, so
       // backfill it for every row that lacks the flag (older history rows).
       if (r.firmware == null) r.firmware = isFirmwarePkg(r.package, r.description) ? 1 : 0;
+      // Same for the broader Raspberry Pi tag — needs the final kernel/firmware
+      // values above so it never overlaps with either.
+      if (r.rpi == null) r.rpi = isRpiPkg(r.package, r.kernel, r.firmware) ? 1 : 0;
     }
     return rows;
   }

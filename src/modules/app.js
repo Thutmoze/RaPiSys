@@ -5376,6 +5376,7 @@ pageRenderers.updates = (() => {
     if (activeFilter === 'security') return updates.filter((u) => u.security);
     if (activeFilter === 'kernel') return updates.filter((u) => u.kernel);
     if (activeFilter === 'firmware') return updates.filter((u) => u.firmware);
+    if (activeFilter === 'rpi') return updates.filter((u) => u.rpi);
     return updates;
   }
 
@@ -5403,6 +5404,7 @@ pageRenderers.updates = (() => {
     const sec = updates.filter((u) => u.security).length;
     const kern = updates.filter((u) => u.kernel).length;
     const fwPkgs = updates.filter((u) => u.firmware).length;   // firmware apt packages (chip filter)
+    const rpiPkgs = updates.filter((u) => u.rpi).length;        // Raspberry Pi ecosystem packages (chip filter)
     const fw = firmware?.updateAvailable;                       // bootloader EEPROM (action button)
 
     // "checked" is fresh (normal colour) if < 24h old, else dimmed/stale.
@@ -5413,6 +5415,7 @@ pageRenderers.updates = (() => {
       <button class="up-chip up-filter up-chip-sec" data-filter="security">Security (${sec})</button>
       <button class="up-chip up-filter up-chip-kern" data-filter="kernel">Kernel (${kern})</button>
       <button class="up-chip up-filter up-chip-fw" data-filter="firmware">Firmware (${fwPkgs})</button>
+      <button class="up-chip up-filter up-chip-rpi" data-filter="rpi">Raspberry Pi (${rpiPkgs})</button>
       ${piholeUpd?.updateAvailable ? `<button class="up-chip up-chip-pihole" data-up="piholego" title="${esc(piholeUpd.currentVersion || '')}${piholeUpd.latestVersion ? ' → ' + esc(piholeUpd.latestVersion) : ''}">Pi-hole (1)</button>` : ''}
       ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}
       ${autoCheck ? `<span class="up-checked up-autocheck" title="Last automatic background check: ${autoCheck.checked} updates, ${autoCheck.security} security">Auto-checked ${fmtChecked(autoCheck.ts)}</span>` : ''}`;
@@ -5444,7 +5447,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
             <td class="inv-dim">${u.releaseDate ? rapisysFmtDate(u.releaseDate) : '—'}</td>
             <td class="inv-dim">${u.installedAt ? rapisysFmtDate(u.installedAt) : '—'}</td>
-            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}</div></td>
+            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}${u.rpi ? '<span class="up-tag up-tag-rpi">raspberry pi</span>' : ''}</div></td>
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
           </tr>`).join('')}</tbody>
@@ -5452,7 +5455,7 @@ pageRenderers.updates = (() => {
       <div class="up-uptodate">
         <div class="up-uptodate-ring">${ICN.check || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'}</div>
         <div class="up-uptodate-title">System is up to date \u{1F389}</div>
-        <div class="up-uptodate-sub">No package, security, kernel, or firmware updates are pending.</div>
+        <div class="up-uptodate-sub">No package, security, kernel, firmware, or Raspberry Pi updates are pending.</div>
         ${lastChecked ? `<div class="up-uptodate-meta">Last checked ${fmtChecked(lastChecked)}</div>` : ''}
       </div>`;
     wireTable(host);
@@ -6040,17 +6043,21 @@ pageRenderers.updates = (() => {
         // row). Older rows predating this have null flags — fall back to the
         // best-effort log/name heuristic for those only.
         const tags = [];
-        if (e.security != null || e.cves != null || e.kernel != null || e.firmware != null) {
+        if (e.security != null || e.cves != null || e.kernel != null || e.firmware != null || e.rpi != null) {
           if (e.security) tags.push('<span class="up-tag up-tag-sec">Security</span>');
           if (e.cves) tags.push(`<span class="up-tag up-tag-cve">${e.cves} CVE${e.cves > 1 ? 's' : ''}</span>`);
           if (e.kernel) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
           if (e.firmware) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
+          if (e.rpi) tags.push('<span class="up-tag up-tag-rpi">Raspberry Pi</span>');
         } else {
           const log = (e.log || '').toLowerCase();
+          const isKernel = /linux-image|kernel/.test(log) || /kernel/i.test(e.package);
+          const isFirmware = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/.test(e.package) || /firmware/i.test(e.description || '');
           if (/security|-security/.test(log)) tags.push('<span class="up-tag up-tag-sec">Security</span>');
           if (/cve-\d/.test(log)) tags.push('<span class="up-tag up-tag-cve">CVE</span>');
-          if (/linux-image|kernel/.test(log) || /kernel/i.test(e.package)) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
-          if (/^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/.test(e.package) || /firmware/i.test(e.description || '')) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
+          if (isKernel) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
+          if (isFirmware) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
+          if (!isKernel && !isFirmware && /^(raspberrypi-|libraspberrypi|raspi-|rpi-imager|rpi-connect|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/.test(e.package)) tags.push('<span class="up-tag up-tag-rpi">Raspberry Pi</span>');
         }
         return `<tr>
         <td class="inv-dim">${rapisysFmtTime(e.ts)}</td>

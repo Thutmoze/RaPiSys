@@ -2079,10 +2079,17 @@ WantedBy=multi-user.target
     // "Raspberry Pi Firmware …" EEPROM/crypto libraries and tools). Kept strict:
     // this does NOT tag EEPROM/OTP HAT tooling like raspi-utils-eeprom.
     const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
+    // Broader Raspberry Pi ecosystem classification — the OS-integration/tooling
+    // packages that are specific to Raspberry Pi OS but aren't the kernel or
+    // firmware (already covered by their own tags above): sys/ui/net mods,
+    // config tools, GPIO/camera libraries, the Imager, Connect, etc. Excludes
+    // anything already tagged kernel/firmware so a package never double-tags.
+    const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-imager|rpi-connect|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
     for (const u of updates) {
       u.description = desc[u.package] || '';
       u.sizeBytes = sizeMap[u.package] || null;
       u.firmware = FIRMWARE_RE.test(u.package) || /firmware/i.test(u.description);
+      u.rpi = !u.kernel && !u.firmware && RPI_RE.test(u.package);
       try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
       catch { u.installedAt = null; }
     }
