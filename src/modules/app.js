@@ -6057,7 +6057,7 @@ pageRenderers.updates = (() => {
           if (/cve-\d/.test(log)) tags.push('<span class="up-tag up-tag-cve">CVE</span>');
           if (isKernel) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
           if (isFirmware) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
-          if (!isKernel && !isFirmware && /^(raspberrypi-|libraspberrypi|raspi-|rpi-imager|rpi-connect|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/.test(e.package)) tags.push('<span class="up-tag up-tag-rpi">Raspberry Pi</span>');
+          if (!isKernel && !isFirmware && (/^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/.test(e.package) || /raspberry\s*pi|raspi-config/i.test(e.description || ''))) tags.push('<span class="up-tag up-tag-rpi">Raspberry Pi</span>');
         }
         return `<tr>
         <td class="inv-dim">${rapisysFmtTime(e.ts)}</td>

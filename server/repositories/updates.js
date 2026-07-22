@@ -110,9 +110,12 @@ export function createUpdatesRepo(db) {
   const isFirmwarePkg = (name, desc) => FIRMWARE_RE.test(String(name || '')) || /firmware/i.test(String(desc || ''));
   // Raspberry Pi ecosystem classification — mirrors the agent's rule. Only
   // applies when the package isn't already kernel/firmware, so History never
-  // shows two overlapping Pi tags on the same row.
-  const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-imager|rpi-connect|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
-  const isRpiPkg = (name, kernel, fw) => !kernel && !fw && RPI_RE.test(String(name || ''));
+  // shows two overlapping Pi tags on the same row. Companion tools without a
+  // recognizable name prefix (e.g. "rc-gui", "rpcc") are caught by the
+  // description fallback instead.
+  const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
+  const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
+  const isRpiPkg = (name, kernel, fw, desc) => !kernel && !fw && (RPI_RE.test(String(name || '')) || RPI_DESC_RE.test(String(desc || '')));
 
   function record({ ts, packageName, fromV, toV, result, log, description }) {
     // capture the package's known security tags at the moment of the upgrade
@@ -122,7 +125,7 @@ export function createUpdatesRepo(db) {
       if (t) { sec = t.security ? 1 : 0; cves = t.cves || 0; }
       kern = (/linux-image|^linux-headers|kernel/i.test(packageName)) ? 1 : 0;
       fw = isFirmwarePkg(packageName, description) ? 1 : 0;
-      rpi = isRpiPkg(packageName, kern, fw) ? 1 : 0;
+      rpi = isRpiPkg(packageName, kern, fw, description) ? 1 : 0;
     } catch { /* best-effort */ }
     db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel, firmware, rpi, description)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -156,7 +159,7 @@ export function createUpdatesRepo(db) {
       if (r.firmware == null) r.firmware = isFirmwarePkg(r.package, r.description) ? 1 : 0;
       // Same for the broader Raspberry Pi tag — needs the final kernel/firmware
       // values above so it never overlaps with either.
-      if (r.rpi == null) r.rpi = isRpiPkg(r.package, r.kernel, r.firmware) ? 1 : 0;
+      if (r.rpi == null) r.rpi = isRpiPkg(r.package, r.kernel, r.firmware, r.description) ? 1 : 0;
     }
     return rows;
   }
