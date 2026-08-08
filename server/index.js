@@ -331,8 +331,10 @@ function checkDnsService(service) {
       resolve({ ...service, status: 'offline', latency: null });
     }, 3000);
 
-    // Try to resolve a simple domain
-    resolver.resolve('google.com', (err) => {
+    // Try to resolve a simple domain (kept on-LAN so this check doesn't
+    // depend on internet connectivity or generate recurring external
+    // queries against the monitored DNS server's logs)
+    resolver.resolve('pi.hole', (err) => {
       clearTimeout(timeout);
       const latency = Date.now() - start;
       resolve({
