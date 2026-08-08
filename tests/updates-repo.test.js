@@ -19,7 +19,7 @@ describe('update history security tags', () => {
     // a known security package with CVEs
     r.saveSecurityTag('openssl', { candidate: '3.1', security: true, cves: 4, urgency: 'high' });
     r.record({ ts: Date.now(), packageName: 'openssl', fromV: '3.0', toV: '3.1', result: 'success', log: 'Setting up openssl', description: 'Secure Sockets Layer toolkit' });
-    const [row] = r.recent(10);
+    const [row] = r.recent(10).rows;
     expect(row.package).toBe('openssl');
     expect(row.security).toBe(1);
     expect(row.cves).toBe(4);
@@ -31,7 +31,7 @@ describe('update history security tags', () => {
   it('flags kernel packages by name even without a security tag', () => {
     const r = repo();
     r.record({ ts: Date.now(), packageName: 'linux-image-6.6', fromV: '6.5', toV: '6.6', result: 'success', log: '' });
-    const [row] = r.recent(10);
+    const [row] = r.recent(10).rows;
     expect(row.kernel).toBe(1);
     expect(row.security).toBeNull();   // no sectag → null, not a false 0-vs-1 guess
   });
@@ -39,7 +39,7 @@ describe('update history security tags', () => {
   it('records null tags for an unknown, non-kernel package', () => {
     const r = repo();
     r.record({ ts: Date.now(), packageName: 'nano', fromV: '7', toV: '8', result: 'success', log: '' });
-    const [row] = r.recent(10);
+    const [row] = r.recent(10).rows;
     expect(row.security).toBeNull();
     expect(row.cves).toBeNull();
     expect(row.kernel).toBe(0);
@@ -49,11 +49,11 @@ describe('update history security tags', () => {
     const r = repo();
     // simulate an old row: recorded with no known tag (security/cves NULL)
     r.record({ ts: Date.now(), packageName: 'firefox', fromV: '151', toV: '152', result: 'success', log: '' });
-    let [row] = r.recent(10);
+    let [row] = r.recent(10).rows;
     expect(row.security).toBeNull();          // nothing known yet
     // the tag is learned later (e.g. a changelog scan)
     r.saveSecurityTag('firefox', { candidate: '152', security: true, cves: 39, urgency: 'high' });
-    [row] = r.recent(10);
+    [row] = r.recent(10).rows;
     expect(row.security).toBe(1);             // now surfaced on the old row
     expect(row.cves).toBe(39);
   });
@@ -75,5 +75,21 @@ describe('update history security tags', () => {
     const got = r.getChangelog('nano', '8.0');
     expect(got.none).toBeUndefined();
     expect(got.changelog).toMatch(/nano/);
+  });
+
+  it('paginates with offset/limit and reports a total independent of the page size', () => {
+    const r = repo();
+    for (let i = 0; i < 5; i++) {
+      r.record({ ts: 1000 + i, packageName: `pkg-${i}`, fromV: '1', toV: '2', result: 'success', log: '' });
+    }
+    const page1 = r.recent({ limit: 2, offset: 0 });
+    expect(page1.total).toBe(5);
+    expect(page1.rows.length).toBe(2);
+    expect(page1.rows[0].package).toBe('pkg-4');   // newest first (ORDER BY ts DESC)
+    const page2 = r.recent({ limit: 2, offset: 2 });
+    expect(page2.total).toBe(5);
+    expect(page2.rows.map((x) => x.package)).toEqual(['pkg-2', 'pkg-1']);
+    const page3 = r.recent({ limit: 2, offset: 4 });
+    expect(page3.rows.map((x) => x.package)).toEqual(['pkg-0']);   // last partial page
   });
 });

@@ -135,10 +135,16 @@ export function createUpdatesRepo(db) {
     const tx = db.transaction((rows) => { for (const r of rows) record(r); });
     tx(entries);
   }
-  function recent(limit = 50) {
+  function recent(opts = 50) {
+    // Accept the old recent(limit) call shape too, so nothing else in the
+    // codebase breaks if it's ever called that way again.
+    const { limit = 50, offset = 0 } = typeof opts === 'number' ? { limit: opts } : opts;
+    const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const off = Math.max(Number(offset) || 0, 0);
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM update_history`).get().c;
     const rows = db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log,
                               security, cves, kernel, firmware, rpi, description
-                       FROM update_history ORDER BY ts DESC LIMIT ?`).all(Math.min(limit, 200));
+                       FROM update_history ORDER BY ts DESC LIMIT ? OFFSET ?`).all(lim, off);
     // Backfill rows that predate per-row tag capture (security IS NULL): if the
     // package still has a tag in update_sectags, surface it so older history
     // entries show Security/CVE badges too. Computed at read time, not stored.
@@ -161,7 +167,7 @@ export function createUpdatesRepo(db) {
       // values above so it never overlaps with either.
       if (r.rpi == null) r.rpi = isRpiPkg(r.package, r.kernel, r.firmware, r.description) ? 1 : 0;
     }
-    return rows;
+    return { rows, total };
   }
   return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, saveReleaseDate, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog, markNoChangelog };
 }

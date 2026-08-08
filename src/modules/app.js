@@ -5285,6 +5285,8 @@ pageRenderers.disk = (() => {
 
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set(), activeFilter = 'all', piholeUpd = null;
+  let hOffset = 0, hTotal = 0;
+  const HIST_LIMIT = 50;
   let streaming = false, expandedLog = null, logCache = {}, editSchedule = false, schedPollHost = null;
   const oldExpanded = new Set();
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -6029,7 +6031,8 @@ pageRenderers.updates = (() => {
 
   async function loadHistory(host) {
     let h;
-    try { h = await api('/updates/history'); } catch { return; }
+    try { h = await api(`/updates/history?limit=${HIST_LIMIT}&offset=${hOffset}`); } catch { return; }
+    hTotal = h.total || 0;
     const target = $('[data-up=history]', host);
     if (!target) return;
     target.innerHTML = h.history.length ? `
@@ -6068,6 +6071,16 @@ pageRenderers.updates = (() => {
         <td><span class="inv-badge ${e.result === 'success' ? 'inv-ok' : 'inv-err'}">${esc(e.result)}</span></td>
       </tr>`;
       }).join('')}</tbody></table></div>` : '<p class="sess-empty">No update history yet.</p>';
+    const to = Math.min(hOffset + HIST_LIMIT, hTotal);
+    target.innerHTML += hTotal > 0 ? `
+      <div class="inv-pager">
+        <span class="inv-count">${hOffset + 1}\u2013${to} of ${hTotal}</span>
+        <button class="net-toggle" data-hist="prev" ${hOffset === 0 ? 'disabled' : ''}>Prev</button>
+        <button class="net-toggle" data-hist="next" ${to >= hTotal ? 'disabled' : ''}>Next</button>
+      </div>` : '';
+    const prevBtn = $('[data-hist=prev]', host), nextBtn = $('[data-hist=next]', host);
+    if (prevBtn) prevBtn.onclick = () => { hOffset = Math.max(0, hOffset - HIST_LIMIT); loadHistory(host); };
+    if (nextBtn) nextBtn.onclick = () => { hOffset += HIST_LIMIT; loadHistory(host); };
   }
 
   // Auto-check schedule tab: read config, render a small form, wire save + run.
@@ -6348,7 +6361,7 @@ pageRenderers.updates = (() => {
       wirePageTabs(host, (tab) => {
         // leaving the schedule tab stops its poll
         if (tab !== 'schedule' && host._schedPoll) { clearInterval(host._schedPoll); host._schedPoll = null; }
-        if (tab === 'history') loadHistory(host);
+        if (tab === 'history') { hOffset = 0; loadHistory(host); }
         if (tab === 'schedule') loadSchedule(host);
       });
       // Draw the action toolbar immediately so "Check for updates" is always

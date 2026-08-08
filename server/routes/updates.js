@@ -117,7 +117,10 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
 
   // Update history.
   r.get('/history', (req, res) => {
-    res.json({ history: updatesRepo.recent(Number(req.query.limit) || 50) });
+    const limit = Number(req.query.limit) || 50;
+    const offset = Number(req.query.offset) || 0;
+    const { rows, total } = updatesRepo.recent({ limit, offset });
+    res.json({ history: rows, total });
   });
 
   // Simulate an upgrade (dry run) — returns the apt plan as text.
