@@ -18,12 +18,14 @@ export function sessionsRouter({ sessions, sessionsRepo, requireAuth, requireCon
 
   r.get('/history', (req, res) => {
     const now = Date.now();
-    const RANGES = { '24h': 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3 };
+    const RANGES = { '24h': 86400e3, '7d': 7 * 86400e3, '30d': 30 * 86400e3, '90d': 90 * 86400e3 };
     const from = Number(req.query.from) || now - (RANGES[req.query.range] || RANGES['7d']);
-    res.json({
-      history: sessionsRepo.history({ from, to: Number(req.query.to) || now, kind: req.query.kind || null }),
-      perDay: sessionsRepo.loginsPerDay(30),
+    const limit = Number(req.query.limit) || 50;
+    const offset = Number(req.query.offset) || 0;
+    const { rows, total } = sessionsRepo.history({
+      from, to: Number(req.query.to) || now, kind: req.query.kind || null, limit, offset,
     });
+    res.json({ history: rows, total, perDay: sessionsRepo.loginsPerDay(30) });
   });
 
   // Disconnecting a user is Pi control: 403 in monitor mode, admin in full.

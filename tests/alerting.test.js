@@ -145,8 +145,9 @@ describe('session tracker', () => {
     await tracker.trackOnce();                                  // session ended -> closed
     expect(sessionsRepo.openRows().length).toBe(0);
     const hist = sessionsRepo.history({ from: 0, to: Date.now() + 1000 });
-    expect(hist.length).toBe(1);
-    expect(hist[0].ended_at).not.toBeNull();
+    expect(hist.rows.length).toBe(1);
+    expect(hist.total).toBe(1);
+    expect(hist.rows[0].ended_at).not.toBeNull();
   });
 });
 

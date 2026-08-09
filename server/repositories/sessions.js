@@ -17,12 +17,17 @@ export function createSessionsRepo(db) {
   function close(id, endedAt) {
     db.prepare(`UPDATE session_log SET ended_at = ? WHERE id = ?`).run(endedAt, id);
   }
-  function history({ from, to, kind, limit = 200 }) {
-    let sql = `SELECT * FROM session_log WHERE started_at BETWEEN ? AND ?`;
-    const args = [from, to];
-    if (kind) { sql += ` AND kind = ?`; args.push(kind); }
-    sql += ` ORDER BY started_at DESC LIMIT ?`; args.push(limit);
-    return db.prepare(sql).all(...args);
+  function history({ from, to, kind, limit = 50, offset = 0 }) {
+    const lim = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const off = Math.max(Number(offset) || 0, 0);
+    let where = ` WHERE started_at BETWEEN ? AND ?`;
+    const whereArgs = [from, to];
+    if (kind) { where += ` AND kind = ?`; whereArgs.push(kind); }
+    const total = db.prepare(`SELECT COUNT(*) AS c FROM session_log${where}`).get(...whereArgs).c;
+    const rows = db.prepare(
+      `SELECT * FROM session_log${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`
+    ).all(...whereArgs, lim, off);
+    return { rows, total };
   }
   function loginsPerDay(days = 7) {
     return db.prepare(

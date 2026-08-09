@@ -886,6 +886,8 @@ pageRenderers.sessions = (() => {
   let timer = null;
   let term = null, termFit = null, termWs = null, termResizeObs = null;   // SSH terminal state
   let vncRfb = null;                                                       // VNC client state
+  let histOffset = 0, histTotal = 0;                                      // Login History pager state
+  const HIST_LIMIT = 50;
 
   function teardownTerm() {
     try { termWs && termWs.close(); } catch { /* */ }
@@ -1085,7 +1087,8 @@ pageRenderers.sessions = (() => {
       `${snap.ssh.length} SSH · ${snap.vnc.length} VNC · ${ts.peers?.filter((p) => p.online).length || 0} Tailscale online`;
   }
 
-  async function refreshHistory(host) {
+  async function refreshHistory(host, resetPage) {
+    if (resetPage) histOffset = 0;
     try {
       const rangeSel = $('[data-hist=range]', host);
       const range = (rangeSel && rangeSel.value) || '7d';
@@ -1101,23 +1104,35 @@ pageRenderers.sessions = (() => {
       } else {
         qs += `range=${encodeURIComponent(range)}`;
       }
+      qs += `&limit=${HIST_LIMIT}&offset=${histOffset}`;
       const data = await api(`/sessions/history?${qs}`);
+      histTotal = data.total || 0;
       const el2 = $('[data-sess=hist]', host);
       if (!el2) return;
       if (!data.history.length) { el2.innerHTML = '<p class="sess-empty">No login history for this filter</p>'; return; }
       const KIND_LABEL = { ssh: 'SSH', console: 'Console', vnc: 'VNC', tailscale: 'Tailscale' };
+      const to = Math.min(histOffset + HIST_LIMIT, histTotal);
       el2.innerHTML = `
         <div class="sess-hist-head">
           <span>User</span><span>Type</span><span>Source</span><span>Started</span><span>Duration</span>
         </div>
-        ${data.history.slice(0, 200).map((h) => `
+        ${data.history.map((h) => `
           <div class="sess-row sess-hist-row">
             <span><b>${esc(h.username)}</b></span>
             <span><span class="sess-type-badge sess-type-${esc(h.kind)}">${esc(KIND_LABEL[h.kind] || h.kind)}</span></span>
             <span>${esc(h.source || '—')}</span>
             <span>${fmtTime(h.started_at)}</span>
             <span>${h.ended_at ? fmtDur(h.ended_at - h.started_at) : '<span class="sess-live sess-live-anim">● active</span>'}</span>
-          </div>`).join('')}`;
+          </div>`).join('')}
+        ${histTotal > HIST_LIMIT ? `
+        <div class="inv-pager">
+          <span class="inv-count">${histOffset + 1}\u2013${to} of ${histTotal}</span>
+          <button class="net-toggle" data-hist="prev" ${histOffset === 0 ? 'disabled' : ''}>Prev</button>
+          <button class="net-toggle" data-hist="next" ${to >= histTotal ? 'disabled' : ''}>Next</button>
+        </div>` : ''}`;
+      const prevBtn = $('[data-hist=prev]', host), nextBtn = $('[data-hist=next]', host);
+      if (prevBtn) prevBtn.onclick = () => { histOffset = Math.max(0, histOffset - HIST_LIMIT); refreshHistory(host); };
+      if (nextBtn) nextBtn.onclick = () => { histOffset += HIST_LIMIT; refreshHistory(host); };
     } catch { /* keep last */ }
   }
 
@@ -1193,14 +1208,14 @@ pageRenderers.sessions = (() => {
         const on = rangeSel && rangeSel.value === 'custom';
         host.querySelectorAll('[data-hist-custom]').forEach((l) => { l.hidden = !on; });
       };
-      if (rangeSel) rangeSel.addEventListener('change', () => { toggleCustom(); refreshHistory(host); });
+      if (rangeSel) rangeSel.addEventListener('change', () => { toggleCustom(); refreshHistory(host, true); });
       const kindSel = $('[data-hist=kind]', host);
-      if (kindSel) kindSel.addEventListener('change', () => refreshHistory(host));
+      if (kindSel) kindSel.addEventListener('change', () => refreshHistory(host, true));
       ['from', 'to'].forEach((f) => {
         const inp = $(`[data-hist=${f}]`, host);
-        if (inp) inp.addEventListener('change', () => refreshHistory(host));
+        if (inp) inp.addEventListener('change', () => refreshHistory(host, true));
       });
-      refresh(host); refreshHistory(host);
+      refresh(host); refreshHistory(host, true);
       timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
       // popout window: ?pop=terminal|desktop → jump straight to that tab and
       // strip the nav rail/header for a clean standalone window.
