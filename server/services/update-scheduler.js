@@ -119,9 +119,46 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
     }
   }
 
+  // Persist a run result (success, failure, or flagged) to lastRun + a short
+  // history, shared by every exit path of doRun() below.
+  async function persistRun(result) {
+    await withFileLock(async () => {
+      const s = await loadSettings();
+      s.rapisys = s.rapisys || {};
+      const cur = s.rapisys.updateSchedule || {};
+      const history = [result, ...(cur.runHistory || [])].slice(0, 10);
+      s.rapisys.updateSchedule = { ...cur, lastRun: result, runHistory: history };
+      await saveSettings(s);
+    });
+    return result;
+  }
+
+  // Most recent run that actually completed with a real count, used as the
+  // baseline for drop-detection below. Skips failed runs so a string of
+  // failures doesn't reset the baseline to nothing.
+  function lastGoodRun(cfg) {
+    if (cfg.lastRun?.ok !== false && cfg.lastRun?.checked != null) return cfg.lastRun;
+    return (cfg.runHistory || []).find((r) => r.ok !== false && r.checked != null) || null;
+  }
+
   async function doRun(cfg) {
     const out = await updates.refresh();
     if (!out.available) return { skipped: 'no-agent' };
+
+    // The apt call itself failed (e.g. dpkg lock held) — out.updates is
+    // absent entirely, not just empty. Record the failure distinctly and
+    // leave the cached update list (and last known-good lastRun) untouched;
+    // don't email/telegram a false "all clear".
+    if (out.ok === false) {
+      const result = {
+        ts: Date.now(), checked: null, security: null, emailed: false, telegrammed: false,
+        checkedAt: out.checkedAt, ok: false, error: out.error, updateWarning: out.updateWarning,
+      };
+      events?.add?.('update.check.fail', 'warning', { error: out.error });
+      await persistRun(result);
+      return { skipped: null, ...result };
+    }
+
     const list = out.updates || [];
 
     // Deep scan (#3): the interactive UI tags security/CVEs lazily — a user
@@ -183,16 +220,27 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
         events?.add?.('update.telegram.fail', 'warning', { error: err.message });
       }
     }
-    const result = { ts: Date.now(), checked: finalList.length, security: security.length, emailed, telegrammed, checkedAt: out.checkedAt };
-    // persist the last-run summary + a short history so the UI can show both
-    await withFileLock(async () => {
-      const s = await loadSettings();
-      s.rapisys = s.rapisys || {};
-      const cur = s.rapisys.updateSchedule || {};
-      const history = [result, ...(cur.runHistory || [])].slice(0, 10);
-      s.rapisys.updateSchedule = { ...cur, lastRun: result, runHistory: history };
-      await saveSettings(s);
-    });
+    // Sanity-check the count against the last known-good run: apt can exit 0
+    // and still hand back a hollow result (this is how the original bug
+    // slipped past — the agent call succeeded, the parsed list was just
+    // empty). A large drop in one cycle is unusual enough to flag rather than
+    // trust outright; it's still recorded and still shown, just marked.
+    const baseline = lastGoodRun(cfg);
+    let flagged = false, flagReason = null;
+    if (baseline && baseline.checked >= 5) {
+      if (finalList.length === 0) {
+        flagged = true; flagReason = `dropped from ${baseline.checked} to 0`;
+      } else if (finalList.length < baseline.checked * 0.15) {
+        flagged = true; flagReason = `dropped from ${baseline.checked} to ${finalList.length}`;
+      }
+    }
+
+    const result = {
+      ts: Date.now(), checked: finalList.length, security: security.length, emailed, telegrammed,
+      checkedAt: out.checkedAt, ok: true, flagged, flagReason, updateWarning: out.updateWarning,
+    };
+    if (flagged) events?.add?.('update.check.flagged', 'warning', { reason: flagReason, checked: finalList.length });
+    await persistRun(result);
     return { skipped: null, ...result };
   }
 

@@ -109,9 +109,23 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     // never bulk-download). Known security tags are re-applied from cache.
     if (!agentConfigured()) return { available: false };
     onProgress?.({ phase: 'apt-update' });
-    await agentCall('apt.update', {}, null, 120000).catch(() => {});
+    // `apt-get update` failing (stale mirror, network blip) isn't fatal on its
+    // own — `apt list --upgradable` still reflects the last-refreshed cache —
+    // but it's worth surfacing rather than silently discarding, so callers
+    // that care (the scheduler) can note it even on an otherwise-OK run.
+    let updateWarning = null;
+    await agentCall('apt.update', {}, null, 120000).catch((err) => { updateWarning = err.message; });
     onProgress?.({ phase: 'listing' });
-    const { updates } = await agentCall('apt.listUpgradable', {}, null, 90000);
+    // Unlike apt-get update, a failure here means we have no package list at
+    // all — surface it distinctly from "available:false" (no agent) and from
+    // a genuine empty list, so a scheduled check can keep last known-good
+    // results instead of overwriting them with a false zero.
+    let updates;
+    try {
+      ({ updates } = await agentCall('apt.listUpgradable', {}, null, 90000));
+    } catch (err) {
+      return { available: true, ok: false, error: err.message, updateWarning, checkedAt: Date.now() };
+    }
     // carry forward known tags (skip re-scan when candidate unchanged)
     const known = updatesRepo?.getSecurityTags?.() || {};
     const toScan = [];
@@ -146,7 +160,7 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     const unscanned = updates
       .filter((u) => !updatesRepo?.getChangelog?.(u.package, u.candidate))
       .map((u) => u.package);
-    return { available: true, updates, checkedAt: Date.now(), unscanned };
+    return { available: true, ok: true, updates, checkedAt: Date.now(), unscanned, updateWarning };
   }
 
   // Inspect a single candidate changelog's security signals (called lazily

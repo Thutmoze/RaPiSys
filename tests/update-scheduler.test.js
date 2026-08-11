@@ -133,6 +133,75 @@ describe('update scheduler', () => {
     expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 6, 3, 1)))).toBe(false);  // Tuesday
   });
 
+  it('records a failed check distinctly instead of a false zero, and does not email', async () => {
+    const { sched, mailer, telegram, settings } = fixture();
+    // override refresh to simulate apt.listUpgradable throwing (dpkg lock, etc.)
+    const updates = {
+      refresh: vi.fn(async () => ({ available: true, ok: false, error: 'apt list --upgradable exited 100: could not get lock', checkedAt: Date.now() })),
+      cached: vi.fn(() => ({ available: true, updates: [], checkedAt: Date.now() })),
+      changelogFull: vi.fn(),
+      tagSecurityFromChangelog: vi.fn(),
+    };
+    let s = { rapisys: {} };
+    const events = { add: vi.fn() };
+    const sched2 = createUpdateScheduler({
+      updates, mailer, telegram,
+      loadSettings: async () => s,
+      saveSettings: async (v) => { s = v; },
+      withFileLock: async (fn) => fn(),
+      events,
+    });
+    await sched2.setConfig({ enabled: true });
+    const r = await sched2.runOnce();
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/could not get lock/);
+    expect(r.checked).toBeNull();
+    expect(mailer.send).not.toHaveBeenCalled();
+    expect(telegram.send).not.toHaveBeenCalled();
+    expect(events.add).toHaveBeenCalledWith('update.check.fail', 'warning', expect.objectContaining({ error: expect.stringMatching(/lock/) }));
+    // persisted so the UI can show it, not silently dropped
+    expect(s.rapisys.updateSchedule.lastRun.ok).toBe(false);
+    expect(s.rapisys.updateSchedule.runHistory[0].ok).toBe(false);
+  });
+
+  it('flags a suspicious drop from a large known-good count to zero, but still records it', async () => {
+    const { sched, mailer } = fixture({ updatesList: [] });
+    let s = { rapisys: { updateSchedule: { enabled: true, lastRun: { ts: Date.now() - 86400000, checked: 95, security: 35, ok: true }, runHistory: [] } } };
+    const events = { add: vi.fn() };
+    const sched2 = createUpdateScheduler({
+      updates: { refresh: vi.fn(async () => ({ available: true, ok: true, updates: [], checkedAt: Date.now(), unscanned: [] })),
+        cached: vi.fn(() => ({ available: true, updates: [], checkedAt: Date.now() })),
+        changelogFull: vi.fn(), tagSecurityFromChangelog: vi.fn() },
+      mailer, telegram: { send: vi.fn() },
+      loadSettings: async () => s,
+      saveSettings: async (v) => { s = v; },
+      withFileLock: async (fn) => fn(),
+      events,
+    });
+    const r = await sched2.runOnce();
+    expect(r.flagged).toBe(true);
+    expect(r.flagReason).toMatch(/95 to 0/);
+    expect(r.checked).toBe(0);   // still recorded, not hidden
+    expect(events.add).toHaveBeenCalledWith('update.check.flagged', 'warning', expect.objectContaining({ checked: 0 }));
+  });
+
+  it('does not flag a genuinely small/normal update count', async () => {
+    const { sched } = fixture({ updatesList: [{ package: 'nano', candidate: '2', security: false }] });
+    let s = { rapisys: { updateSchedule: { enabled: true, lastRun: { ts: Date.now() - 86400000, checked: 2, security: 0, ok: true }, runHistory: [] } } };
+    const sched2 = createUpdateScheduler({
+      updates: { refresh: vi.fn(async () => ({ available: true, ok: true, updates: [{ package: 'nano', candidate: '2', security: false }], checkedAt: Date.now(), unscanned: [] })),
+        cached: vi.fn(() => ({ available: true, updates: [{ package: 'nano', candidate: '2', security: false }], checkedAt: Date.now() })),
+        changelogFull: vi.fn(), tagSecurityFromChangelog: vi.fn() },
+      mailer: { send: vi.fn() }, telegram: { send: vi.fn() },
+      loadSettings: async () => s,
+      saveSettings: async (v) => { s = v; },
+      withFileLock: async (fn) => fn(),
+      events: { add: vi.fn() },
+    });
+    const r = await sched2.runOnce();
+    expect(r.flagged).toBe(false);
+  });
+
   it('isDue shifts by tzOffsetMinutes so local time matches a UTC container', async () => {
     const { sched } = fixture();
     // user in UTC+3 (Doha) wants 03:00 local → that's 00:00 UTC

@@ -36,15 +36,22 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     try {
       const out = await updates.refresh((p) => send('progress', p));
-      send('done', { count: out.updates?.length || 0, checkedAt: out.checkedAt, unscanned: out.unscanned || [] });
+      // apt itself failed (dpkg lock, etc.) — out.updates is absent, not just
+      // empty. Report it as a failure, not as "0 updates found", so a manual
+      // check can't silently look identical to a genuinely clean result.
+      if (out.ok === false) send('error', { message: out.error || 'update check failed' });
+      else send('done', { count: out.updates?.length || 0, checkedAt: out.checkedAt, unscanned: out.unscanned || [] });
     } catch (err) { send('error', { message: err.message }); }
     res.end();
   });
 
   // Non-streaming refresh (kept for scripts/automation).
   r.post('/refresh', requireControl, async (req, res) => {
-    try { res.json(await updates.refresh()); }
-    catch (err) { res.status(502).json({ error: err.message }); }
+    try {
+      const out = await updates.refresh();
+      if (out.ok === false) return res.status(502).json({ error: out.error || 'update check failed' });
+      res.json(out);
+    } catch (err) { res.status(502).json({ error: err.message }); }
   });
 
   // Full-download security scan for the large packages the quick scan skipped.

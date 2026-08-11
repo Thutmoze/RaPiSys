@@ -5312,6 +5312,7 @@ pageRenderers.updates = (() => {
     download: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></svg>',
     rocket: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0zM12 15l-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8zM9 12H4s.5-3 2-4 5 0 5 0M12 15v5s3-.5 4-2 0-5 0-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>',
   };
   // Escape, then color-code CVE ids, security markers, and urgency by severity.
   const hlSec = (s) => esc(s)
@@ -5417,7 +5418,41 @@ pageRenderers.updates = (() => {
     return rapisysFmtDate(ts);
   }
 
+  // Auto-check came back either as a genuine failure (apt errored — the
+  // list below is stale, not zero) or a flagged result (apt "succeeded" but
+  // the count is implausible given the last known-good check). Either way,
+  // surface it above the list instead of letting a bad auto-check look
+  // identical to a clean one.
+  function renderBanner(host) {
+    const el = $('[data-up=banner]', host);
+    if (!el) return;
+    if (autoCheck && autoCheck.ok === false) {
+      el.innerHTML = `
+        <div class="up-banner up-banner-fail">
+          <div class="up-banner-icon">${ICN.alert}</div>
+          <div class="up-banner-text">
+            <div class="up-banner-title">Last automatic check failed — showing last known results</div>
+            <div class="up-banner-desc">${fmtChecked(autoCheck.ts)} — ${esc(autoCheck.error || 'the update check did not complete')}.
+              ${lastChecked ? `The list below is from the last successful check (${fmtChecked(lastChecked)}).` : ''}</div>
+          </div>
+        </div>`;
+    } else if (autoCheck && autoCheck.flagged) {
+      el.innerHTML = `
+        <div class="up-banner up-banner-warn">
+          <div class="up-banner-icon">${ICN.alert}</div>
+          <div class="up-banner-text">
+            <div class="up-banner-title">Last automatic check result looks unusual</div>
+            <div class="up-banner-desc">${fmtChecked(autoCheck.ts)} — ${esc(autoCheck.flagReason || 'unexpected change in update count')}.
+              Shown below, but worth confirming with a manual check.</div>
+          </div>
+        </div>`;
+    } else {
+      el.innerHTML = '';
+    }
+  }
+
   function render(host) {
+    renderBanner(host);
     const sec = updates.filter((u) => u.security).length;
     const kern = updates.filter((u) => u.kernel).length;
     const fwPkgs = updates.filter((u) => u.firmware).length;   // firmware apt packages (chip filter)
@@ -6137,16 +6172,25 @@ pageRenderers.updates = (() => {
       return cand.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
     })();
 
-    // run history list
+    // run history list — status column distinguishes a real zero-update
+    // result from a failed check or a flagged/suspicious one, so a run of
+    // "0 updates" rows can't be mistaken for a run of failures (or vice
+    // versa) at a glance.
     const history = cfg.runHistory || [];
+    const statusBadge = (h) => {
+      if (h.ok === false) return `<span class="up-hist-badge up-hist-fail" title="${esc(h.error || 'check failed')}">Failed</span>`;
+      if (h.flagged) return `<span class="up-hist-badge up-hist-warn" title="${esc(h.flagReason || 'unusual result')}">Flagged</span>`;
+      return '<span class="up-hist-badge up-hist-ok">OK</span>';
+    };
     const historyHtml = history.length ? `
       <h4 class="sess-h">Run history</h4>
       <div class="up-table-scroll">
-      <table class="inv-table"><thead><tr><th>When</th><th>Updates</th><th>Security</th><th>Email</th><th>Telegram</th></tr></thead>
+      <table class="inv-table"><thead><tr><th>When</th><th>Status</th><th>Updates</th><th>Security</th><th>Email</th><th>Telegram</th></tr></thead>
       <tbody>${history.map((h) => `<tr>
         <td class="inv-dim">${rapisysFmtTime(h.ts)}</td>
-        <td><b>${h.checked}</b></td>
-        <td><b class="${h.security ? 'sched-sec' : ''}">${h.security}</b></td>
+        <td>${statusBadge(h)}</td>
+        <td><b>${h.checked == null ? '—' : h.checked}</b></td>
+        <td><b class="${h.security ? 'sched-sec' : ''}">${h.security == null ? '—' : h.security}</b></td>
         <td>${h.emailed ? '<span class="inv-badge inv-ok">sent</span>' : '<span class="inv-dim">—</span>'}</td>
         <td>${h.telegrammed ? '<span class="inv-badge inv-ok">sent</span>' : '<span class="inv-dim">—</span>'}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p class="sess-empty">No automatic checks have run yet.</p>';
@@ -6164,7 +6208,11 @@ pageRenderers.updates = (() => {
             <div class="set-kv"><span>Schedule</span><b>${scheduleText} at ${timeText}</b></div>
             <div class="set-kv"><span>Next run</span><b class="sched-next">${nextRunText}</b></div>
             <div class="set-kv"><span>Notify via</span><b>${[cfg.emailEnabled ? 'Email' : null, cfg.telegramEnabled ? 'Telegram' : null].filter(Boolean).join(' + ') || 'None'}</b></div>
-            <div class="set-kv"><span>Last run</span><b>${cfg.lastRun ? `${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked}` : 'not yet'}</b></div>
+            <div class="set-kv"><span>Last run</span><b>${cfg.lastRun ? (
+              cfg.lastRun.ok === false ? `<span class="up-hist-fail-text">${fmtChecked(cfg.lastRun.ts)} \u2014 check failed</span>`
+              : cfg.lastRun.flagged ? `<span class="up-hist-warn-text">${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked} (flagged)</span>`
+              : `${fmtChecked(cfg.lastRun.ts)} \u2014 ${cfg.lastRun.security} security of ${cfg.lastRun.checked}`
+            ) : 'not yet'}</b></div>
           </div>
           <div class="sched-sum-acts">
             <button class="inv-act" data-sch="edit" title="Edit schedule"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>
@@ -6337,8 +6385,11 @@ pageRenderers.updates = (() => {
         if (r.skipped) {
           if (msg) msg.textContent = r.skipped === 'disabled' ? '✗ enable the schedule first' : `✗ ${r.skipped}`;
           runBtn.innerHTML = original;
+        } else if (r.ok === false) {
+          if (msg) msg.textContent = `✗ check failed — ${r.error || 'apt error'}`;
+          runBtn.innerHTML = original;
         } else {
-          if (msg) msg.textContent = `✓ ${r.security} security of ${r.checked} updates${r.emailed ? ' · emailed' : ''}${r.telegrammed ? ' · telegrammed' : ''}`;
+          if (msg) msg.textContent = `${r.flagged ? '⚠' : '✓'} ${r.security} security of ${r.checked} updates${r.flagged ? ' (flagged — unusual result)' : ''}${r.emailed ? ' · emailed' : ''}${r.telegrammed ? ' · telegrammed' : ''}`;
           runBtn.innerHTML = '<span>✓ Done</span>';
           setTimeout(() => loadSchedule(host), 1400);
         }
@@ -6360,6 +6411,7 @@ pageRenderers.updates = (() => {
         <div class="card sess-span">
           ${pageTabs([{ id: 'available', label: 'Available Updates' }, { id: 'history', label: 'Update History' }, { id: 'schedule', label: 'Auto-Check' }])}
           <div class="card-body" data-pane="available">
+            <div data-up="banner"></div>
             <div class="up-chips" data-up="chips"></div>
             <div class="up-actions" data-up="actions"></div>
             <div class="up-progress" data-up="progress" style="display:none"></div>

@@ -5404,6 +5404,32 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-chip-rpi { color: #10b981; border-color: rgba(16,185,129,0.4); }
 .up-chip-pihole { color: #e11d63; border-color: rgba(225,29,99,0.45); background: rgba(225,29,99,0.08); cursor: pointer; }
 .up-chip-pihole:hover { border-color: #e11d63; box-shadow: 0 0 10px rgba(225,29,99,0.3); }
+
+/* Auto-check failure/flagged banner — distinguishes "check failed" and
+   "unusual result" from a genuine clean/zero-update state. */
+.up-banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 14px; }
+.up-banner-icon { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center;
+  justify-content: center; flex-shrink: 0; }
+.up-banner-text { flex: 1; }
+.up-banner-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+.up-banner-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.up-banner-fail { background: rgba(239,68,68,0.06); border-color: rgba(239,68,68,0.3); }
+.up-banner-fail .up-banner-icon { background: rgba(239,68,68,0.15); color: var(--accent-red, #ef4444); }
+.up-banner-fail .up-banner-title { color: var(--accent-red, #ef4444); }
+.up-banner-warn { background: rgba(249,115,22,0.06); border-color: rgba(249,115,22,0.3); }
+.up-banner-warn .up-banner-icon { background: rgba(249,115,22,0.15); color: var(--accent-orange); }
+.up-banner-warn .up-banner-title { color: var(--accent-orange); }
+
+/* Run-history status badges (Auto-Check tab) */
+.up-hist-badge { font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+  text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+.up-hist-ok { background: rgba(16,185,129,0.12); color: var(--accent-green); }
+.up-hist-warn { background: rgba(249,115,22,0.12); color: var(--accent-orange); }
+.up-hist-fail { background: rgba(239,68,68,0.12); color: var(--accent-red, #ef4444); }
+.up-hist-fail-text { color: var(--accent-red, #ef4444); }
+.up-hist-warn-text { color: var(--accent-orange); }
+
 .up-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
 .up-act-sec { color: #f59e0b !important; border-color: rgba(245,158,11,0.4) !important; }
 .up-act-danger { color: var(--accent-red, #ef4444) !important; border-color: rgba(239,68,68,0.35) !important; }

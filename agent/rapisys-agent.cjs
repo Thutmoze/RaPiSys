@@ -2027,16 +2027,37 @@ WantedBy=multi-user.target
   },
 
   // ---- APT / firmware updates ----------------------------------------------
+  // Both ops used to swallow failures silently: `apt-get update` discarded its
+  // own output when called with no onLine (the scheduled auto-check never
+  // passes one), and `apt.listUpgradable` never looked at either command's
+  // exit code — a dpkg-lock error or any other apt failure produced an empty
+  // `updates: []` that read identically to "genuinely zero updates available".
+  // Both now capture output and surface real failures as thrown errors so
+  // callers (the scheduler in particular) can tell the difference.
   async 'apt.update'(_, send) {
-    const r = await runStreaming('apt-get', ['update'], { DEBIAN_FRONTEND: 'noninteractive' }, send);
+    const lines = [];
+    const r = await runStreaming('apt-get', ['update'], { DEBIAN_FRONTEND: 'noninteractive' },
+      (line) => { lines.push(line); send?.(line); });
+    if (r.code !== 0) {
+      const tail = (lines.filter((l) => /^(E:|W:)/.test(l)).slice(-5).join(' | ')
+        || lines.slice(-3).join(' | ') || 'no output captured');
+      throw new Error(`apt-get update exited ${r.code}: ${tail}`);
+    }
     return { code: r.code };
   },
   async 'apt.listUpgradable'() {
-    const { stdout } = await run('apt', ['list', '--upgradable'], 60000);
+    const { code, stdout, stderr } = await run('apt', ['list', '--upgradable'], 60000);
+    if (code !== 0) {
+      throw new Error(`apt list --upgradable exited ${code}: ${(stderr || '').trim().slice(0, 400) || 'no output'}`);
+    }
     // Security tagging via simulated dist-upgrade against -security pockets.
+    // A failure here shouldn't blow up the whole list (the package list is
+    // already known-good above) — it just means security tags are skipped
+    // for this pass; carried-forward tags from `known` in the collector still
+    // apply, and the next scheduled/manual scan re-tries the deep scan.
     const sim = await run('apt-get', ['-s', 'dist-upgrade'], 60000);
     const securityPkgs = new Set(
-      [...sim.stdout.matchAll(/^Inst (\S+) .*-security/gm)].map((m) => m[1])
+      sim.code === 0 ? [...sim.stdout.matchAll(/^Inst (\S+) .*-security/gm)].map((m) => m[1]) : []
     );
     const updates = [];
     const names = [];
