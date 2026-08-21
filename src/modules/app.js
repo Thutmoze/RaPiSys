@@ -2065,6 +2065,186 @@ pageRenderers.settings = (() => {
   // and Update each open a pop-up (modal) hosting the form/confirmation and the
   // streamed progress + log. Disconnect / Log out are quick inline actions.
   // Connecting unlocks the trusted *.ts.net TLS mode in the HTTPS/TLS card.
+
+  // ---- Nodes (multi-node federation, §14.6) -------------------------------
+  // Peer list, the smart address field, and LAN discovery. Follows the same
+  // collapse-when-configured convention as the NAS and DNS cards.
+  let nodesAddOpen = false;
+  let nodesScan = null;
+
+  async function loadNodes(host) {
+    const el = $('[data-set=nodes]', host);
+    if (!el) return;
+    el.innerHTML = '<p class="net-dns-note">Loading…</p>';
+
+    let nodes = [];
+    try { nodes = (await api('/nodes')).nodes || []; }
+    catch (err) { el.innerHTML = `<p class="set-err">Could not load nodes: ${esc(err.message)}</p>`; return; }
+
+    const showForm = nodesAddOpen || !nodes.length;
+
+    const stateLabel = (n) => {
+      if (n.state === 'cert-changed') return ['set-err', '● Certificate changed'];
+      if (n.state === 'auth-failed') return ['set-err', '● API key rejected'];
+      if (n.reachable) return ['set-ok', `● Reachable${n.latencyMs != null ? ` (${n.latencyMs} ms)` : ''}`];
+      if (n.checkedAt) return ['set-err', '○ Unreachable'];
+      return ['', '○ Not yet polled'];
+    };
+
+    const rows = nodes.map((n) => {
+      const [cls, label] = stateLabel(n);
+      const s = n.summary || {};
+      return `
+      <div class="set-summary" data-node="${n.id}">
+        <div class="set-kv"><span>Name</span><b>${esc(n.name)}</b></div>
+        <div class="set-kv"><span>Address</span><b>${esc(n.baseUrl)}</b></div>
+        <div class="set-kv"><span>Status</span><b class="${cls}">${label}</b></div>
+        ${n.reachable && s.cpu ? `<div class="set-kv"><span>Load</span><b>${s.cpu.usage != null ? Math.round(s.cpu.usage) + '% CPU' : '—'}${s.cpu.temp ? ' · ' + Math.round(s.cpu.temp) + '°C' : ''}${s.memory?.usedPercent != null ? ' · ' + Math.round(s.memory.usedPercent) + '% mem' : ''}</b></div>` : ''}
+        ${n.state === 'cert-changed' ? `<p class="set-err">Polling is paused. The TLS certificate changed since this peer was added. Re-test to accept the new certificate, but only if you changed it yourself.</p>` : ''}
+        <div class="set-actions">
+          <button class="set-btn set-btn-test" data-nd="test" data-id="${n.id}">${TEST_ICON}<span>${n.state === 'cert-changed' ? 'Accept &amp; test' : 'Test'}</span></button>
+          <button class="set-btn set-btn-danger" data-nd="remove" data-id="${n.id}" data-name="${esc(n.name)}">${TRASH_ICON}<span>Remove</span></button>
+          <span data-nd="msg-${n.id}"></span>
+        </div>
+      </div>`;
+    }).join('');
+
+    const scanMarkup = !nodesScan ? '' : (nodesScan.busy
+      ? `<p class="net-dns-note"><span class="up-spinner"></span> Scanning ${esc(nodesScan.label || 'the local network')}…</p>`
+      : (!nodesScan.nodes.length
+        ? `<p class="sess-empty">No other RaPiSys nodes answered on ${esc((nodesScan.subnets || []).join(', ') || 'this network')}.</p>`
+        : `<div class="set-found">${nodesScan.nodes.map((f) => {
+          const tag = f.state === 'ready' ? '<span class="set-ok">https</span>'
+            : f.state === 'needs-tls' ? '<span class="set-err">http only</span>'
+              : '<span class="set-err">needs update</span>';
+          return `
+          <div class="set-summary set-found-item">
+            <div class="set-kv"><span>${esc(f.address)}</span><b>${tag}</b></div>
+            ${f.hostname && f.hostname !== f.ip ? `<div class="set-kv"><span>Address</span><b>${esc(f.ip)}</b></div>` : ''}
+            ${f.state === 'needs-tls' ? '<p class="net-dns-note">Enable TLS on that node (Settings → Remote Access) before adding it, so its API key never crosses the LAN in cleartext.</p>' : ''}
+            ${f.state === 'outdated' ? '<p class="net-dns-note">That node is running an older RaPiSys without the peer endpoint. Update it first.</p>' : ''}
+            <div class="set-actions">
+              ${f.alreadyAdded ? '<span class="net-dns-note">Already added</span>'
+                : f.state === 'ready' ? `<button class="set-btn set-btn-primary" data-nd="use" data-addr="${esc(f.address)}" data-name="${esc(f.suggestedName)}">${SAVE_ICON}<span>Use this node</span></button>` : ''}
+            </div>
+          </div>`;
+        }).join('')}</div>`));
+
+    el.innerHTML = `
+      <div class="set-card set-card-wide">
+        <h4 class="sess-h">Nodes</h4>
+        <p class="net-dns-note">Each node runs its own RaPiSys and keeps its own history. Peers are polled read-only over HTTPS every 60 seconds; if this node goes down, open a peer's dashboard directly. Add a <b>peer unreachable</b> alert rule to be told when one disappears.</p>
+        ${nodes.length ? rows : '<p class="sess-empty">No peers configured. This is a single-node install.</p>'}
+        ${nodes.length && !nodesAddOpen ? `<div class="set-actions"><button class="set-btn set-btn-edit" data-nd="addopen">${EDIT_ICON}<span>Add another node</span></button></div>` : ''}
+        ${showForm ? `
+        <h4 class="sess-h">${nodes.length ? 'Add another node' : 'Add a node'}</h4>
+        <div class="wz-form">
+          <label>Name <input data-nd="name" placeholder="rapi-02" maxlength="63"></label>
+          <label>Address <input data-nd="addr" placeholder="192.168.10.6, rapi-02.local, or a full URL"></label>
+          <label>API key <input data-nd="key" type="password" placeholder="from that node's API panel"></label>
+          <div class="set-actions">
+            <button class="set-btn set-btn-primary" data-nd="add">${SAVE_ICON}<span>Add node</span></button>
+            <button class="set-btn set-btn-test" data-nd="testnew">${TEST_ICON}<span>Test connection</span></button>
+            ${nodes.length ? `<button class="set-btn set-btn-cancel" data-nd="addcancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
+            <span data-nd="newmsg"></span>
+          </div>
+          <p class="net-dns-note">HTTPS is required. A node answering only on port 3001 is found by the scan but cannot be added until TLS is enabled on it.</p>
+        </div>
+        <h4 class="sess-h">Find nodes on this network</h4>
+        <div class="set-actions">
+          <button class="set-btn" data-nd="scan">Scan network</button>
+          <span class="net-dns-note">Probes every address on the local subnet. Takes a few seconds.</span>
+        </div>
+        ${scanMarkup}` : ''}
+      </div>`;
+
+    // ---- handlers ----
+    const q = (sel) => $(sel, host);
+
+    const addOpen = q('[data-nd=addopen]');
+    if (addOpen) addOpen.onclick = () => { nodesAddOpen = true; loadNodes(host); };
+    const addCancel = q('[data-nd=addcancel]');
+    if (addCancel) addCancel.onclick = () => { nodesAddOpen = false; nodesScan = null; loadNodes(host); };
+
+    const readForm = () => ({
+      name: (q('[data-nd=name]')?.value || '').trim(),
+      address: (q('[data-nd=addr]')?.value || '').trim(),
+      apiKey: q('[data-nd=key]')?.value || '',
+    });
+
+    const testNew = q('[data-nd=testnew]');
+    if (testNew) testNew.onclick = async () => {
+      const msg = q('[data-nd=newmsg]');
+      const body = readForm();
+      if (!body.address) { setStatus(msg, false, '✗ enter an address first'); return; }
+      testNew.disabled = true; setStatus(msg, true, 'Testing…');
+      try {
+        const r = await api('/nodes/test', { method: 'POST', body });
+        if (r.ok) setStatus(msg, true, `✓ reachable at ${r.baseUrl}${r.latencyMs != null ? ` (${r.latencyMs} ms)` : ''}`);
+        else setStatus(msg, false, `✗ ${r.error || r.state}`);
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
+      testNew.disabled = false;
+    };
+
+    const add = q('[data-nd=add]');
+    if (add) add.onclick = async () => {
+      const msg = q('[data-nd=newmsg]');
+      const body = readForm();
+      if (!body.name) { setStatus(msg, false, '✗ a name is required'); return; }
+      if (!body.address) { setStatus(msg, false, '✗ an address is required'); return; }
+      add.disabled = true; setStatus(msg, true, 'Connecting…');
+      try {
+        await api('/nodes', { method: 'POST', body });
+        toast('success', 'Nodes', `${body.name} added`);
+        nodesAddOpen = false; nodesScan = null;
+        loadNodes(host);
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); add.disabled = false; }
+    };
+
+    host.querySelectorAll('[data-nd=test]').forEach((b) => { b.onclick = async () => {
+      const id = b.dataset.id;
+      const msg = q(`[data-nd=msg-${id}]`);
+      b.disabled = true; setStatus(msg, true, 'Testing…');
+      // A cert-changed peer re-pins only on an explicit re-test, never on poll.
+      const isCert = b.textContent.includes('Accept');
+      try {
+        const r = await api(`/nodes/${id}/test${isCert ? '?confirmCert=1' : ''}`, { method: 'POST', body: {} });
+        if (r.ok) { setStatus(msg, true, '✓ reachable'); loadNodes(host); }
+        else { setStatus(msg, false, `✗ ${r.error || r.state}`); b.disabled = false; }
+      } catch (err) { setStatus(msg, false, `✗ ${err.message}`); b.disabled = false; }
+    }; });
+
+    host.querySelectorAll('[data-nd=remove]').forEach((b) => { b.onclick = async () => {
+      const { id, name } = b.dataset;
+      if (!await rapisysConfirm(`Remove ${name}? Its stored API key and cached status are deleted. That node keeps running and keeps its own history.`, { danger: true, confirmLabel: 'Remove' })) return;
+      try { await api(`/nodes/${id}`, { method: 'DELETE' }); toast('success', 'Nodes', `${name} removed`); loadNodes(host); }
+      catch (err) { toast('error', 'Nodes', err.message); }
+    }; });
+
+    const scan = q('[data-nd=scan]');
+    if (scan) scan.onclick = async () => {
+      nodesScan = { busy: true, nodes: [] };
+      loadNodes(host);
+      try {
+        const r = await api('/nodes/scan', { method: 'POST', body: {} });
+        nodesScan = { busy: false, nodes: r.nodes || [], subnets: r.subnets || [] };
+      } catch (err) {
+        nodesScan = null;
+        toast('error', 'Nodes', err.message);
+      }
+      loadNodes(host);
+    };
+
+    const use = host.querySelectorAll('[data-nd=use]');
+    use.forEach((b) => { b.onclick = () => {
+      const n = q('[data-nd=name]'), a = q('[data-nd=addr]');
+      if (n && !n.value.trim()) n.value = b.dataset.name;
+      if (a) a.value = b.dataset.addr;
+      q('[data-nd=key]')?.focus();
+      setStatus(q('[data-nd=newmsg]'), true, 'Filled — paste that node\u2019s API key to finish');
+    }; });
+  }
+
   async function loadTailscale(host) {
     const el = $('[data-set=tailscale]', host);
     if (!el) return;
@@ -3589,6 +3769,7 @@ pageRenderers.settings = (() => {
             { id: 'remote', label: 'Remote Access', icon: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/>' },
             { id: 'account', label: 'Account', icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>' },
             { id: 'pironman', label: 'Case', icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h2M8 11h2M8 15h2"/><circle cx="15.5" cy="9" r="1.6"/>' },
+            { id: 'nodes', label: 'Nodes', icon: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h3a1.5 1.5 0 0 1 1.5 1.5v6"/>' },
           ])}
           <div class="card-body" data-pane="health">
             <div class="set-grid">
@@ -3628,12 +3809,16 @@ pageRenderers.settings = (() => {
           <div class="card-body" data-pane="pironman" style="display:none">
             <div class="set-grid" data-set="pironman"></div>
           </div>
+          <div class="card-body" data-pane="nodes" style="display:none">
+            <div class="set-grid" data-set="nodes"></div>
+          </div>
         </div>
       </div>`;
       wirePageTabs(host, (tab) => {
         if (tab === 'remote') { loadTailscale(host); loadTls(host); loadRemote(host); }
         if (tab === 'dns') loadPihole(host);
         if (tab === 'pironman') loadPironman(host);
+        if (tab === 'nodes') loadNodes(host);
       });
       load(host);
       // Deep-link: #/settings?tab=dns opens a specific tab.
@@ -6840,5 +7025,5 @@ window.addEventListener('DOMContentLoaded', () => {
   route();
   maybeShowWizard();
   refreshAuthBadge();
-  initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings'; } });
+  initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings?tab=nodes'; } });
 });

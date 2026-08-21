@@ -178,7 +178,7 @@ export const SUMMARY_WIDGETS = [
     },
   },
   {
-    id: 'sum-nodes', title: 'Nodes', icon: iconNodes, nav: '#/settings',
+    id: 'sum-nodes', title: 'Nodes', icon: iconNodes, nav: '#/settings?tab=nodes',
     async load(elv) {
       let nodes = [];
       try { nodes = (await getJSON('/api/nodes')).nodes || []; }

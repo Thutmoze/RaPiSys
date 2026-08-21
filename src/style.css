@@ -6610,3 +6610,13 @@ body.rapisys-popout .rt-vnc { height: calc(100vh - 70px); }
 body.compact .ns-btn, body.ultra .ns-btn { padding: 4px 9px; font-size: 12px; }
 body.compact .ns-name, body.ultra .ns-name { max-width: 90px; }
 body.ultra .ns-sub { display: none; }
+
+/* Scan results in Settings → Nodes (§14.4). Reuses .set-summary for each
+   entry; this only adds the spacing and the discovered-item accent. */
+.set-found { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.set-found-item {
+  border: 1px solid rgba(0, 212, 255, 0.22);
+  background: rgba(0, 212, 255, 0.05);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}

@@ -2,10 +2,10 @@
 
 **Project:** Production-grade enhancement of `zepgram/pi-dashboard` for Raspberry Pi 5 (shipped as **RaPiSys**)
 **Target platform:** Raspberry Pi 5 · Raspberry Pi OS Bookworm/**Trixie** (arm64) · Docker / Docker Compose
-**Status:** IMPLEMENTED (single node). All planned feature areas are built and in production use. This document is the original design (sections 1–11) preserved for context, an **as-built addendum** (section 13) covering what shipped and the post-plan subsystems (DNS/Pi-hole and the Pironman case controller), and a **forward-looking design** (section 14) for multi-node federation, which is approved but not yet implemented.
+**Status:** IMPLEMENTED. All planned feature areas are built and in production use. This document is the original design (sections 1–11) preserved for context, an **as-built addendum** (section 13) covering what shipped and the post-plan subsystems (DNS/Pi-hole and the Pironman case controller), and **section 14**, multi-node federation, which shipped in patches 0284-0289.
 **Plan date:** 2026-06-10 · **Last updated:** 2026-08-21
 
-> **Reading guide:** sections 1–11 are the original architecture/plan and remain largely accurate as the system's foundation. Section 12 (open questions) has been resolved (see §13.1). Section 13 is the current as-built state, including the DNS/Pi-hole integration, the NAS-backup subsystem, and the optional Pironman 5 Mini case controller, all added after the original plan. Section 14 is design-only: it specifies multi-node federation and is the one section that does not yet describe running code.
+> **Reading guide:** sections 1–11 are the original architecture/plan and remain largely accurate as the system's foundation. Section 12 (open questions) has been resolved (see §13.1). Section 13 is the current as-built state, including the DNS/Pi-hole integration, the NAS-backup subsystem, and the optional Pironman 5 Mini case controller, all added after the original plan. Section 14 specifies multi-node federation, implemented across patches 0284-0289.
 
 ---
 
@@ -476,9 +476,9 @@ The original plan did not cover third-party enclosures. RaPiSys gained an option
 
 ---
 
-## 14. Multi-Node Federation (design, not yet built)
+## 14. Multi-Node Federation
 
-**Status:** APPROVED DESIGN, IMPLEMENTATION PENDING (patches 0284–0288). Everything in §§1–13 describes a single-node system. This section covers adding a second (or Nth) Pi.
+**Status:** IMPLEMENTED (patches 0284–0289). Everything in §§1–13 describes a single-node system. This section covers adding a second (or Nth) Pi.
 
 ### 14.1 Requirement
 
@@ -568,7 +568,7 @@ CREATE TABLE peer_health (
 | 0286 | `services/peer-scan.js`: probe-based address resolution + `POST /api/nodes/scan` LAN discovery | container | shipped |
 | 0287 | `services/peer-poller.js`, TOFU pinning on poll, `peer_health` writes, `peer.<name>.up` metric + transition events | container | shipped |
 | 0288 | `sum-nodes` summary widget + header node switcher | frontend | shipped |
-| 0289 | Settings → Nodes tab | frontend | pending |
+| 0289 | Settings → Nodes tab | frontend | shipped |
 
 **Alerting needs no new condition type.** The poller emits `peer.<name>.up` (1/0) as an ordinary metric, so it sits alongside `service.<name>.up` and `docker.<name>.up` and the existing rule engine supplies the sustain window ("unreachable for 5 minutes"), cooldown, severity and channels unchanged. The metric catalog gains a `Nodes` group and treats the key as a status metric so notifications read as a node name rather than a raw metric key.
 
