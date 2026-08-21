@@ -561,15 +561,18 @@ CREATE TABLE peer_health (
 
 ### 14.7 Implementation plan
 
-| Patch | Scope | Rebuild |
-|---|---|---|
-| 0284 | `005_peers.sql`, `repositories/peers.js`, `routes/nodes.js` (CRUD + test), `GET /api/v1/node-summary` | container |
-| 0285 | `services/peer-poller.js`, TOFU fingerprint pinning, `peer_health` writes, peer-unreachable alert condition | container |
-| 0286 | Address normalization + `POST /api/nodes/scan` LAN discovery | container |
-| 0287 | `sum-nodes` summary widget + header node switcher | frontend |
-| 0288 | Settings → Nodes tab | frontend |
+| Patch | Scope | Rebuild | Status |
+|---|---|---|---|
+| 0284 | This section (§14) | docs | shipped |
+| 0285 | `005_peers.sql`, `repositories/peers.js`, `services/peer-client.js`, `routes/nodes.js` (CRUD + test), `GET /api/v1/node-summary` | container | shipped |
+| 0286 | `services/peer-scan.js`: probe-based address resolution + `POST /api/nodes/scan` LAN discovery | container | shipped |
+| 0287 | `services/peer-poller.js`, TOFU pinning on poll, `peer_health` writes, `peer.<name>.up` metric + transition events | container | shipped |
+| 0288 | `sum-nodes` summary widget + header node switcher | frontend | pending |
+| 0289 | Settings → Nodes tab | frontend | pending |
 
-Test coverage added for the peer repository, address normalization, TOFU state transitions, and the unreachable-alert state machine. No patch in this series touches `agent/rapisys-agent.cjs`.
+**Alerting needs no new condition type.** The poller emits `peer.<name>.up` (1/0) as an ordinary metric, so it sits alongside `service.<name>.up` and `docker.<name>.up` and the existing rule engine supplies the sustain window ("unreachable for 5 minutes"), cooldown, severity and channels unchanged. The metric catalog gains a `Nodes` group and treats the key as a status metric so notifications read as a node name rather than a raw metric key.
+
+Test coverage added for the peer repository, address resolution and responder classification, TOFU state transitions, and the poller's metric/event behaviour. No patch in this series touches `agent/rapisys-agent.cjs`.
 
 ---
 

@@ -36,6 +36,7 @@ import { createAlertEngine } from './services/alerting.js';
 import { createSessionTracker } from './services/session-tracker.js';
 import { createAuth } from './services/auth.js';
 import { createRemoteAccess } from './services/remote-access.js';
+import { createPeerPoller } from './services/peer-poller.js';
 import { getSystemStats } from './stats.js';
 import { historyRouter } from './routes/history.js';
 import { deepHealthRouter } from './routes/health.js';
@@ -165,6 +166,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // simply won't produce service.* metrics rather than failing to start.
   const servicesApi = (loadServices && checkService) ? { loadServices, checkService } : null;
   const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware, servicesApi });
+  const peerPoller = createPeerPoller({
+    peersRepo: peersFacade, metricsRepo: metricsFacade, eventsRepo: eventsFacade,
+  });
   const retention = createRetention({
     metricsRepo: metricsFacade,
     eventsRepo: eventsFacade,
@@ -271,6 +275,11 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       }
     } catch { /* nethogs absent or busy — skip silently */ }
   });
+  // Peers are polled server-side so the browser only ever calls its own node.
+  // The 60s cadence matches the design in section 14.3; the poller writes the
+  // peer.<name>.up metric that the existing alert rule engine evaluates.
+  scheduler.register('peer-poller', 60e3, () => peerPoller.pollAll(), { runNow: true });
+  scheduler.register('peer-health-prune', 6 * 3600e3, () => peerPoller.prune());
   scheduler.register('auth-session-purge', 6 * 3600e3, () => auth.purgeExpired());
   // Nightly report materialization (runs the previous day's summary).
   scheduler.register('reports-daily', 6 * 3600e3, () => { try { reports.materializeDay(); reports.backfill(7); } catch { /* */ } });

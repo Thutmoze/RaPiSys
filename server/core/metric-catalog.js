@@ -24,8 +24,9 @@ const STATIC = {
 const NET_RE = /^net\.(.+)\.(rx|tx)$/;
 const SVC_RE = /^service\.(.+)\.up$/;
 const DOCK_RE = /^docker\.(.+)\.up$/;
+const PEER_RE = /^peer\.(.+)\.up$/;
 
-export const GROUP_ORDER = ['System', 'Thermal & power', 'Network', 'Services', 'Containers', 'Other'];
+export const GROUP_ORDER = ['System', 'Thermal & power', 'Network', 'Services', 'Containers', 'Nodes', 'Other'];
 
 /** Turn a display name ('Pi-hole Admin', 'my_container.1') into a stable metric-key segment. */
 export function slugify(s) {
@@ -58,9 +59,14 @@ export function describeMetric(key, live = {}) {
     const name = live.containers?.get(m[1]) || titleize(m[1]);
     return { key, label: name, group: 'Containers' };
   }
+  if ((m = key.match(PEER_RE))) {
+    // Peer names come straight from the operator, so the slug is the name.
+    const name = live.peers?.get(m[1]) || m[1];
+    return { key, label: `Node ${name} reachable`, group: 'Nodes' };
+  }
   return { key, label: key, group: 'Other' };
 }
 
 export function isStatusMetric(key) {
-  return SVC_RE.test(key) || DOCK_RE.test(key);
+  return SVC_RE.test(key) || DOCK_RE.test(key) || PEER_RE.test(key);
 }
