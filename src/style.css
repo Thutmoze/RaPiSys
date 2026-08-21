@@ -6541,3 +6541,72 @@ body.rapisys-popout .rt-vnc { height: calc(100vh - 70px); }
 .dk-sz{margin-left:auto;color:var(--text-tertiary,#6b7280);font-size:12px}
 
 .dk-page{max-width:1120px}
+
+/* ============================================================
+   Node switcher (multi-node federation, §14.6)
+   Hidden entirely until a peer is configured, so single-node
+   installs are visually unchanged.
+   ============================================================ */
+.node-switcher { position: relative; margin-right: 8px; }
+.node-switcher[hidden] { display: none; }
+
+.ns-btn {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 999px; padding: 6px 12px; cursor: pointer;
+  color: var(--text-primary); font-size: 13px; font-weight: 500;
+  font-family: inherit; transition: var(--transition);
+}
+.ns-btn:hover { background: rgba(0, 212, 255, 0.08); border-color: rgba(0, 212, 255, 0.35); }
+.ns-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ns-chev { color: var(--text-muted); font-size: 10px; transition: var(--transition); }
+.node-switcher.open .ns-chev { transform: rotate(180deg); }
+.ns-badge {
+  font-size: 10px; font-weight: 600; line-height: 1;
+  background: rgba(239, 68, 68, 0.15); color: var(--accent-red);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 999px; padding: 2px 6px;
+}
+
+.ns-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--accent-green); box-shadow: var(--glow-green); }
+.ns-dot-warn { background: var(--accent-orange); box-shadow: 0 0 20px rgba(249, 115, 22, 0.3); }
+.ns-dot-down { background: var(--accent-red); box-shadow: 0 0 20px rgba(239, 68, 68, 0.3); }
+
+.ns-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; min-width: 280px;
+  background: #141414; border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); padding: 6px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  display: none; z-index: 60;
+}
+.node-switcher.open .ns-menu { display: block; }
+
+.ns-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 11px; border-radius: var(--radius-sm);
+  cursor: pointer; transition: var(--transition); outline: none;
+}
+.ns-item:hover, .ns-item:focus-visible { background: rgba(255, 255, 255, 0.05); }
+.ns-item-cur { background: rgba(0, 212, 255, 0.08); cursor: default; }
+.ns-item-cur:hover { background: rgba(0, 212, 255, 0.08); }
+.ns-meta { min-width: 0; }
+.ns-item-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ns-item-off .ns-item-name { color: var(--text-secondary); }
+.ns-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.ns-tag {
+  margin-left: auto; font-size: 10px; color: var(--accent-cyan);
+  border: 1px solid rgba(0, 212, 255, 0.35); border-radius: 999px; padding: 2px 8px;
+}
+.ns-sep { height: 1px; background: var(--border-color); margin: 5px 8px; }
+.ns-foot {
+  padding: 9px 11px; font-size: 12px; color: var(--text-secondary);
+  cursor: pointer; border-radius: var(--radius-sm); transition: var(--transition); outline: none;
+}
+.ns-foot:hover, .ns-foot:focus-visible { background: rgba(255, 255, 255, 0.05); color: var(--text-primary); }
+
+/* Compact and ultra modes shrink the pill to match the action buttons. */
+body.compact .ns-btn, body.ultra .ns-btn { padding: 4px 9px; font-size: 12px; }
+body.compact .ns-name, body.ultra .ns-name { max-width: 90px; }
+body.ultra .ns-sub { display: none; }

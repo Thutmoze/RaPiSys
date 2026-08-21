@@ -11,6 +11,7 @@
 
 import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs } from './layout.js';
 import { eyeLogoImg } from './brand.js';
+import { initNodeSwitcher } from './node-switcher.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -6839,4 +6840,5 @@ window.addEventListener('DOMContentLoaded', () => {
   route();
   maybeShowWizard();
   refreshAuthBadge();
+  initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings'; } });
 });

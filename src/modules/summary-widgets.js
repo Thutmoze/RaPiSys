@@ -177,6 +177,36 @@ export const SUMMARY_WIDGETS = [
       ]);
     },
   },
+  {
+    id: 'sum-nodes', title: 'Nodes', icon: iconNodes, nav: '#/settings',
+    async load(elv) {
+      let nodes = [];
+      try { nodes = (await getJSON('/api/nodes')).nodes || []; }
+      catch { /* not configured or not authenticated */ }
+
+      // Single-node installs are the common case: say so plainly rather than
+      // showing a zero that looks like a fault.
+      if (!nodes.length) {
+        setBig(elv, '1', 'this node only');
+        setRow(elv, [['Peers', 'none added']]);
+        return;
+      }
+
+      // Count this node too — it is by definition up if this code is running.
+      const total = nodes.length + 1;
+      const up = nodes.filter((n) => n.reachable).length + 1;
+      const certIssue = nodes.some((n) => n.state === 'cert-changed');
+      const tone = up < total ? 'crit' : (certIssue ? 'warn' : 'ok');
+      setBig(elv, `${up}/${total}`, up < total ? 'nodes reachable' : 'all reachable', tone);
+
+      setRow(elv, nodes.slice(0, 3).map((n) => {
+        if (n.state === 'cert-changed') return [n.name, 'cert!', 'warn'];
+        if (!n.reachable) return [n.name, 'down', 'crit'];
+        const t = n.summary?.cpu?.temp;
+        return [n.name, t ? `${Math.round(t)}°C` : 'up'];
+      }));
+    },
+  },
 ];
 
 // --- helpers ---------------------------------------------------------------
@@ -247,4 +277,5 @@ function iconFan() { return svg('<path d="M12 12c0-3 .5-6 3-6s3 3 0 4.5"/><path 
 function iconBolt() { return svg('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'); }
 function iconShuffle() { return svg('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>'); }
 function iconGlobe() { return svg('<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>'); }
+function iconNodes() { return svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h3a1.5 1.5 0 0 1 1.5 1.5v6"/>'); }
 function iconArrow() { return svg('<line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/>'); }

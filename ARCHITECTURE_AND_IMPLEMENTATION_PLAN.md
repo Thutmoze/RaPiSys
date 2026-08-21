@@ -555,7 +555,7 @@ CREATE TABLE peer_health (
 
 ### 14.6 UI surface
 
-- **Header node switcher** — a pill listing all nodes with status dots. Selecting a peer opens that node's own dashboard in a new tab. Deliberately not a proxied context swap: the one-click open *is* the failover story.
+- **Header node switcher** — a pill listing all nodes with status dots, hidden entirely until a peer is configured so single-node installs are visually unchanged. Selecting a peer opens that node's own dashboard in a new tab (`noopener`). Deliberately not a proxied context swap: the one-click open *is* the failover story, and proxying would make the view depend on the node most likely to be dead when it is needed.
 - **Nodes summary widget** (`sum-nodes`) — a new entry in `src/modules/summary-widgets.js`, same shape as the existing five, showing per-node cpu/temp/mem/health with unreachable nodes greyed and timestamped.
 - **Settings → Nodes tab** — peer list with per-peer Test/Remove, the smart address field, and the network scan, following the established collapse-when-configured convention.
 
@@ -567,7 +567,7 @@ CREATE TABLE peer_health (
 | 0285 | `005_peers.sql`, `repositories/peers.js`, `services/peer-client.js`, `routes/nodes.js` (CRUD + test), `GET /api/v1/node-summary` | container | shipped |
 | 0286 | `services/peer-scan.js`: probe-based address resolution + `POST /api/nodes/scan` LAN discovery | container | shipped |
 | 0287 | `services/peer-poller.js`, TOFU pinning on poll, `peer_health` writes, `peer.<name>.up` metric + transition events | container | shipped |
-| 0288 | `sum-nodes` summary widget + header node switcher | frontend | pending |
+| 0288 | `sum-nodes` summary widget + header node switcher | frontend | shipped |
 | 0289 | Settings → Nodes tab | frontend | pending |
 
 **Alerting needs no new condition type.** The poller emits `peer.<name>.up` (1/0) as an ordinary metric, so it sits alongside `service.<name>.up` and `docker.<name>.up` and the existing rule engine supplies the sustain window ("unreachable for 5 minutes"), cooldown, severity and channels unchanged. The metric catalog gains a `Nodes` group and treats the key as a status metric so notifications read as a node name rather than a raw metric key.
