@@ -2152,7 +2152,7 @@ pageRenderers.settings = (() => {
         </div>
         <h4 class="sess-h">Find nodes on this network</h4>
         <div class="set-actions">
-          <button class="set-btn" data-nd="scan">Scan network</button>
+          <button class="set-btn set-btn-detect" data-nd="scan">${DETECT_ICON}<span>Scan network</span></button>
           <span class="net-dns-note">Probes every address on the local subnet. Takes a few seconds.</span>
         </div>
         ${scanMarkup}` : ''}

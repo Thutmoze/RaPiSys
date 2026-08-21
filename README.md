@@ -37,6 +37,7 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **Inventory** | Searchable, paginated catalog of installed apt packages (version, size, install date), systemd services (status, description), and Docker containers (image, state), synced to the database every 30 min, queried server-side so 1,500+ packages never flood the browser |
 | **Updates** | apt update detection with security/kernel tagging, per-package or security-only upgrades, full dist-upgrade behind a typed confirmation, rpi-eeprom firmware updates, package changelogs, and update history; upgrades stream live to the UI over SSE, executed through the host agent |
 | **Two operating modes** | **Monitor only**: read-only like upstream, Pi-control features disabled outright · **Full control**: fan/NAS/updates/reboot from the UI, gated behind a **local admin account with optional TOTP MFA** (recommended, on by default) (Google Authenticator, Authy, 1Password, fully offline, no cloud) |
+| **Multi-node** | Add a second (or Nth) Pi and see them all from one console. Each node runs the full stack and writes only to its own database, so there is no shared-DB constraint, no replication and no failover script: if one node dies you open another node's URL, and it is already running with its own complete history. Peers are polled read-only over HTTPS (self-signed accepted, certificate pinned on first use), added by LAN IP, mDNS name, Tailscale name or a **network scan** of the local subnet, and a `peer unreachable` alert rule means the surviving node is what tells you the other one went down |
 | **Host agent** | Tiny root systemd service with a *fixed allowlist* of operations, HMAC-authenticated over a Unix socket, lets the web container run **non-root with all capabilities dropped** |
 | **DevOps** | One-command install · snapshot-based upgrades with automatic rollback · deep health checks |
 | **Self-contained** | No CDN dependencies at runtime, works on offline/air-gapped LANs |
@@ -132,6 +133,17 @@ sudo ./deploy.sh rollback    # restore the newest snapshot
 sudo ./deploy.sh uninstall   # remove (add --purge to delete data)
 ```
 
+### Adding a second node
+
+Each Pi runs its own full RaPiSys install, so there is no "join a cluster" step. On the **new** Pi, run the quick install above, then:
+
+1. **Enable TLS** on it: Settings → Remote Access → HTTPS/TLS. This is required, though a self-signed certificate is fine. Peers are polled every 60 s with an API key attached, and HTTPS is what keeps that key off the wire. A node answering only on `:3001` is found by the scan but cannot be added.
+2. **Generate an API key** on it: the API panel in the header (or Settings), which is what the polling node authenticates with.
+3. On your **existing** Pi, go to Settings → **Nodes** and either press **Scan network** (sweeps the local subnet and offers whatever it finds, preferring the `.local` name over a raw IP, since a raw IP breaks when the DHCP lease moves) or type the address directly: a LAN IP, an mDNS name, a Tailscale name, or a full URL all work — the port is found by probing.
+4. **Add an alert rule** so you are told when a node disappears: Alerts → new rule → metric **Node `<name>` reachable** (in the *Nodes* group), condition `< 1`, sustain 300 s, channel Telegram or email.
+
+The node switcher then appears in the header. Selecting a peer opens *that node's* dashboard in a new tab rather than proxying it — since every node is already running with its own complete history, opening the other URL is the entire failover procedure.
+
 ### Recommended SMTP providers (free tiers, verified June 2026)
 
 | Provider | Free tier | Notes |
@@ -156,7 +168,16 @@ Unauthenticated relays are not supported by design.
  │  Express routes → services → repositories → SQLite         │
  │  collectors (read /host/proc, /host/sys)                   │
  │  scheduler: 10 s metrics · hourly retention/downsampling   │
- └──────────────┬─────────────────────────────────────────────┘
+ │  peer-poller: 60 s ─────────────────────────────┐          │
+ └──────────────┬─────────────────────────────────┼──────────┘
+                │                                 │ GET /api/v1/node-summary
+                │                                 │ HTTPS + X-API-Key (read-only)
+                │                                 ▼
+                │                    ┌────────────────────────┐
+                │                    │ other RaPiSys nodes    │
+                │                    │ (identical stack, own  │
+                │                    │  DB, own alert rules)  │
+                │                    └────────────────────────┘
                 │ /run/rapisys/agent.sock — HMAC-signed RPC
  ┌──────────────▼─────────────────────────────────────────────┐
  │ rapisys-agent — host systemd unit (root)                   │
@@ -171,6 +192,7 @@ Key decisions:
 
 - **SQLite, not a TSDB.** At ~25 metrics × 10 s cadence, SQLite with tiered downsampling stays in the hundreds of MB over 90 days and costs no extra daemon RAM. The storage layer prefers `better-sqlite3` and transparently falls back to Node's built-in `node:sqlite`, so a failed native build can never brick the app.
 - **DB on the NAS, safely.** WAL mode requires shared memory that CIFS/NFS can't provide; RaPiSys detects the filesystem of the DB directory and selects the journal mode accordingly, and survives an offline NAS by falling back to local storage with a visible degraded flag (`/api/health/deep`).
+- **Federated nodes, not a primary/secondary pair.** A dormant standby cannot report the primary's death — the thing that would alert you is the thing that failed. Instead every node is identical and independent: cross-node traffic is read-only HTTP between the *unprivileged* Express servers, never between agents, so the root agent stays on its local Unix socket and is unreachable from the network. Nothing is added to `metrics`, `events` or `session_log`; a database only ever holds its own node's data.
 - **Privilege split.** Everything root-y lives in the ~500-line, zero-dependency agent with a closed operation set. The web container itself can't run `apt`, write to sysfs, or mount anything, even if compromised.
 
 ### Repository layout
@@ -208,6 +230,7 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 | `/api/reports/*` · `/api/inventory/*` · `/api/updates/*` | report aggregation/export · package/service/container inventory · update detection & execution 🔒 |
 | `/api/layouts/*` | dashboards registry, per-dashboard layouts, reorder 🔒 |
 | `/api/pironman/*` | Case controller: status/detect/config/settings, install & update over SSE, restart 🔒 |
+| `/api/nodes/*` · `GET /api/v1/node-summary` | peer CRUD, connection test, LAN scan 🔒 · compact snapshot read by peers (API-key gated) |
 
 🔒 = requires `X-Admin-Token`.
 
