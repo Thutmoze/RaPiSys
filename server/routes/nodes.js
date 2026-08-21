@@ -9,7 +9,8 @@
  * there is no CORS surface and no cross-node session to reason about.
  */
 import express from 'express';
-import { normalizeBaseUrl, probePeer } from '../services/peer-client.js';
+import { probePeer } from '../services/peer-client.js';
+import { resolveAddress, scanLan } from '../services/peer-scan.js';
 
 const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/;
 
@@ -48,7 +49,7 @@ export function nodesRouter({ peersRepo, requireControl, events }) {
   // Try an address + key without saving anything. Used by the Add form.
   r.post('/test', requireControl, async (req, res) => {
     try {
-      const baseUrl = normalizeBaseUrl(req.body?.address);
+      const baseUrl = await resolveAddress(req.body?.address);
       const out = await probePeer({ baseUrl, apiKey: req.body?.apiKey || null });
       res.json({
         baseUrl,
@@ -71,7 +72,7 @@ export function nodesRouter({ peersRepo, requireControl, events }) {
       }
       if (peersRepo.getByName(name)) return res.status(409).json({ error: `a peer named "${name}" already exists` });
 
-      const baseUrl = normalizeBaseUrl(req.body?.address);
+      const baseUrl = await resolveAddress(req.body?.address);
       const apiKey = req.body?.apiKey ? String(req.body.apiKey) : null;
       const probe = await probePeer({ baseUrl, apiKey });
       if (!probe.ok) {
@@ -130,7 +131,7 @@ export function nodesRouter({ peersRepo, requireControl, events }) {
         patch.name = name;
       }
       if (req.body?.address !== undefined) {
-        patch.baseUrl = normalizeBaseUrl(req.body.address);
+        patch.baseUrl = await resolveAddress(req.body.address);
         // A new address is a new host: drop the old pin so TOFU runs again.
         if (patch.baseUrl !== peer.baseUrl) peersRepo.pinFingerprint(peer.id, null);
       }
@@ -140,6 +141,17 @@ export function nodesRouter({ peersRepo, requireControl, events }) {
       const updated = peersRepo.update(peer.id, patch);
       res.json({ node: toPublic(updated, peersRepo.latestHealth(peer.id), peersRepo.hasApiKey(peer.id)) });
     } catch (err) { res.status(400).json({ error: err.message }); }
+  });
+
+  // Sweep the local /24 for other RaPiSys nodes. Only possible because the
+  // container runs network_mode: host. Results are advisory: nothing is added
+  // and no credentials are sent — the probe is unauthenticated.
+  r.post('/scan', requireControl, async (req, res) => {
+    try {
+      const known = peersRepo.list().map((p) => p.baseUrl);
+      const out = await scanLan({ knownBaseUrls: known });
+      res.json(out);
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   r.delete('/:id', requireControl, (req, res) => {
