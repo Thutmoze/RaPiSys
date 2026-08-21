@@ -53,6 +53,8 @@ const INSTALL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none
 const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const RESTART_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
 const CHECK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+const WARN_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>';
+const SPIN_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>';
 const DETECT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="11" cy="11" r="3"/><path d="m13.5 13.5 2 2"/></svg>';
 const CONNECT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>';
 const LOGOUT_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
@@ -1609,6 +1611,10 @@ pageRenderers.settings = (() => {
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
   let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false, editTls = false;
+  // Guided-swap state: null when idle, otherwise { kind, title, body, holders,
+  // steps[], acts } rendered into [data-set=nasguide]. Survives re-renders of
+  // the card so a running swap is not wiped by a routine load().
+  let nasGuide = null;
   // shared glyphs hoisted to module scope (EDIT_ICON, TRASH_ICON, …)
 
   async function load(host) {
@@ -1654,6 +1660,7 @@ pageRenderers.settings = (() => {
         <div class="set-actions"><button class="set-btn set-btn-primary" data-nf="mount">${SAVE_ICON}<span>Mount &amp; persist</span></button>${nas ? `<button class="set-btn set-btn-cancel" data-nf="cancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}<span data-nf="msg"></span></div>
       </div>` : '';
     if (nas?.smbVersion) { const sel = $('[data-nf=smb]', host); if (sel) sel.value = nas.smbVersion; }
+    renderNasGuide(host);
     enhanceSelects(host);   // dynamic selects appear after this render
 
     // ---- storage card ----
@@ -1810,6 +1817,113 @@ pageRenderers.settings = (() => {
     wire(host, nas, st);
   }
 
+  // ---- guided share swap -----------------------------------------------------
+  // Replacing a share that holds the live database cannot be done in place: the
+  // container keeps rapisys.db open, so the unmount fails and the old flow left
+  // the mount, the unit file and the recorded settings disagreeing. The guided
+  // swap moves the database to local storage, swaps the share, and moves it
+  // back, rewinding if any step fails.
+  const NASG_STEPS = () => ([
+    { title: 'Move database to local storage', note: 'copy, reopen, verify writable', state: 'pend' },
+    { title: 'Swap the share', note: 'unmount the old share, mount the new one', state: 'pend' },
+    { title: 'Move database back onto the NAS', note: 'copy to the new share, reopen', state: 'pend' },
+  ]);
+
+  function renderNasGuide(host) {
+    const slot = $('[data-set=nasguide]', host);
+    if (!slot) return;
+    const g = nasGuide;
+    if (!g) { slot.innerHTML = ''; return; }
+    slot.innerHTML = `
+      <div class="nasg ${esc(g.kind || '')}">
+        <div class="nasg-h">${g.icon || WARN_ICON}<span>${esc(g.title)}</span></div>
+        ${g.body ? `<p class="nasg-p">${g.body}</p>` : ''}
+        ${g.holders ? `<div class="nasg-hold">${esc(g.holders)}</div>` : ''}
+        ${g.steps ? `<ul class="nasg-steps">${g.steps.map((s) => `
+          <li class="nasg-step" data-s="${esc(s.state)}">
+            <span class="nasg-dot">${s.state === 'done' ? '✓' : s.state === 'fail' ? '!' : ''}</span>
+            <span class="nasg-txt"><b>${esc(s.title)}</b><span>${esc(s.note || '')}</span></span>
+          </li>`).join('')}</ul>` : ''}
+        ${g.acts ? `<div class="nasg-acts">${g.acts}</div>` : ''}
+      </div>`;
+    const go = $('[data-nasg=go]', slot); if (go) go.onclick = () => runNasSwap(host);
+    const close = $('[data-nasg=close]', slot);
+    if (close) close.onclick = () => { nasGuide = null; editNas = false; load(host); };
+    const retry = $('[data-nasg=retry]', slot);
+    if (retry) retry.onclick = () => { nasGuide = null; editNas = true; load(host); };
+  }
+
+  /** Read the replace form into the shape both /nas/mount and /nas/swap take. */
+  function nasFormValues(host) {
+    return {
+      label: $('[data-nf=label]', host).value.trim(),
+      proto: $('[data-nf=proto]', host).value,
+      host: $('[data-nf=host]', host).value.trim(),
+      share: $('[data-nf=share]', host).value.trim(),
+      smbVersion: $('[data-nf=smb]', host)?.value,
+      username: $('[data-nf=user]', host).value.trim(),
+      password: $('[data-nf=pass]', host).value,
+    };
+  }
+  let nasPending = null;
+
+  function holderLine(pf) {
+    const who = (pf.holders || []).map((h) => `${h.comm} (pid ${h.pid})`).join(', ');
+    return `held by: ${who || 'unknown'}\nmountpoint: ${pf.mountpoint}\ndatabase: ${pf.dbPath}`;
+  }
+
+  async function runNasSwap(host) {
+    const body = nasPending;
+    if (!body) return;
+    const steps = NASG_STEPS();
+    nasGuide = { kind: 'run', title: 'Swapping share', icon: SPIN_ICON, steps,
+      body: 'Each step is verified before the next begins. If one fails, the steps already taken are rolled back.' };
+    renderNasGuide(host);
+
+    let job;
+    try { job = (await api('/setup/nas/swap', { method: 'POST', body })).job; }
+    catch (err) {
+      nasGuide = { kind: 'fail', title: 'Could not start', body: esc(err.message),
+        acts: `<button class="set-btn set-btn-cancel" data-nasg="close">${CANCEL_ICON}<span>Close</span></button>` };
+      renderNasGuide(host); return;
+    }
+
+    const es = new EventSource(`/api/setup/nas/swap/stream?job=${encodeURIComponent(job)}`);
+    es.addEventListener('step', (ev) => {
+      let d; try { d = JSON.parse(ev.data); } catch { return; }
+      const s = steps[d.index]; if (!s) return;
+      s.state = d.state; if (d.note) s.note = d.note;
+      renderNasGuide(host);
+    });
+    es.addEventListener('done', () => {
+      es.close();
+      nasGuide = { kind: 'done', title: 'Share replaced', icon: CHECK_ICON, steps,
+        body: 'The database is back on the NAS at its new location and RaPiSys is writing to it again.',
+        acts: `<button class="set-btn set-btn-cancel" data-nasg="close">${CANCEL_ICON}<span>Close</span></button>` };
+      editNas = false; nasPending = null;
+      load(host);
+    });
+    es.addEventListener('failed', (ev) => {
+      es.close();
+      let d = {}; try { d = JSON.parse(ev.data); } catch { /* */ }
+      nasGuide = { kind: 'fail', title: d.shareReplaced ? 'Share replaced, database did not follow' : 'Swap failed', steps,
+        body: esc(d.message || 'unknown error') + (d.rolledBack
+          ? ' The previous share is mounted again and the database is back on it, so nothing was changed.'
+          : d.dbPath ? ` The database is at <code>${esc(d.dbPath)}</code>.` : ''),
+        acts: `<button class="set-btn set-btn-edit" data-nasg="retry">${EDIT_ICON}<span>Try again</span></button>`
+          + `<button class="set-btn set-btn-cancel" data-nasg="close">${CANCEL_ICON}<span>Close</span></button>` };
+      nasPending = null;
+      load(host);
+    });
+    es.onerror = () => {
+      es.close();
+      nasGuide = { kind: 'fail', title: 'Connection lost', steps,
+        body: 'The swap stream dropped. Reload this page to see the current state before retrying.',
+        acts: `<button class="set-btn set-btn-cancel" data-nasg="close">${CANCEL_ICON}<span>Close</span></button>` };
+      renderNasGuide(host);
+    };
+  }
+
   function wire(host, nas, st) {
     const proto = $('[data-nf=proto]', host);
     const smbWrap = $('[data-nf-smb]', host);
@@ -1821,17 +1935,33 @@ pageRenderers.settings = (() => {
     const mountBtn = $('[data-nf=mount]', host);
     if (mountBtn) mountBtn.onclick = async () => {
       const msg = $('[data-nf=msg]', host);
+      const body = nasFormValues(host);
+      // Replacing an existing share: ask the server whether an in-place swap
+      // can work at all before attempting one that is structurally doomed.
+      if (nas?.mountpoint) {
+        let pf = null;
+        try { pf = await api(`/setup/nas/preflight?mountpoint=${encodeURIComponent(nas.mountpoint)}`); }
+        catch { /* agent or route unavailable — fall through to a plain mount */ }
+        if (pf?.dbOnShare) {
+          nasPending = body;
+          nasGuide = {
+            kind: '', title: 'The database is on this share',
+            body: `RaPiSys is writing <code>${esc(pf.dbPath)}</code>, which lives on the share you are `
+              + 'replacing. The container holds that file open, so the old share cannot be unmounted while '
+              + 'it does. Replacing in place would fail partway and leave the mount, the unit file and this '
+              + 'page disagreeing about what is configured.',
+            holders: holderLine(pf),
+            acts: `<button class="set-btn set-btn-primary" data-nasg="go">${SAVE_ICON}<span>Run guided swap</span></button>`
+              + `<button class="set-btn set-btn-cancel" data-nasg="close">${CANCEL_ICON}<span>Cancel</span></button>`
+              + '<span class="nasg-hint">Moves the database aside, swaps the share, moves it back.</span>',
+          };
+          renderNasGuide(host);
+          return;
+        }
+      }
       setStatus(msg, true, 'Mounting…');
       try {
-        await api('/setup/nas/mount', { method: 'POST', body: {
-          label: $('[data-nf=label]', host).value.trim(),
-          proto: $('[data-nf=proto]', host).value,
-          host: $('[data-nf=host]', host).value.trim(),
-          share: $('[data-nf=share]', host).value.trim(),
-          smbVersion: $('[data-nf=smb]', host)?.value,
-          username: $('[data-nf=user]', host).value.trim(),
-          password: $('[data-nf=pass]', host).value,
-        }});
+        await api('/setup/nas/mount', { method: 'POST', body });
         setStatus(msg, true, '✓ mounted & set to mount on boot');
         editNas = false;
         load(host);
@@ -1845,7 +1975,33 @@ pageRenderers.settings = (() => {
 
     const unmount = $('[data-set=unmount]', host);
     if (unmount) unmount.onclick = async () => {
-      if (!await rapisysConfirm(`Unmount ${nas.mountpoint}? If the database lives here it will fall back to local storage.`, { danger: true, confirmLabel: 'Unmount' })) return;
+      let pf = null;
+      try { pf = await api(`/setup/nas/preflight?mountpoint=${encodeURIComponent(nas.mountpoint)}`); } catch { /* */ }
+      if (pf?.dbOnShare) {
+        // The old confirm dialog claimed the DB would "fall back to local
+        // storage"; it does not — the unmount simply fails, and used to do so
+        // after the share had already been dropped from settings.
+        nasGuide = {
+          kind: '', title: 'The database is on this share',
+          body: `Unmounting now would pull <code>${esc(pf.dbPath)}</code> out from under the running server. `
+            + 'The container holds the file open, so the unmount cannot succeed until the database is moved '
+            + 'to local storage first.',
+          holders: holderLine(pf),
+          acts: `<button class="set-btn set-btn-edit" data-set="dbedit-jump">${EDIT_ICON}<span>Move database to local storage</span></button>`
+            + `<button class="set-btn set-btn-cancel" data-nasg="close">${CANCEL_ICON}<span>Cancel</span></button>`,
+        };
+        renderNasGuide(host);
+        const jump = $('[data-set=dbedit-jump]', host);
+        if (jump) jump.onclick = () => {
+          nasGuide = null; editDb = true;
+          load(host).then(() => {
+            const f = $('[data-set=dbdir]', host);
+            if (f) { f.value = pf.localDbPath ? pf.localDbPath.replace(/\/rapisys\.db$/, '') : '/app/data'; f.focus(); }
+          });
+        };
+        return;
+      }
+      if (!await rapisysConfirm(`Unmount ${nas.mountpoint}?`, { danger: true, confirmLabel: 'Unmount' })) return;
       const msg = $('[data-set=nasmsg]', host);
       setStatus(msg, true, 'Unmounting…');
       try { await api('/setup/nas/unmount', { method: 'POST', body: { mountpoint: nas.mountpoint } }); setStatus(msg, true, '✓ unmounted'); load(host); }
@@ -3778,7 +3934,7 @@ pageRenderers.settings = (() => {
           </div>
           <div class="card-body" data-pane="storage" style="display:none">
             <div class="set-grid">
-              <div class="set-card"><h4 class="sess-h">Network Storage (NAS)</h4><div data-set="nas"></div><div data-set="nasform"></div></div>
+              <div class="set-card"><h4 class="sess-h">Network Storage (NAS)</h4><div data-set="nas"></div><div data-set="nasform"></div><div data-set="nasguide"></div></div>
               <div class="set-card"><h4 class="sess-h">Database Storage</h4><div data-set="storage"></div></div>
             </div>
           </div>

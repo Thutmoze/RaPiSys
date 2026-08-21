@@ -6620,3 +6620,52 @@ body.ultra .ns-sub { display: none; }
   border-radius: var(--radius-sm);
   padding: 12px 14px;
 }
+
+/* ---- guided NAS share swap (Settings → Storage) --------------------------
+   Shown when a share cannot be replaced in place because the live database
+   sits on it. Uses the settings-card token set so it reads as part of the
+   card rather than a modal. */
+.nasg { border: 1px solid rgba(245,158,11,0.3); background: rgba(245,158,11,0.06);
+  border-radius: var(--radius-sm); padding: 14px 16px; margin-top: 12px; }
+.nasg.run { border-color: rgba(0,212,255,0.35); background: rgba(0,212,255,0.05); }
+.nasg.done { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.05); }
+.nasg.fail { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.06); }
+.nasg-h { display: flex; align-items: center; gap: 8px; font-size: 13px;
+  font-weight: 700; color: #f59e0b; margin-bottom: 8px; }
+.nasg.run .nasg-h { color: var(--accent-cyan); }
+.nasg.done .nasg-h { color: var(--accent-green); }
+.nasg.fail .nasg-h { color: var(--accent-red); }
+.nasg-h svg { width: 16px; height: 16px; flex-shrink: 0; }
+.nasg.run .nasg-h svg { animation: nasgSpin 0.9s linear infinite; }
+.nasg-p { font-size: 12.5px; color: var(--text-secondary); margin: 0 0 10px; line-height: 1.6; }
+.nasg-p code, .nasg-hint code { background: rgba(255,255,255,0.07); padding: 1px 5px;
+  border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px; color: #9fe6f2; }
+.nasg-hold { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+  background: rgba(0,0,0,0.35); border: 1px solid var(--border-color); border-radius: 6px;
+  padding: 8px 10px; margin-top: 8px; color: var(--text-secondary); white-space: pre-wrap; }
+.nasg-steps { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; }
+.nasg-step { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0;
+  font-size: 12.5px; border-bottom: 1px solid var(--border-color); }
+.nasg-step:last-child { border-bottom: none; }
+.nasg-dot { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+  border: 2px solid var(--border-color); display: flex; align-items: center;
+  justify-content: center; font-size: 10px; font-weight: 700; color: var(--text-muted); }
+.nasg-step[data-s=run] .nasg-dot { border-color: var(--accent-cyan);
+  border-top-color: transparent; animation: nasgSpin 0.8s linear infinite; }
+.nasg-step[data-s=done] .nasg-dot { border-color: var(--accent-green); color: var(--accent-green); }
+.nasg-step[data-s=fail] .nasg-dot { border-color: var(--accent-red); color: var(--accent-red); }
+.nasg-step[data-s=skip] .nasg-dot { opacity: 0.35; }
+.nasg-txt { flex: 1; min-width: 0; }
+.nasg-txt b { display: block; font-weight: 600; color: var(--text-primary); font-size: 12.5px; }
+.nasg-txt span { display: block; color: var(--text-muted); font-size: 11.5px;
+  margin-top: 2px; line-height: 1.5; word-break: break-word; }
+.nasg-step[data-s=pend] .nasg-txt b { color: var(--text-secondary); }
+.nasg-step[data-s=done] .nasg-txt b { color: var(--accent-green); }
+.nasg-step[data-s=fail] .nasg-txt b { color: var(--accent-red); }
+.nasg-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+.nasg-hint { font-size: 12px; color: var(--text-muted); }
+@keyframes nasgSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nasg.run .nasg-h svg, .nasg-step[data-s=run] .nasg-dot { animation: none; }
+}

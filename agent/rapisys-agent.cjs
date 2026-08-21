@@ -116,6 +116,31 @@ function unitNameFor(mountpoint) {
   return mountpoint.replace(/^\//, '').replace(/-/g, '\\x2d').replace(/\//g, '-');
 }
 
+/** Is anything actually mounted at this path right now? */
+async function isMounted(mountpoint) {
+  const r = await run('findmnt', ['-n', '-o', 'TARGET', '--target', mountpoint], 5000).catch(() => null);
+  if (!r || r.code !== 0) return false;
+  // --target reports the nearest mountpoint, which for an unmounted directory
+  // is its parent (/mnt or /). Only an exact match means this path is mounted.
+  return r.stdout.trim().split('\n').some((l) => l.trim() === mountpoint);
+}
+
+/**
+ * Processes holding a mountpoint open, so "target is busy" can name a culprit.
+ * fuser prints PIDs on stdout and its human labels on stderr; we take the PIDs
+ * and read the command name from /proc, which is stable and needs no parsing.
+ */
+async function mountHolders(mountpoint) {
+  const r = await run('fuser', ['-m', mountpoint], 8000).catch(() => null);
+  if (!r) return [];
+  const pids = (r.stdout || '').trim().split(/\s+/).filter((p) => /^\d+$/.test(p));
+  return pids.map((pid) => {
+    let comm = 'unknown';
+    try { comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf-8').trim() || comm; } catch { /* exited */ }
+    return { pid: Number(pid), comm };
+  });
+}
+
 function findFanSysfs() {
   // Pi 5 official cooler: /sys/devices/platform/cooling_fan/hwmon/hwmonN/{fan1_input,pwm1,pwm1_enable}
   const base = '/sys/devices/platform/cooling_fan/hwmon';
@@ -1902,17 +1927,46 @@ const OPS = {
   },
 
   // ---- NAS mounts (systemd .mount/.automount units, never fstab) ----------
-  async 'nas.unmount'({ mountpoint }) {
+  //
+  // History: there used to be two 'nas.unmount' entries in this object. The
+  // second silently shadowed the first, and it ran `systemctl stop` with the
+  // exit code discarded, then returned { ok: true } unconditionally. A stop
+  // that failed with "target is busy" (status=32) was therefore reported to
+  // the server as a successful unmount, and the route went on to delete the
+  // recorded share while it was in fact still mounted. Every unmount path
+  // below now checks exit codes and re-checks with findmnt before claiming
+  // success, and names the process holding the mountpoint when it cannot.
+  async 'nas.unmount'({ mountpoint, removeUnit = true }) {
     assert(mountpoint === path.posix.normalize(mountpoint) && mountpoint.startsWith(MOUNT_BASE + '/'),
       `mountpoint must be under ${MOUNT_BASE}`);
     const unit = unitNameFor(mountpoint);
-    await run('systemctl', ['disable', '--now', `${unit}.mount`]).catch(() => {});
-    await run('umount', [mountpoint]).catch(async () => {
-      await run('umount', ['-l', mountpoint]).catch(() => {});
-    });
-    try { fs.unlinkSync(`/etc/systemd/system/${unit}.mount`); } catch { /* gone */ }
-    await run('systemctl', ['daemon-reload']);
+    await run('systemctl', ['disable', '--now', `${unit}.automount`]).catch(() => {});
+    await run('systemctl', ['stop', `${unit}.mount`], 30000).catch(() => {});
+    // systemd's stop can fail while a plain umount still works (and vice
+    // versa), so try both before deciding. Lazy umount last: it detaches the
+    // tree even when a process still holds a file, which is right for a
+    // deliberate unmount but must never be the first thing we reach for.
+    if (await isMounted(mountpoint)) await run('umount', [mountpoint], 30000).catch(() => {});
+    if (await isMounted(mountpoint)) await run('umount', ['-l', mountpoint], 30000).catch(() => {});
+    if (await isMounted(mountpoint)) {
+      const holders = await mountHolders(mountpoint);
+      throw new Error(`${mountpoint} is still mounted${holders.length
+        ? `: held by ${holders.map((h) => `${h.comm} (pid ${h.pid})`).join(', ')}`
+        : ' (see journalctl -u ' + unit + '.mount)'}`);
+    }
+    if (removeUnit) {
+      for (const ext of ['.mount', '.automount']) {
+        try { fs.unlinkSync(`/etc/systemd/system/${unit}${ext}`); } catch { /* gone */ }
+      }
+      await run('systemctl', ['daemon-reload']);
+    }
     return { ok: true, unmounted: mountpoint };
+  },
+
+  /** Which processes hold a mountpoint open — the answer to "target is busy". */
+  async 'nas.holders'({ mountpoint }) {
+    assert(mountpoint.startsWith(MOUNT_BASE), `mountpoint must be under ${MOUNT_BASE}`);
+    return { mounted: await isMounted(mountpoint), holders: await mountHolders(mountpoint) };
   },
 
   async 'nas.status'({ mountpoint }) {
@@ -1943,6 +1997,19 @@ const OPS = {
     const allowed = proto === 'cifs' ? ALLOWED_CIFS_OPTS : ALLOWED_NFS_OPTS;
     for (const o of options) {
       assert(allowed.has(o) || (proto === 'cifs' && UIDGID_RE.test(o)), `mount option not allowed: ${o}`);
+    }
+
+    // Mounting over a share that something is holding open cannot work: the
+    // restart below has to stop the old mount first, and that stop loses to
+    // the open file handle. Fail here with the holder named rather than
+    // further down with a bare "mount failed: see journalctl".
+    if (await isMounted(mountpoint)) {
+      const holders = await mountHolders(mountpoint);
+      if (holders.length) {
+        throw new Error(`${mountpoint} is in use by `
+          + `${holders.map((h) => `${h.comm} (pid ${h.pid})`).join(', ')} — `
+          + 'unmount it or use the guided swap before changing the share');
+      }
     }
 
     // A stale .automount from a previous install leaves a dead autofs trap
@@ -2012,18 +2079,82 @@ WantedBy=multi-user.target
     return OPS['nas.status']({ mountpoint });
   },
 
-  async 'nas.unmount'({ mountpoint, removeUnit = false }) {
-    assert(mountpoint.startsWith(MOUNT_BASE + '/'), `mountpoint must be under ${MOUNT_BASE}`);
+  /**
+   * Swap a mountpoint from one share to another, atomically from the caller's
+   * point of view: either the new share ends up mounted, or the old one is
+   * still mounted and nothing was kept.
+   *
+   * The unit file and credentials file are the only record of how the current
+   * share is mounted, and 'nas.mount' overwrites both (same label -> same unit
+   * name). They are therefore read into memory first and written back if the
+   * new share fails to mount, which is what makes rollback possible without
+   * asking the operator for the old password again.
+   */
+  async 'nas.swap'({ label, proto, host, share, mountpoint, options = [], username, password }, send) {
+    assert(mountpoint === path.posix.normalize(mountpoint) && mountpoint.startsWith(MOUNT_BASE + '/'),
+      `mountpoint must be under ${MOUNT_BASE}`);
     const unit = unitNameFor(mountpoint);
-    await run('systemctl', ['disable', '--now', `${unit}.automount`]).catch(() => {});
-    await run('systemctl', ['stop', `${unit}.mount`]).catch(() => {});
-    if (removeUnit) {
-      for (const ext of ['.mount', '.automount']) {
-        try { fs.unlinkSync(`/etc/systemd/system/${unit}${ext}`); } catch { /* gone */ }
-      }
-      await run('systemctl', ['daemon-reload']);
+    const unitPath = `/etc/systemd/system/${unit}.mount`;
+    const log = (l) => { try { send?.(l); } catch { /* caller went away */ } };
+
+    // -- snapshot the current mount so it can be put back verbatim ----------
+    let priorUnit = null, priorCred = null, priorCredPath = null;
+    try { priorUnit = fs.readFileSync(unitPath, 'utf-8'); } catch { /* first mount */ }
+    const priorLabel = (priorUnit?.match(/^Options=.*credentials=(\S+?)(?:,|$)/m) || [])[1];
+    if (priorLabel) {
+      priorCredPath = priorLabel;
+      try { priorCred = fs.readFileSync(priorCredPath, 'utf-8'); } catch { /* none */ }
     }
-    return { ok: true };
+
+    const restore = async (why) => {
+      log(`rolling back: ${why}`);
+      if (priorCred && priorCredPath) {
+        try { fs.writeFileSync(priorCredPath, priorCred, { mode: 0o600 }); } catch { /* */ }
+      }
+      if (priorUnit) {
+        try { fs.writeFileSync(unitPath, priorUnit); } catch { /* */ }
+        await run('systemctl', ['daemon-reload']);
+        await run('systemctl', ['reset-failed', `${unit}.mount`]).catch(() => {});
+        await run('systemctl', ['start', `${unit}.mount`], 45000).catch(() => {});
+      }
+      const back = await isMounted(mountpoint);
+      log(back ? 'previous share remounted' : 'previous share could NOT be remounted');
+      return back;
+    };
+
+    // -- release the old mount, and refuse rather than lie if we cannot -----
+    log(`unmounting ${mountpoint}`);
+    try {
+      await OPS['nas.unmount']({ mountpoint, removeUnit: false });
+    } catch (err) {
+      // Still mounted: nothing has been written yet, so there is nothing to
+      // undo. Surface the holder so the operator knows what to stop.
+      throw new Error(`cannot replace share: ${err.message}`);
+    }
+
+    // -- mount the new share -------------------------------------------------
+    log(`mounting //${host}/${share}`);
+    try {
+      await OPS['nas.mount']({ label, proto, host, share, mountpoint, options, username, password });
+    } catch (err) {
+      const back = await restore(err.message);
+      throw new Error(`${err.message}${back ? ' (previous share restored)' : ' (previous share is NOT mounted)'}`);
+    }
+
+    // -- prove it is writable before declaring success -----------------------
+    try {
+      const probe = path.join(mountpoint, `.rapisys-swap-${Date.now()}`);
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
+    } catch (err) {
+      await OPS['nas.unmount']({ mountpoint, removeUnit: false }).catch(() => {});
+      const back = await restore(`new share is not writable: ${err.message}`);
+      throw new Error(`new share mounted but is not writable: ${err.message}`
+        + `${back ? ' (previous share restored)' : ' (previous share is NOT mounted)'}`);
+    }
+
+    log('new share mounted and writable');
+    return OPS['nas.status']({ mountpoint });
   },
 
   // ---- APT / firmware updates ----------------------------------------------

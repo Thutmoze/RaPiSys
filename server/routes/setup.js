@@ -15,6 +15,7 @@
  */
 
 import express from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { agentCall, agentAvailable } from '../core/agent-client.js';
@@ -23,8 +24,56 @@ import { fsTypeOf } from '../core/db.js';
 
 const RETENTION_PRESETS = [7, 30, 90, 180, 365];
 
+/**
+ * Build the mount option list for a share. Shared by the plain mount route and
+ * the guided swap so the two can never drift into mounting the same share with
+ * different options (a drift that previously only showed up as SQLite failing
+ * on a share missing `nobrl`).
+ */
+export function buildMountOptions({ proto, smbVersion, nfsVersion, readOnly }) {
+  const options = [];
+  if (proto === 'cifs') {
+    // Only accept known SMB dialects; never let an NFS value leak in.
+    const SMB_VERS = ['1.0', '2.0', '2.1', '3.0', '3.1.1'];
+    const v = SMB_VERS.includes(smbVersion) ? smbVersion : '3.0';
+    // Files must belong to the CONTAINER user (uid 990) and the host
+    // rapisys group, or the DB write-probe fails with EACCES.
+    const gid = Number(process.env.RAPISYS_GID) || 990;
+    // noperm: the client kernel must not enforce server-side ownership
+    // against our container uid — the NAS already enforces the SMB
+    // credentials. nounix (SMB1): old Samba negotiates unix extensions,
+    // which would override our uid=/gid=/file_mode= mapping entirely.
+    options.push(`vers=${v}`, 'iocharset=utf8', 'uid=990', `gid=${gid}`,
+      'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino', 'noperm');
+    if (v === '1.0') {
+      // SMB1 / old Samba (WD My Book) can't honor POSIX byte-range
+      // locks, so SQLite's lock attempts fail as "database is locked".
+      // nobrl disables client byte-range locking; nounix stops the
+      // unix-extensions uid override. Safe here: RaPiSys is the only
+      // writer to its DB directory.
+      options.push('nounix', 'nobrl');
+    }
+    // No forced sec= option: legacy NTLM was removed from the kernel
+    // CIFS driver in Linux 6.7 (sec=ntlm => EINVAL on modern kernels).
+    // The default NTLMSSP negotiation works against old Samba (WD My
+    // Book World) when credentials are supplied.
+  } else {
+    // NFS has its own version space (WD EX2 Ultra speaks v3; default 4.1).
+    const NFS_VERS = ['3', '4', '4.1', '4.2'];
+    const v = NFS_VERS.includes(nfsVersion) ? nfsVersion : '4.1';
+    options.push(`vers=${v}`, 'soft', 'timeo=100', 'retrans=2', 'noatime');
+  }
+  options.push(readOnly ? 'ro' : 'rw');
+  return options;
+}
+
+/** Mountpoint for a share label, matching the agent's MOUNT_BASE contract. */
+export function mountpointFor(label) {
+  return `/mnt/rapisys/${String(label || 'nas').replace(/[^A-Za-z0-9_-]/g, '')}`;
+}
+
 export function setupRouter({ loadSettings, saveSettings, withFileLock,
-  secrets, mailer, telegram, reopenDb, dbMeta, requireAuth, events }) {
+  secrets, mailer, telegram, reopenDb, dbMeta, fallbackDbPath, requireAuth, events }) {
   const r = express.Router();
 
   /** Gate: open until setup completed, admin-token protected afterwards. */
@@ -73,40 +122,8 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
   r.post('/nas/mount', async (req, res) => {
     const { label, proto, host, share, username, password, smbVersion, nfsVersion, readOnly } = req.body || {};
     try {
-      const mountpoint = `/mnt/rapisys/${String(label || 'nas').replace(/[^A-Za-z0-9_-]/g, '')}`;
-      const options = [];
-      if (proto === 'cifs') {
-        // Only accept known SMB dialects; never let an NFS value leak in.
-        const SMB_VERS = ['1.0', '2.0', '2.1', '3.0', '3.1.1'];
-        const v = SMB_VERS.includes(smbVersion) ? smbVersion : '3.0';
-        // Files must belong to the CONTAINER user (uid 990) and the host
-        // rapisys group, or the DB write-probe fails with EACCES.
-        const gid = Number(process.env.RAPISYS_GID) || 990;
-        // noperm: the client kernel must not enforce server-side ownership
-        // against our container uid — the NAS already enforces the SMB
-        // credentials. nounix (SMB1): old Samba negotiates unix extensions,
-        // which would override our uid=/gid=/file_mode= mapping entirely.
-        options.push(`vers=${v}`, 'iocharset=utf8', `uid=990`, `gid=${gid}`,
-          'file_mode=0664', 'dir_mode=0775', 'soft', 'noserverino', 'noperm');
-        if (v === '1.0') {
-          // SMB1 / old Samba (WD My Book) can't honor POSIX byte-range
-          // locks, so SQLite's lock attempts fail as "database is locked".
-          // nobrl disables client byte-range locking; nounix stops the
-          // unix-extensions uid override. Safe here: RaPiSys is the only
-          // writer to its DB directory.
-          options.push('nounix', 'nobrl');
-        }
-        // No forced sec= option: legacy NTLM was removed from the kernel
-        // CIFS driver in Linux 6.7 (sec=ntlm => EINVAL on modern kernels).
-        // The default NTLMSSP negotiation works against old Samba (WD My
-        // Book World) when credentials are supplied.
-      } else {
-        // NFS has its own version space (WD EX2 Ultra speaks v3; default 4.1).
-        const NFS_VERS = ['3', '4', '4.1', '4.2'];
-        const v = NFS_VERS.includes(nfsVersion) ? nfsVersion : '4.1';
-        options.push(`vers=${v}`, 'soft', 'timeo=100', 'retrans=2', 'noatime');
-      }
-      options.push(readOnly ? 'ro' : 'rw');
+      const mountpoint = mountpointFor(label);
+      const options = buildMountOptions({ proto, smbVersion, nfsVersion, readOnly });
       const result = await agentCall('nas.mount',
         { label, proto, host, share, mountpoint, options, username, password }, null, 60000);
       await withFileLock(async () => {
@@ -115,7 +132,11 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
         settings.rapisys.nas = { label, proto, host, share, mountpoint, smbVersion: smbVersion || null };
         await saveSettings(settings);
       });
-      events.add('nas.mounted', 'info', { label, proto, host, share, mountpoint });
+      // Best-effort: the events table can live on the very share being
+      // changed, so a failed write here must not turn a completed mount into
+      // a reported error.
+      try { events.add('nas.mounted', 'info', { label, proto, host, share, mountpoint }); }
+      catch { /* DB unavailable mid-swap */ }
       res.json({ ok: true, mountpoint, ...result });
     } catch (err) {
       res.status(502).json({ ok: false, error: err.message });
@@ -134,23 +155,169 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
     }
   });
 
+  /**
+   * Can this share be changed in place? Reports whether the live database sits
+   * on the mountpoint (in which case the container holds it open and no
+   * unmount can succeed) and which processes are holding it. The UI uses this
+   * to offer the guided swap instead of walking into a doomed unmount.
+   */
+  r.get('/nas/preflight', async (req, res) => {
+    const mountpoint = String(req.query.mountpoint || '');
+    if (!mountpoint.startsWith('/mnt/rapisys/')) {
+      return res.status(400).json({ error: 'mountpoint must be under /mnt/rapisys' });
+    }
+    const dbPath = dbMeta().path || '';
+    const dbOnShare = dbPath.startsWith(mountpoint.replace(/\/$/, '') + '/');
+    let mounted = null, holders = [];
+    try {
+      const st = await agentCall('nas.holders', { mountpoint }, null, 15000);
+      mounted = st.mounted; holders = st.holders || [];
+    } catch { /* agent down: fall back to the dbOnShare answer alone */ }
+    res.json({ mountpoint, dbPath, dbOnShare, mounted, holders, localDbPath: fallbackDbPath });
+  });
+
   // -- unmount a NAS share (Settings page) -------------------------------------
+  // Ordering matters here. This used to delete the recorded share immediately
+  // after the agent call and then write an event; when the agent wrongly
+  // reported success and the event write failed against a read-only DB on the
+  // share itself, the response was a 502 that looked like "nothing happened"
+  // while the share had already been dropped from settings. The agent now
+  // verifies the unmount, settings are only cleared once it has, and the event
+  // write cannot affect the outcome.
   r.post('/nas/unmount', requireAuth, async (req, res) => {
     const mountpoint = String(req.body?.mountpoint || '');
     if (!mountpoint.startsWith('/mnt/rapisys/')) {
       return res.status(400).json({ error: 'mountpoint must be under /mnt/rapisys' });
     }
+    const dbPath = dbMeta().path || '';
+    if (dbPath.startsWith(mountpoint.replace(/\/$/, '') + '/') && !req.body?.force) {
+      return res.status(409).json({
+        error: `the database (${dbPath}) is on this share — move it to local storage first`,
+        dbOnShare: true, dbPath,
+      });
+    }
     try {
-      const result = await agentCall('nas.unmount', { mountpoint }, null, 30000);
+      const result = await agentCall('nas.unmount', { mountpoint }, null, 45000);
       await withFileLock(async () => {
         const settings = await loadSettings();
         if (settings.rapisys?.nas?.mountpoint === mountpoint) { delete settings.rapisys.nas; await saveSettings(settings); }
       });
-      events.add('nas.unmounted', 'info', { mountpoint });
+      try { events.add('nas.unmounted', 'info', { mountpoint }); } catch { /* DB may have lived there */ }
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(502).json({ error: err.message });
     }
+  });
+
+  // -- guided share swap -------------------------------------------------------
+  // Two-part because EventSource cannot POST and a NAS password must not travel
+  // in a URL: the credentials are handed over here and consumed once by the
+  // stream below, keyed by a single-use job id.
+  const swapJobs = new Map();
+  const SWAP_TTL_MS = 120000;
+
+  r.post('/nas/swap', requireAuth, async (req, res) => {
+    const { label, proto, host, share, username, password, smbVersion, nfsVersion, readOnly } = req.body || {};
+    if (!label || !host || !share) return res.status(400).json({ error: 'label, host and share are required' });
+    const id = crypto.randomUUID();
+    swapJobs.set(id, {
+      job: { label, proto, host, share, username, password, smbVersion, nfsVersion, readOnly },
+      expires: Date.now() + SWAP_TTL_MS,
+    });
+    setTimeout(() => swapJobs.delete(id), SWAP_TTL_MS).unref?.();
+    res.json({ ok: true, job: id });
+  });
+
+  /**
+   * Move the DB off the share, swap the share, move the DB back. Each step is
+   * verified before the next begins, and a failure rewinds the steps already
+   * taken: the agent restores the previous mount, and the database is put back
+   * where it came from. The worst case leaves the DB on local storage with the
+   * old share mounted — degraded but running and writable, never stranded.
+   */
+  r.get('/nas/swap/stream', requireAuth, async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const step = (index, state, note) => send('step', { index, state, note });
+
+    const entry = swapJobs.get(String(req.query.job || ''));
+    swapJobs.delete(String(req.query.job || ''));
+    if (!entry || entry.expires < Date.now()) {
+      send('failed', { message: 'swap request expired — start it again' });
+      return res.end();
+    }
+    const j = entry.job;
+    const mountpoint = mountpointFor(j.label);
+    const options = buildMountOptions(j);
+    const originalDbPath = dbMeta().path;
+    const settingsBefore = (await loadSettings()).rapisys?.nas || null;
+    send('start', { mountpoint });
+
+    // -- 1. move the database to local storage -----------------------------
+    step(0, 'run');
+    try {
+      reopenDb(fallbackDbPath);
+      step(0, 'done', `now at ${fallbackDbPath}`);
+    } catch (err) {
+      step(0, 'fail', err.message);
+      send('failed', { message: `could not move the database to local storage: ${err.message}` });
+      return res.end();
+    }
+
+    // -- 2/3. swap the share (the agent rolls the mount back on failure) ----
+    step(1, 'run');
+    try {
+      await agentCall('nas.swap', { ...j, mountpoint, options },
+        (line) => send('line', { line }), 120000);
+      step(1, 'done', `${j.proto}://${j.host}/${j.share}`);
+    } catch (err) {
+      step(1, 'fail', err.message);
+      // The old share is back (or was never released) — put the DB with it.
+      let restored = false;
+      try { reopenDb(originalDbPath); restored = true; } catch { /* stays local */ }
+      step(2, 'skip', 'not attempted');
+      send('failed', {
+        message: err.message,
+        rolledBack: restored,
+        dbPath: dbMeta().path,
+        nas: settingsBefore,
+      });
+      return res.end();
+    }
+
+    // -- 4. move the database onto the new share ----------------------------
+    step(2, 'run');
+    const newDbPath = path.join(mountpoint, 'rapisys.db');
+    try {
+      reopenDb(newDbPath);
+      step(2, 'done', `now at ${newDbPath}`);
+    } catch (err) {
+      // The share is good but the DB could not follow it. Leave the DB local
+      // rather than half-moved and say so plainly.
+      step(2, 'fail', err.message);
+      send('failed', {
+        message: `share replaced, but the database stayed on local storage: ${err.message}`,
+        shareReplaced: true, dbPath: dbMeta().path,
+      });
+      return res.end();
+    }
+
+    await withFileLock(async () => {
+      const settings = await loadSettings();
+      settings.rapisys = settings.rapisys || {};
+      settings.rapisys.nas = {
+        label: j.label, proto: j.proto, host: j.host, share: j.share,
+        mountpoint, smbVersion: j.smbVersion || null,
+      };
+      settings.rapisys.storage = { dbPath: newDbPath };
+      await saveSettings(settings);
+    });
+    try { events.add('nas.swapped', 'info', { mountpoint, share: j.share, dbPath: newDbPath }); }
+    catch { /* best effort */ }
+    send('done', { mountpoint, dbPath: newDbPath });
+    res.end();
   });
 
   // -- step 2b: relocate the database ------------------------------------------

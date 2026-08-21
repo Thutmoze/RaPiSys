@@ -476,6 +476,27 @@ The original plan did not cover third-party enclosures. RaPiSys gained an option
 
 ---
 
+---
+
+### 13.7 NAS share replacement (post-plan)
+
+Replacing the share behind an existing mountpoint was unsafe whenever the metrics database lived on that share, which is the normal configuration (§13.5). Three defects combined:
+
+1. **The agent had two `nas.unmount` entries in one object literal.** The second silently shadowed the first, and it discarded the exit code of `systemctl stop`, returning `{ ok: true }` unconditionally. A stop that failed with `target is busy` was reported to the server as a successful unmount.
+2. **The route committed before verifying.** `/setup/nas/unmount` deleted `settings.rapisys.nas` on that false success and only then wrote an event. Because the events table lives on the share being unmounted, that write failed against a read-only database and threw, so the response was a 502 that read as "nothing happened" while the share had already been dropped from settings.
+3. **The deadlock itself.** The container holds `rapisys.db` open on the mountpoint, so no unmount can succeed while RaPiSys is running. `nas.mount` hit the same wall from the other direction: its `systemctl restart` has to stop the old mount first.
+
+The result was a three-way disagreement between the live mount, the unit file and the recorded settings, with no rollback.
+
+**Honest failures.** The duplicate op is gone. Every unmount path now tries `systemctl stop`, then `umount`, then lazy `umount -l`, and re-checks with `findmnt` before claiming success; if the path is still mounted it throws, naming the holding processes from `fuser -m` plus `/proc/<pid>/comm` (`held by node (pid 3180857)`). A new `nas.holders` op exposes the same answer for preflighting, and `nas.mount` refuses up front when the mountpoint is held rather than failing later with a bare `see journalctl`. On the server, settings are only rewritten after a verified result and every `events.add` around mount changes is best-effort, so a database on the affected share cannot turn a completed operation into a reported failure.
+
+**Guided swap.** `GET /setup/nas/preflight` reports whether the active database path sits under the mountpoint, along with the holders. When it does, the UI offers a guided swap instead of an in-place replace: `POST /setup/nas/swap` takes the credentials and returns a single-use job id (EventSource cannot POST, and a NAS password must not travel in a URL), and `GET /setup/nas/swap/stream` runs the sequence over SSE — relocate the database to local storage, swap the share, relocate it back — reporting each step as it is verified.
+
+Rollback lives in the agent, because the unit file and the credentials file are the only record of how the current share is mounted and `nas.mount` overwrites both. `nas.swap` reads them into memory first, and on failure writes them back, reloads systemd and restarts the old mount before throwing. The new share is additionally write-probed before the swap is called a success. The server rewinds its own half in step: if the swap fails, the database is reopened at its original path; if only the final relocation fails, the database stays local and the response says so. The worst case is a working system with the old share mounted and the database on local storage, never a stranded one.
+
+Mount option construction is now shared by the mount and swap paths (`buildMountOptions`), so the two cannot drift into mounting the same share with different options — a drift that previously surfaced only as SQLite failing on a share missing `nobrl`.
+
+
 ## 14. Multi-Node Federation
 
 **Status:** IMPLEMENTED (patches 0284–0289). Everything in §§1–13 describes a single-node system. This section covers adding a second (or Nth) Pi.
