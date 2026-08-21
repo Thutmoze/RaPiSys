@@ -2,10 +2,10 @@
 
 **Project:** Production-grade enhancement of `zepgram/pi-dashboard` for Raspberry Pi 5 (shipped as **RaPiSys**)
 **Target platform:** Raspberry Pi 5 · Raspberry Pi OS Bookworm/**Trixie** (arm64) · Docker / Docker Compose
-**Status:** IMPLEMENTED. All planned feature areas are built and in production use. This document is the original design (sections 1–11) preserved for context, plus an **as-built addendum** (section 13) covering what shipped and the post-plan subsystems (DNS/Pi-hole and the Pironman case controller).
-**Plan date:** 2026-06-10 · **Last updated:** 2026-06-24
+**Status:** IMPLEMENTED (single node). All planned feature areas are built and in production use. This document is the original design (sections 1–11) preserved for context, an **as-built addendum** (section 13) covering what shipped and the post-plan subsystems (DNS/Pi-hole and the Pironman case controller), and a **forward-looking design** (section 14) for multi-node federation, which is approved but not yet implemented.
+**Plan date:** 2026-06-10 · **Last updated:** 2026-08-21
 
-> **Reading guide:** sections 1–11 are the original architecture/plan and remain largely accurate as the system's foundation. Section 12 (open questions) has been resolved (see §13.1). Section 13 is the current as-built state, including the DNS/Pi-hole integration, the NAS-backup subsystem, and the optional Pironman 5 Mini case controller, all added after the original plan.
+> **Reading guide:** sections 1–11 are the original architecture/plan and remain largely accurate as the system's foundation. Section 12 (open questions) has been resolved (see §13.1). Section 13 is the current as-built state, including the DNS/Pi-hole integration, the NAS-backup subsystem, and the optional Pironman 5 Mini case controller, all added after the original plan. Section 14 is design-only: it specifies multi-node federation and is the one section that does not yet describe running code.
 
 ---
 
@@ -473,6 +473,102 @@ The original plan did not cover third-party enclosures. RaPiSys gained an option
 **UI**: a **Settings to Case** tab (master toggle, install method chooser with live SSE log, then live fan/RGB/display controls once installed), a compact **Case** summary widget on the Overview, and a gated **Case** card on the Hardware page with inline fan-mode and fan-LED controls. All three honour the existing design tokens and stay hidden unless the controller is enabled and installed. This Pi 5's own active cooling (the PWM fan on the board) remains a separate Hardware card; the Case card covers the enclosure's fan and lighting only.
 
 **Security**: pm_dashboard listens on port 34001 without authentication and binds all interfaces; RaPiSys only ever contacts it on localhost, and the Case tab warns the operator to keep that port firewalled or localhost-bound on a shared LAN. The SunFounder software runs as its own GPL-licensed process, isolated from RaPiSys.
+
+---
+
+## 14. Multi-Node Federation (design, not yet built)
+
+**Status:** APPROVED DESIGN, IMPLEMENTATION PENDING (patches 0284–0288). Everything in §§1–13 describes a single-node system. This section covers adding a second (or Nth) Pi.
+
+### 14.1 Requirement
+
+Monitor and reach a second Raspberry Pi from a single console, and keep a usable dashboard if the first Pi dies.
+
+### 14.2 Rejected approach: centralized primary/secondary
+
+The obvious design — a primary node that polls a dormant secondary's agent, replicating the SQLite DB so the secondary can be promoted on failure — was evaluated and rejected on three grounds:
+
+1. **A dormant standby cannot report the primary's death.** Alerting lives on the primary. When the primary fails, the thing that would have told you is the thing that failed. The outage is discovered by a human failing to load a page.
+2. **It networks the most privileged component.** `rapisys-agent.cjs` runs as root and executes an allowlisted set of privileged operations (apt upgrades, mounts, fan control, reboot). It has been local-Unix-socket-only since Phase 0, which is a significant part of why the security model holds (§9). Exposing it over the network is the single highest-risk change available, and it doubles the blast radius of the recurring agent-restart-slip failure mode.
+3. **Replication solves a self-inflicted problem.** The "SQLite is unsafe over CIFS/NFS" constraint (§13.3, §13.5) only binds if two machines need one database file. It is cheaper to ensure they never do than to add Litestream, restore tooling, and split-brain arbitration.
+
+### 14.3 Adopted approach: federated peers
+
+Both Pis run the identical RaPiSys stack. There is no primary/secondary distinction in the software. **Each node writes only to its own local database**, so the single-writer invariant holds by construction and the network-SQLite constraint dissolves rather than being worked around.
+
+Cross-node visibility is **read-only HTTP between the two Express servers**, never between agents:
+
+```
+  Node A (rapi-01)                            Node B (rapi-02)
+ ┌──────────────────────────┐               ┌──────────────────────────┐
+ │ Express ── rapisys.db    │  GET          │ Express ── rapisys.db    │
+ │ peer-poller ─────────────┼──────────────►│ /api/v1/node-summary     │
+ │   60s, X-API-Key         │  (HTTPS)      │   (requireApiKey)        │
+ │ peer_health cache        │◄──────────────┤                          │
+ │                          │               │                          │
+ │ agent.sock (root, LOCAL) │               │ agent.sock (root, LOCAL) │
+ └──────────────────────────┘               └──────────────────────────┘
+        ▲ browser talks only to its own node — no CORS, no cross-node session
+```
+
+- **Auth reuses the existing mechanism.** `requireApiKey` and the hashed key in `settings.api` already gate `/api/v1/*`. No new auth scheme is introduced. Peer API keys are stored encrypted at rest via the existing `core/crypto.js` AES-256-GCM helper, exactly as SMTP and NAS credentials are.
+- **One new peer-facing endpoint.** `GET /api/v1/node-summary` returns a compact snapshot (hostname, uptime, cpu, mem, temp, disk, counts for alerts/updates/sessions, health score). No route proxying; nothing privileged is reachable from a peer.
+- **Polling is server-side.** The local node polls its peers every 60 s and caches results in `peer_health`, so the browser only ever calls its own API.
+- **The agent is untouched.** No change to `rapisys-agent.cjs`, and therefore no agent install/restart step in any of these deploys.
+
+**Failover becomes a non-operation.** If one node dies, open the other node's URL. It is already running, already holds its own complete history, already has its alert rules firing. No takeover script, no restore, no replication lag, no split-brain window when the dead node returns.
+
+**Mutual monitoring falls out for free.** A `peer unreachable for N minutes` alert condition means the surviving node notifies you (Telegram/email) that the other one is down — the capability the rejected design structurally could not provide.
+
+**Accepted trade-offs:** no single SQL query spans both nodes' history (a combined chart merges two fetched series client-side), and configuration (alert rules, dashboards, SMTP) is per-node unless a one-way config push is added later. Both are acceptable at two-to-three node scale.
+
+### 14.4 Transport and addressing
+
+A peer is added by a single smart address field accepting a LAN IP (`192.168.10.6`), an mDNS name (`rapi-02.local`), a Tailscale name, or a full URL. Bare input is normalized by probing `https://host:3443` then `http://host:3001` — the same probe-to-discover-the-real-port pattern already used by `pihole.detect` (§13.3).
+
+- **HTTPS is required; self-signed is tolerated.** The Pi-hole collector already establishes this precedent. A node answering only on `:3001` is *discovered* but not addable, surfaced as "needs TLS" with a pointer to that node's Settings → TLS (`services/tls.js` already ships). This prevents the peer API key from crossing a plain LAN in cleartext every 60 s. Over Tailscale the tunnel is encrypted regardless, but the rule is kept uniform.
+- **Trust on first use.** The cert fingerprint is recorded on first successful add. If it later changes, the peer enters a `cert-changed` state and polling stops until re-confirmed. This is the appropriate model where no CA is in play.
+- **LAN discovery.** Because the container runs `network_mode: host`, it can probe the local /24 directly. `POST /api/nodes/scan` probes `/api/health` on both ports in parallel and returns anything with a RaPiSys health payload, preferring the mDNS name over the raw IP in results — raw IPs break on DHCP lease changes, and Pi OS ships Avahi by default.
+
+### 14.5 Schema
+
+Migration `005_peers.sql`. Two new tables; **no existing table is modified**. In particular, no `node_id` column is added to `metrics`, `events`, `session_log`, or `inventory` — each database only ever contains its own node's data, which is what makes this migration trivial compared to the centralized alternative.
+
+```sql
+CREATE TABLE peers (
+  id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
+  base_url TEXT NOT NULL,            -- normalized, always https://
+  api_key_enc BLOB, api_key_iv BLOB, api_key_tag BLOB,
+  cert_fingerprint TEXT,             -- TOFU pin
+  enabled INTEGER DEFAULT 1, created_at INTEGER
+);
+
+CREATE TABLE peer_health (
+  peer_id INTEGER NOT NULL, ts INTEGER NOT NULL,
+  reachable INTEGER NOT NULL,
+  state TEXT,                        -- ok | unreachable | cert-changed | auth-failed
+  latency_ms INTEGER, snapshot TEXT, -- JSON from /api/v1/node-summary
+  PRIMARY KEY (peer_id, ts)
+) WITHOUT ROWID;
+```
+
+### 14.6 UI surface
+
+- **Header node switcher** — a pill listing all nodes with status dots. Selecting a peer opens that node's own dashboard in a new tab. Deliberately not a proxied context swap: the one-click open *is* the failover story.
+- **Nodes summary widget** (`sum-nodes`) — a new entry in `src/modules/summary-widgets.js`, same shape as the existing five, showing per-node cpu/temp/mem/health with unreachable nodes greyed and timestamped.
+- **Settings → Nodes tab** — peer list with per-peer Test/Remove, the smart address field, and the network scan, following the established collapse-when-configured convention.
+
+### 14.7 Implementation plan
+
+| Patch | Scope | Rebuild |
+|---|---|---|
+| 0284 | `005_peers.sql`, `repositories/peers.js`, `routes/nodes.js` (CRUD + test), `GET /api/v1/node-summary` | container |
+| 0285 | `services/peer-poller.js`, TOFU fingerprint pinning, `peer_health` writes, peer-unreachable alert condition | container |
+| 0286 | Address normalization + `POST /api/nodes/scan` LAN discovery | container |
+| 0287 | `sum-nodes` summary widget + header node switcher | frontend |
+| 0288 | Settings → Nodes tab | frontend |
+
+Test coverage added for the peer repository, address normalization, TOFU state transitions, and the unreachable-alert state machine. No patch in this series touches `agent/rapisys-agent.cjs`.
 
 ---
 
