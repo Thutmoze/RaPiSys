@@ -1066,7 +1066,7 @@ app.delete('/api/services/config/:index', requireAuth, async (req, res) => {
 let serverRef = null;
 import('./rapisys.js')
   .then(({ initRapisys }) => initRapisys({
-    app, loadSettings, saveSettings, withFileLock, requireAuth,
+    app, loadSettings, saveSettings, withFileLock, requireAuth, requireApiKey,
     loadServices, checkService,
   }))
   .then((rapisys) => {

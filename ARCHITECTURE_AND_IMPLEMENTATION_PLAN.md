@@ -534,14 +534,15 @@ A peer is added by a single smart address field accepting a LAN IP (`192.168.10.
 
 Migration `005_peers.sql`. Two new tables; **no existing table is modified**. In particular, no `node_id` column is added to `metrics`, `events`, `session_log`, or `inventory` — each database only ever contains its own node's data, which is what makes this migration trivial compared to the centralized alternative.
 
+Peer API keys are **not** columns on `peers`. Implementation revised the design here: the existing encrypted `secrets` table already provides AES-256-GCM at-rest storage keyed by string, so peer keys live there under `peer.<id>.apikey`, exactly as the SMTP password does. This avoids duplicating crypto handling in a second place.
+
 ```sql
 CREATE TABLE peers (
   id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
   base_url TEXT NOT NULL,            -- normalized, always https://
-  api_key_enc BLOB, api_key_iv BLOB, api_key_tag BLOB,
   cert_fingerprint TEXT,             -- TOFU pin
   enabled INTEGER DEFAULT 1, created_at INTEGER
-);
+);  -- API key -> secrets table, key `peer.<id>.apikey`
 
 CREATE TABLE peer_health (
   peer_id INTEGER NOT NULL, ts INTEGER NOT NULL,

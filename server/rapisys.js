@@ -26,6 +26,7 @@ import { createInventoryRepo } from './repositories/inventory.js';
 import { createLayoutsRepo } from './repositories/layouts.js';
 import { createUpdatesCollector } from './collectors/updates.js';
 import { createUpdatesRepo } from './repositories/updates.js';
+import { createPeersRepo } from './repositories/peers.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
 import { createMailer } from './services/mailer.js';
@@ -35,8 +36,10 @@ import { createAlertEngine } from './services/alerting.js';
 import { createSessionTracker } from './services/session-tracker.js';
 import { createAuth } from './services/auth.js';
 import { createRemoteAccess } from './services/remote-access.js';
+import { getSystemStats } from './stats.js';
 import { historyRouter } from './routes/history.js';
 import { deepHealthRouter } from './routes/health.js';
+import { nodesRouter } from './routes/nodes.js';
 import { setupRouter } from './routes/setup.js';
 import { hardwareRouter } from './routes/hardware.js';
 import { alertsRouter } from './routes/alerts.js';
@@ -58,7 +61,7 @@ import { diskRouter } from './routes/disk.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export async function initRapisys({ app, loadSettings, saveSettings, withFileLock, requireAuth, loadServices, checkService }) {
+export async function initRapisys({ app, loadSettings, saveSettings, withFileLock, requireAuth, requireApiKey, loadServices, checkService }) {
   // ---- storage -------------------------------------------------------------
   const settings = await loadSettings();
   const dataDir = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
@@ -110,7 +113,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo, layoutsRepo;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo, layoutsRepo, peersRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
@@ -121,6 +124,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     inventoryRepo = createInventoryRepo(getDb());
     layoutsRepo = createLayoutsRepo(getDb());
     updatesRepo = createUpdatesRepo(getDb());
+    peersRepo = createPeersRepo(getDb(), { secrets });
   }
   rebuildRepos();
 
@@ -145,6 +149,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     countSince: (...a) => eventsRepo.countSince(...a),
     purgeOlderThan: (...a) => eventsRepo.purgeOlderThan(...a),
   };
+  const peersFacade = new Proxy({}, { get: (_, m) => (...a) => peersRepo[m](...a) });
   const secretsFacade = {
     set: (...a) => secrets.set(...a),
     get: (...a) => secrets.get(...a),
@@ -503,6 +508,48 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       notAfter: cfg.notAfter || null, dnsName: cfg.dnsName || null, provisionedAt: cfg.provisionedAt || null });
   });
   app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app, loadSettings }));
+  app.use('/api/nodes', rc, nodesRouter({
+    peersRepo: peersFacade, requireControl: auth.requireControl, events: eventsFacade,
+  }));
+
+  // Peer-facing read-only snapshot (§14.3). This is the ONLY endpoint another
+  // node can call. It is gated by the existing API-key middleware, returns a
+  // compact summary rather than proxying anything, and exposes nothing
+  // privileged: the host agent stays unreachable from the network.
+  if (typeof requireApiKey === 'function') {
+    app.get('/api/v1/node-summary', requireApiKey, async (req, res) => {
+      try {
+        const stats = await getSystemStats();
+        let health = null;
+        try { health = reports.materializeDay(new Date())?.health?.overall ?? null; } catch { /* optional */ }
+        let alerts = 0;
+        try { alerts = (alertsFacade.active?.() || []).length; } catch { /* optional */ }
+        let updates = 0;
+        try { updates = Number(stats.os?.updatesAvailable) || 0; } catch { /* optional */ }
+
+        const rootDisk = (stats.disks || [])[0] || null;
+        res.json({
+          ts: Date.now(),
+          node: {
+            name: stats.os?.hostname || 'rapisys',
+            hostname: stats.os?.hostname || null,
+            distro: stats.os?.distro || null,
+            arch: stats.os?.arch || null,
+          },
+          uptime: stats.load?.uptime ?? null,
+          cpu: { usage: stats.cpu?.usage ?? null, temp: stats.temperature?.main ?? null },
+          memory: { usedPercent: stats.memory?.usedPercent ?? null, total: stats.memory?.total ?? null },
+          disk: rootDisk ? { usedPercent: rootDisk.percent ?? null, mount: rootDisk.mount || null, size: rootDisk.size ?? null } : null,
+          throttled: !!stats.temperature?.throttled,
+          counts: { alerts, updates },
+          health,
+        });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+  }
+
   app.use('/api/layouts', rc, layoutsRouter({ layoutsRepo: layoutsRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
