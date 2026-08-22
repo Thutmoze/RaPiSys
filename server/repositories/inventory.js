@@ -9,19 +9,78 @@ export function createInventoryRepo(db) {
       installed_at=COALESCE(excluded.installed_at, inventory.installed_at),
       meta=excluded.meta, category=excluded.category, priority=excluded.priority, section=excluded.section`);
 
-  /** Replace the whole inventory for the given kinds in one transaction. */
+  const deleteOne = db.prepare(`DELETE FROM inventory WHERE kind = ? AND name = ?`);
+
+  /** Flatten a collector item into the exact column values the upsert writes. */
+  function normalize(it) {
+    return {
+      kind: it.kind, name: it.name, version: it.version ?? null,
+      installedAt: it.installedAt ?? null, source: it.source ?? null,
+      status: it.status ?? null, lastUsed: it.lastUsed ?? null,
+      meta: it.meta ? JSON.stringify(it.meta) : null,
+      category: it.category ?? null, priority: it.meta?.priority ?? null, section: it.meta?.section ?? null,
+    };
+  }
+
+  /**
+   * True when running the upsert would actually change the stored row.
+   *
+   * This mirrors the upsert's DO UPDATE clause exactly: `last_used` is never
+   * written on update, and `installed_at` is COALESCEd, so a null incoming
+   * install time leaves the existing value alone and is not a difference.
+   */
+  function differs(prev, next) {
+    return prev.version !== next.version
+      || prev.status !== next.status
+      || prev.source !== next.source
+      || prev.meta !== next.meta
+      || prev.category !== next.category
+      || prev.priority !== next.priority
+      || prev.section !== next.section
+      || (next.installedAt !== null && prev.installed_at !== next.installedAt);
+  }
+
+  /**
+   * Reconcile the inventory for the given kinds against `items`, writing only
+   * the rows that actually changed.
+   *
+   * This used to delete every row for these kinds and reinsert all of them, so
+   * a routine sync rewrote ~1,500 package rows even when nothing had changed.
+   * better-sqlite3 is synchronous, so when the database lives on a network
+   * mount that burst of page writes blocks the event loop for tens of seconds
+   * and the entire UI stops responding. Between syncs almost nothing actually
+   * moves, so we read the current state first and touch only the differences —
+   * a steady-state sync now issues zero writes.
+   *
+   * Returns per-run counts so callers can log or assert on the write volume.
+   */
   const sync = db.transaction((items, kinds) => {
     const ph = kinds.map(() => '?').join(',');
-    db.prepare(`DELETE FROM inventory WHERE kind IN (${ph})`).run(...kinds);
+    const existing = new Map();
+    const rows = db.prepare(
+      `SELECT kind, name, version, installed_at, source, status, meta, category, priority, section
+         FROM inventory WHERE kind IN (${ph})`).all(...kinds);
+    for (const row of rows) existing.set(`${row.kind}\u0000${row.name}`, row);
+
+    const seen = new Set();
+    let inserted = 0; let updated = 0; let removed = 0;
+
     for (const it of items) {
-      upsert.run({
-        kind: it.kind, name: it.name, version: it.version ?? null,
-        installedAt: it.installedAt ?? null, source: it.source ?? null,
-        status: it.status ?? null, lastUsed: it.lastUsed ?? null,
-        meta: it.meta ? JSON.stringify(it.meta) : null,
-        category: it.category ?? null, priority: it.meta?.priority ?? null, section: it.meta?.section ?? null,
-      });
+      const key = `${it.kind}\u0000${it.name}`;
+      if (seen.has(key)) continue;          // collector duplicates collapse to one row anyway
+      seen.add(key);
+      const next = normalize(it);
+      const prev = existing.get(key);
+      if (!prev) { upsert.run(next); inserted++; } else if (differs(prev, next)) { upsert.run(next); updated++; }
     }
+
+    for (const [key, row] of existing) {
+      if (seen.has(key)) continue;          // gone from the system since the last sync
+      deleteOne.run(row.kind, row.name);
+      removed++;
+    }
+
+    return { inserted, updated, removed, unchanged: seen.size - inserted - updated };
   });
 
   function search({ kind = null, q = '', limit = 50, offset = 0, sort = 'name', category = null, priority = null, section = null } = {}) {

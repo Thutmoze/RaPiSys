@@ -339,7 +339,11 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   scheduler.register('inventory-sync', 30 * 60e3, async () => {
     try {
       const items = await inventory.collectAll();
-      inventoryRepoFacade.sync(items, ['package', 'service', 'container']);
+      const w = inventoryRepoFacade.sync(items, ['package', 'service', 'container']);
+      // Quiet when nothing moved — a steady-state sync writes no rows at all.
+      if (w && (w.inserted || w.updated || w.removed)) {
+        console.log(`[inventory] sync wrote ${w.inserted} new, ${w.updated} changed, ${w.removed} removed (${w.unchanged} untouched)`);
+      }
       const recs = await inventory.recommendations();
       inventoryRepoFacade.saveRecommendations(recs);
     } catch { /* */ }
