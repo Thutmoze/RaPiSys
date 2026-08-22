@@ -72,17 +72,27 @@ export function nodesRouter({ peersRepo, requireControl, events }) {
   // authenticated is a configuration mistake, not a row worth persisting.
   r.post('/', requireControl, async (req, res) => {
     try {
-      const name = String(req.body?.name || '').trim();
-      if (!NAME_RE.test(name)) {
+      let name = String(req.body?.name || '').trim();
+      if (name && !NAME_RE.test(name)) {
         return res.status(400).json({ error: 'name must be 1-63 chars: letters, digits, dot, dash, underscore' });
       }
-      if (peersRepo.getByName(name)) return res.status(409).json({ error: `a peer named "${name}" already exists` });
+      if (name && peersRepo.getByName(name)) return res.status(409).json({ error: `a peer named "${name}" already exists` });
 
       const baseUrl = await resolveAddress(req.body?.address);
       const apiKey = req.body?.apiKey ? String(req.body.apiKey) : null;
       const probe = await probePeer({ baseUrl, apiKey });
       if (!probe.ok) {
         return res.status(502).json({ error: probe.error || 'peer did not respond', state: probe.state });
+      }
+
+      // No name given: use what the peer calls itself. The probe response
+      // already carries its hostname, so adding by bare IP no longer produces
+      // a peer permanently labelled with an address.
+      if (!name) {
+        const reported = String(probe.json?.node?.name || probe.json?.node?.hostname || '').trim();
+        if (NAME_RE.test(reported)) name = reported;
+        if (!name) return res.status(400).json({ error: 'that node did not report a usable hostname — enter a name yourself' });
+        if (peersRepo.getByName(name)) return res.status(409).json({ error: `a peer named "${name}" already exists` });
       }
 
       const peer = peersRepo.add({ name, baseUrl, apiKey });

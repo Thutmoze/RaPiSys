@@ -2231,6 +2231,7 @@ pageRenderers.settings = (() => {
   // collapse-when-configured convention as the NAS and DNS cards.
   let nodesAddOpen = false;
   let nodesScan = null;
+  let nodesRenaming = null;   // peer id currently being renamed, or null
 
   async function loadNodes(host) {
     const el = $('[data-set=nodes]', host);
@@ -2256,12 +2257,18 @@ pageRenderers.settings = (() => {
       const s = n.summary || {};
       return `
       <div class="set-summary" data-node="${n.id}">
-        <div class="set-kv"><span>Name</span><b>${esc(n.name)}</b></div>
+        ${nodesRenaming === n.id
+          ? `<div class="set-kv"><span>Name</span><input data-nd="rename-input" value="${esc(n.name)}" maxlength="63" style="max-width:220px"></div>`
+          : `<div class="set-kv"><span>Name</span><b>${esc(n.name)}</b></div>`}
         <div class="set-kv"><span>Address</span><b>${esc(n.baseUrl)}</b></div>
         <div class="set-kv"><span>Status</span><b class="${cls}">${label}</b></div>
         ${n.reachable && s.cpu ? `<div class="set-kv"><span>Load</span><b>${s.cpu.usage != null ? Math.round(s.cpu.usage) + '% CPU' : '—'}${s.cpu.temp ? ' · ' + Math.round(s.cpu.temp) + '°C' : ''}${s.memory?.usedPercent != null ? ' · ' + Math.round(s.memory.usedPercent) + '% mem' : ''}</b></div>` : ''}
         ${n.state === 'cert-changed' ? `<p class="set-err">Polling is paused. The TLS certificate changed since this peer was added. Re-test to accept the new certificate, but only if you changed it yourself.</p>` : ''}
         <div class="set-actions">
+          ${nodesRenaming === n.id
+            ? `<button class="set-btn set-btn-primary" data-nd="rename-save" data-id="${n.id}">${SAVE_ICON}<span>Save name</span></button>
+               <button class="set-btn set-btn-cancel" data-nd="rename-cancel">${CANCEL_ICON}<span>Cancel</span></button>`
+            : `<button class="set-btn set-btn-edit" data-nd="rename" data-id="${n.id}">${EDIT_ICON}<span>Rename</span></button>`}
           <button class="set-btn set-btn-test" data-nd="test" data-id="${n.id}">${TEST_ICON}<span>${n.state === 'cert-changed' ? 'Accept &amp; test' : 'Test'}</span></button>
           <button class="set-btn set-btn-danger" data-nd="remove" data-id="${n.id}" data-name="${esc(n.name)}">${TRASH_ICON}<span>Remove</span></button>
           <span data-nd="msg-${n.id}"></span>
@@ -2299,7 +2306,7 @@ pageRenderers.settings = (() => {
         ${showForm ? `
         <h4 class="sess-h">${nodes.length ? 'Add another node' : 'Add a node'}</h4>
         <div class="wz-form">
-          <label>Name <input data-nd="name" placeholder="rapi-02" maxlength="63"></label>
+          <label>Name <span class="net-dns-note">(optional)</span> <input data-nd="name" placeholder="leave blank to use the node's own hostname" maxlength="63"></label>
           <label>Address <input data-nd="addr" placeholder="192.168.10.6, rapi-02.local, or a full URL"></label>
           <label>API key <input data-nd="key" type="password" placeholder="from that node's API panel"></label>
           <div class="set-actions">
@@ -2350,15 +2357,35 @@ pageRenderers.settings = (() => {
     if (add) add.onclick = async () => {
       const msg = q('[data-nd=newmsg]');
       const body = readForm();
-      if (!body.name) { setStatus(msg, false, '✗ a name is required'); return; }
       if (!body.address) { setStatus(msg, false, '✗ an address is required'); return; }
       add.disabled = true; setStatus(msg, true, 'Connecting…');
       try {
-        await api('/nodes', { method: 'POST', body });
-        toast('success', 'Nodes', `${body.name} added`);
+        const added = await api('/nodes', { method: 'POST', body });
+        toast('success', 'Nodes', `${added?.node?.name || body.name || 'Node'} added`);
         nodesAddOpen = false; nodesScan = null;
         loadNodes(host);
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); add.disabled = false; }
+    };
+
+    host.querySelectorAll('[data-nd=rename]').forEach((b) => {
+      b.onclick = () => { nodesRenaming = Number(b.dataset.id); loadNodes(host); };
+    });
+    const rnCancel = q('[data-nd=rename-cancel]');
+    if (rnCancel) rnCancel.onclick = () => { nodesRenaming = null; loadNodes(host); };
+    const rnSave = q('[data-nd=rename-save]');
+    if (rnSave) rnSave.onclick = async () => {
+      const id = rnSave.dataset.id;
+      const val = (q('[data-nd=rename-input]')?.value || '').trim();
+      if (!val) { toast('error', 'Nodes', 'A name is required'); return; }
+      rnSave.disabled = true;
+      try {
+        await api(`/nodes/${id}`, { method: 'PATCH', body: { name: val } });
+        // The alert metric is keyed peer.<name>.up, so a rename starts a new
+        // series; any existing rule needs repointing at the new name.
+        toast('success', 'Nodes', `Renamed to ${val} — update any peer alert rule to match`);
+        nodesRenaming = null;
+        loadNodes(host);
+      } catch (err) { toast('error', 'Nodes', err.message); rnSave.disabled = false; }
     };
 
     host.querySelectorAll('[data-nd=test]').forEach((b) => { b.onclick = async () => {

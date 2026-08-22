@@ -159,3 +159,35 @@ describe('trust on first use', () => {
     expect(peers.get(p.id).certFingerprint).toBe(FP_B);
   });
 });
+
+describe('peer auto-naming', () => {
+  // The add route derives a missing name from the peer's own node-summary
+  // response. These cover the rule the route applies to that reported value.
+  const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/;
+  const derive = (reported) => (NAME_RE.test(String(reported || '').trim()) ? String(reported).trim() : '');
+
+  it('accepts a normal hostname', () => {
+    expect(derive('XRPi')).toBe('XRPi');
+    expect(derive('rapi-02')).toBe('rapi-02');
+    expect(derive('rapi-02.local')).toBe('rapi-02.local');
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(derive('  YRPi  ')).toBe('YRPi');
+  });
+
+  it('rejects a hostname that would not pass name validation', () => {
+    // Falls back to requiring an explicit name rather than storing junk.
+    expect(derive('')).toBe('');
+    expect(derive('   ')).toBe('');
+    expect(derive('-leading-dash')).toBe('');
+    expect(derive('has space')).toBe('');
+    expect(derive('a'.repeat(64))).toBe('');
+  });
+
+  it('accepts an IP-shaped hostname, since that is a valid name if chosen', () => {
+    // Auto-naming only kicks in when the operator left the field blank; if a
+    // node genuinely reports this, it is still better than failing the add.
+    expect(derive('192.168.10.5')).toBe('192.168.10.5');
+  });
+});
