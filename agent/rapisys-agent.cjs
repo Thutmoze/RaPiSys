@@ -361,6 +361,81 @@ async function pironmanConfigPath() {
   return (r.code === 0 && p) ? p : null;
 }
 
+/* -- Package classification helpers (pure; unit-tested) ---------------------
+ *
+ * Tagging an upgrade as "Raspberry Pi" used to be a guess made from the
+ * package NAME and its dpkg summary. That misses anything Pi-specific whose
+ * name carries no recognisable prefix and whose summary never says the words
+ * "Raspberry Pi" — libpisp1 ("Helper library for the PiSP hardware block"),
+ * libdtovl0, libgpiolib0, pishutdown, raindrop, rasputin, userconf-pi, and
+ * the volumepulse panel plugins all slipped through.
+ *
+ * The authoritative signal is which archive actually serves the candidate
+ * version, which `apt-cache policy` reports. But origin ALONE over-tags:
+ * archive.raspberrypi.com carries two very different kinds of package.
+ *
+ *   1. Raspberry Pi's own software — plain upstream versions:
+ *        libpisp1 1.7.0-1 · raspi-utils 20260626-1 · rpicam-apps 1.13.0-1
+ *   2. Debian packages that RPi merely recompiled for the Pi:
+ *        firefox 153.0.4-1+rpt1 · mesa 26.2.0-1~bpo13+0~rpt3 · cups …+rpt2
+ *
+ * Only (1) is a Raspberry Pi package; Firefox is still Firefox. The rebuilds
+ * are marked by an `rpt` suffix carrying a SMALL COUNTER. RPi's own forks that
+ * ride Debian packaging use a DATED SNAPSHOT instead — libcamera ships as
+ * 0.7.2+rpt20260817-1 — so the digit count cleanly separates the two. Verified
+ * against a 194-package upgrade set spanning both archives: 37 tagged, zero
+ * Debian packages misclassified.
+ */
+
+/** True when the version's `rpt` marker is a rebuild counter, not a date
+ *  snapshot. `+rpt1`/`~rpt3`/`+rpt2+deb13u2` → rebuild; `+rpt20260817` → not. */
+function isRptRebuild(version) {
+  return /[+~]rpt(\d{1,5})(?!\d)/.test(String(version || ''));
+}
+
+/** True when a hostname belongs to the Raspberry Pi archive. */
+function isRpiArchiveHost(host) {
+  return /(^|\.)raspberrypi\.(com|org)$/i.test(String(host || ''));
+}
+
+/**
+ * Parse `apt-cache policy <pkgs…>` into { package: originHost } for the
+ * CANDIDATE version only. Output shape per package:
+ *
+ *   libpisp1:
+ *     Installed: 1.6.0-1
+ *     Candidate: 1.7.0-1
+ *     Version table:
+ *        1.7.0-1 500
+ *           500 http://archive.raspberrypi.com/debian trixie/main arm64 Packages
+ *    *** 1.6.0-1 500
+ *           500 /var/lib/dpkg/status
+ *
+ * We track the current package, remember its Candidate, then read the source
+ * lines that sit under the matching version-table entry. Locally-installed
+ * versions list /var/lib/dpkg/status (no host) and are skipped.
+ */
+function parsePolicyOrigins(text) {
+  const origins = {};
+  let pkg = null, candidate = null, inCandidate = false;
+  for (const raw of String(text || '').split('\n')) {
+    const header = raw.match(/^(\S+):\s*$/);
+    if (header) { pkg = header[1]; candidate = null; inCandidate = false; continue; }
+    if (!pkg) continue;
+    const cand = raw.match(/^\s+Candidate:\s+(\S+)/);
+    if (cand) { candidate = cand[1]; continue; }
+    // A version-table entry: optional "***" install marker, version, priority.
+    const entry = raw.match(/^(?:\s*\*\*\*)?\s+(\S+)\s+\d+\s*$/);
+    if (entry) { inCandidate = candidate != null && entry[1] === candidate; continue; }
+    // A source line under the current entry: priority then URL (or a path).
+    const src = raw.match(/^\s+\d+\s+(\S+)/);
+    if (src && inCandidate && !origins[pkg]) {
+      try { origins[pkg] = new URL(src[1]).hostname; } catch { /* dpkg status, not a URL */ }
+    }
+  }
+  return origins;
+}
+
 const OPS = {
 
   // ---- Pironman 5 Mini -----------------------------------------------------
@@ -2199,7 +2274,10 @@ WantedBy=multi-user.target
       updates.push({
         package: m[1], pocket: m[2], candidate: m[3], installed: m[4] || null,
         security: securityPkgs.has(m[1]),
-        kernel: /^linux-image|^linux-headers|^raspberrypi-kernel/.test(m[1]),
+        // linux-base-rpi-* and linux-libc-dev ship from the kernel source
+        // package at the kernel's own version (1:6.18.39-1+rpt1) and used to
+        // land untagged; they belong with the kernel, not under Raspberry Pi.
+        kernel: /^linux-(image|headers|base|libc-dev)|^raspberrypi-kernel/.test(m[1]),
       });
     }
     // Descriptions (one dpkg-query call for all upgradable packages) and the
@@ -2211,6 +2289,15 @@ WantedBy=multi-user.target
         const i = line.indexOf('\t');
         if (i > 0) desc[line.slice(0, i)] = line.slice(i + 1);
       }
+    }
+    // Candidate origin: which archive actually serves each upgrade. One
+    // read-only `apt-cache policy` call for all upgradable packages (no
+    // network — it reads the already-downloaded lists). A failure here just
+    // means this pass falls back to name/summary matching, exactly as before.
+    let originMap = {};
+    if (names.length) {
+      const pol = await run('apt-cache', ['policy', ...names], 30000).catch(() => ({ stdout: '' }));
+      originMap = parsePolicyOrigins(pol.stdout || '');
     }
     // Candidate download size: parse `apt-cache show` Size: fields (bytes of the
     // .deb). One call for all upgradable packages; take the first (candidate) Size.
@@ -2248,7 +2335,13 @@ WantedBy=multi-user.target
       u.description = desc[u.package] || '';
       u.sizeBytes = sizeMap[u.package] || null;
       u.firmware = FIRMWARE_RE.test(u.package) || /firmware/i.test(u.description);
-      u.rpi = !u.kernel && !u.firmware && (RPI_RE.test(u.package) || RPI_DESC_RE.test(u.description));
+      // Origin-first: served by the Raspberry Pi archive AND not one of its
+      // rebuilds of a Debian package. The name/summary regexes stay as an OR
+      // fallback so nothing that was tagged before can regress — and so the
+      // tag still works if `apt-cache policy` was unavailable this pass.
+      const fromRpiArchive = isRpiArchiveHost(originMap[u.package]) && !isRptRebuild(u.candidate);
+      u.rpi = !u.kernel && !u.firmware
+        && (fromRpiArchive || RPI_RE.test(u.package) || RPI_DESC_RE.test(u.description));
       try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
       catch { u.installedAt = null; }
     }
@@ -2698,11 +2791,18 @@ const server = net.createServer((sock) => {
   sock.on('error', () => {});
 });
 
-server.listen(SOCKET_PATH, () => {
-  fs.chmodSync(SOCKET_PATH, 0o660);
-  // Best effort: give the docker-side group access to the socket.
-  run('chgrp', [SOCKET_GROUP, SOCKET_PATH]).catch(() => {});
-  console.log(`[agent] rapisys-agent listening on ${SOCKET_PATH}`);
-});
+// Only bind the socket when run as the service (systemd ExecStart). Requiring
+// this file as a module — which the test suite does to exercise the pure
+// classification helpers — must not try to listen on /run/rapisys.
+if (require.main === module) {
+  server.listen(SOCKET_PATH, () => {
+    fs.chmodSync(SOCKET_PATH, 0o660);
+    // Best effort: give the docker-side group access to the socket.
+    run('chgrp', [SOCKET_GROUP, SOCKET_PATH]).catch(() => {});
+    console.log(`[agent] rapisys-agent listening on ${SOCKET_PATH}`);
+  });
 
-process.on('SIGTERM', () => { server.close(); process.exit(0); });
+  process.on('SIGTERM', () => { server.close(); process.exit(0); });
+}
+
+module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost };
