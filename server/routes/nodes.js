@@ -9,6 +9,7 @@
  * there is no CORS surface and no cross-node session to reason about.
  */
 import express from 'express';
+import os from 'os';
 import { probePeer } from '../services/peer-client.js';
 import { resolveAddress, scanLan } from '../services/peer-scan.js';
 
@@ -36,11 +37,16 @@ function toPublic(peer, health, hasKey) {
 export function nodesRouter({ peersRepo, requireControl, events }) {
   const r = express.Router();
 
-  // Peer list with each one's most recent poll result.
+  // Peer list with each one's most recent poll result, plus this node's own
+  // identity. The client cannot derive the latter: location.hostname is
+  // whatever the operator typed in the address bar, so a dashboard opened by
+  // IP would label itself with the IP. The container runs network_mode: host,
+  // so os.hostname() here is the Pi's real hostname.
   r.get('/', (req, res) => {
     try {
       const health = peersRepo.latestHealthAll();
       res.json({
+        self: { name: os.hostname() },
         nodes: peersRepo.list().map((p) => toPublic(p, health[p.id], peersRepo.hasApiKey(p.id))),
       });
     } catch (err) { res.status(500).json({ error: err.message }); }

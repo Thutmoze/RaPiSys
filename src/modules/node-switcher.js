@@ -51,10 +51,15 @@ export function initNodeSwitcher({ onManage } = {}) {
 
   async function refresh() {
     let nodes = [];
+    let selfName = '';
     try {
       const r = await fetch('/api/nodes', { credentials: 'same-origin' });
       if (!r.ok) throw new Error(String(r.status));
-      nodes = (await r.json()).nodes || [];
+      const body = await r.json();
+      nodes = body.nodes || [];
+      // The server reports its own hostname; location.hostname would just echo
+      // back whatever address the operator typed to get here.
+      selfName = body.self?.name || '';
     } catch {
       // Not authenticated yet, or the endpoint is unavailable. Stay hidden
       // rather than showing a broken control.
@@ -66,19 +71,19 @@ export function initNodeSwitcher({ onManage } = {}) {
     host.hidden = false;
 
     const down = nodes.filter((n) => !n.reachable).length;
-    const selfName = (window.__rapisysHostname || location.hostname || 'this node');
+    const label = selfName || location.hostname || 'this node';
 
     host.innerHTML = `
       <button class="ns-btn" type="button" aria-haspopup="true" aria-expanded="${open}">
         <span class="${down ? 'ns-dot ns-dot-down' : 'ns-dot'}"></span>
-        <span class="ns-name">${esc(selfName)}</span>
+        <span class="ns-name">${esc(label)}</span>
         ${down ? `<span class="ns-badge">${down}</span>` : ''}
         <span class="ns-chev">▾</span>
       </button>
       <div class="ns-menu" role="menu">
         <div class="ns-item ns-item-cur">
           <span class="ns-dot"></span>
-          <div class="ns-meta"><div class="ns-item-name">${esc(selfName)}</div><div class="ns-sub">this node</div></div>
+          <div class="ns-meta"><div class="ns-item-name">${esc(label)}</div><div class="ns-sub">this node</div></div>
           <span class="ns-tag">viewing</span>
         </div>
         ${nodes.map((n) => `
