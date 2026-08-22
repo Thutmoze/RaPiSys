@@ -26,10 +26,22 @@ function dockerApiGet(path) {
 }
 
 export function createInventoryCollector() {
-  async function packages() {
-    if (!agentConfigured()) return [];
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.strict] throw on failure instead of returning [].
+   *
+   * Callers that reconcile the database (collectAll → sync) must pass strict:
+   * an empty array from a failed agent call is indistinguishable from "no
+   * packages installed", and syncing that deletes the whole inventory.
+   */
+  async function packages({ strict = false } = {}) {
+    if (!agentConfigured()) {
+      if (strict) throw new Error('host agent not configured');
+      return [];
+    }
     try {
       const { packages } = await agentCall('inventory.packages', {}, null, 20000);
+      if (strict && !Array.isArray(packages)) throw new Error('agent returned no package list');
       return (packages || []).map((p) => ({
         kind: 'package', name: p.name, version: p.version,
         installedAt: p.installedAt, source: 'apt', status: 'installed',
@@ -43,24 +55,33 @@ export function createInventoryCollector() {
         meta: { sizeKB: p.sizeKB, description: p.description, priority: p.priority,
           essential: p.essential, section: p.section },
       }));
-    } catch { return []; }
+    } catch (err) { if (strict) throw err; return []; }
   }
 
-  async function services() {
-    if (!agentConfigured()) return [];
+  async function services({ strict = false } = {}) {
+    if (!agentConfigured()) {
+      if (strict) throw new Error('host agent not configured');
+      return [];
+    }
     try {
       const { services } = await agentCall('inventory.services', {}, null, 12000);
+      if (strict && !Array.isArray(services)) throw new Error('agent returned no service list');
       return (services || []).map((s) => ({
         kind: 'service', name: s.name, version: null, installedAt: null,
         source: 'systemd', status: `${s.active}/${s.sub}`,
         meta: { load: s.load, active: s.active, sub: s.sub, description: s.description },
       }));
-    } catch { return []; }
+    } catch (err) { if (strict) throw err; return []; }
   }
 
-  async function containers() {
+  async function containers({ strict = false } = {}) {
     const list = await dockerApiGet('/containers/json?all=1');
-    if (!Array.isArray(list)) return [];
+    if (!Array.isArray(list)) {
+      // dockerApiGet resolves null on socket error/timeout — that is a failure
+      // to ask, not an empty host. Never let it read as "no containers".
+      if (strict) throw new Error('docker socket unavailable');
+      return [];
+    }
     return list.map((c) => ({
       kind: 'container',
       name: (c.Names?.[0] || c.Id.slice(0, 12)).replace(/^\//, ''),
@@ -109,9 +130,30 @@ export function createInventoryCollector() {
   }
 
   /** Full inventory across all kinds. */
+  /**
+   * Full inventory across all kinds.
+   *
+   * Returns `{ items, kinds, failures }`. `kinds` lists only the kinds that
+   * were actually collected — callers must pass it to inventoryRepo.sync() so
+   * a kind that failed to collect is left untouched rather than reconciled
+   * against an empty list. A transient agent timeout previously came back as
+   * `[]` and deleted the entire package inventory, which then got reinserted
+   * on the following cycle.
+   */
   async function collectAll() {
-    const [pkgs, svcs, ctrs] = await Promise.all([packages(), services(), containers()]);
-    return [...pkgs, ...svcs, ...ctrs];
+    const sources = [
+      ['package', packages],
+      ['service', services],
+      ['container', containers],
+    ];
+    const results = await Promise.allSettled(sources.map(([, fn]) => fn({ strict: true })));
+    const items = []; const kinds = []; const failures = [];
+    results.forEach((r, i) => {
+      const kind = sources[i][0];
+      if (r.status === 'fulfilled') { kinds.push(kind); items.push(...r.value); }
+      else failures.push({ kind, error: r.reason?.message || String(r.reason) });
+    });
+    return { items, kinds, failures };
   }
 
   async function autoremovable() {

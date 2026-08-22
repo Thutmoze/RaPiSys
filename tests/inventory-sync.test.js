@@ -93,3 +93,27 @@ describe('inventory sync', () => {
     expect(repo.counts().userapp).toBe(1);
   });
 });
+
+describe('collectAll failure isolation', () => {
+  it('reports which kinds failed and never lists them as collected', async () => {
+    const { createInventoryCollector } = await import('../server/collectors/inventory.js');
+    const collector = createInventoryCollector();
+    // No agent socket and no docker socket in the test environment, so every
+    // source fails. The point is that failures are *reported* rather than
+    // silently flattened into an empty list.
+    const { items, kinds, failures } = await collector.collectAll();
+    expect(Array.isArray(items)).toBe(true);
+    expect(failures.length).toBeGreaterThan(0);
+    for (const f of failures) expect(kinds).not.toContain(f.kind);
+    for (const f of failures) expect(typeof f.error).toBe('string');
+  });
+
+  it('leaves a kind untouched when it is not in the sync list', () => {
+    const { repo } = tmpRepo();
+    repo.sync([pkg('nginx', '1.24'), pkg('curl', '8.5')], ['package']);
+    // Package collection failed this cycle, so only services are reconciled.
+    const w = repo.sync([{ kind: 'service', name: 'ssh', status: 'active' }], ['service']);
+    expect(w).toMatchObject({ inserted: 1, removed: 0 });
+    expect(repo.counts().package).toBe(2);   // survived the failed cycle
+  });
+});

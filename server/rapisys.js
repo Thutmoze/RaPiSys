@@ -338,11 +338,19 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }, { runNow: false });
   scheduler.register('inventory-sync', 30 * 60e3, async () => {
     try {
-      const items = await inventory.collectAll();
-      const w = inventoryRepoFacade.sync(items, ['package', 'service', 'container']);
-      // Quiet when nothing moved — a steady-state sync writes no rows at all.
-      if (w && (w.inserted || w.updated || w.removed)) {
-        console.log(`[inventory] sync wrote ${w.inserted} new, ${w.updated} changed, ${w.removed} removed (${w.unchanged} untouched)`);
+      const { items, kinds, failures } = await inventory.collectAll();
+      // Reconcile only what we actually managed to read. Syncing a kind whose
+      // collector failed would treat its empty list as "all uninstalled" and
+      // delete every row for it.
+      for (const f of failures) {
+        console.warn(`[inventory] ${f.kind} collection failed (${f.error}) — leaving existing ${f.kind} rows untouched`);
+      }
+      if (kinds.length) {
+        const w = inventoryRepoFacade.sync(items, kinds);
+        // Quiet when nothing moved — a steady-state sync writes no rows at all.
+        if (w && (w.inserted || w.updated || w.removed)) {
+          console.log(`[inventory] sync wrote ${w.inserted} new, ${w.updated} changed, ${w.removed} removed (${w.unchanged} untouched)`);
+        }
       }
       const recs = await inventory.recommendations();
       inventoryRepoFacade.saveRecommendations(recs);

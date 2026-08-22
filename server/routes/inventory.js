@@ -52,8 +52,8 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
     try {
       const out = await inventory.removePackage(String(name), String(confirm));
       events?.add('inventory.removed', 'warning', { name, removed: out.removed });
-      const items = await inventory.collectAll();
-      inventoryRepo.sync(items, ['package', 'service', 'container']);
+      const { items, kinds } = await inventory.collectAll();
+      if (kinds.length) inventoryRepo.sync(items, kinds);
       res.json(out);
     } catch (err) { res.status(502).json({ error: err.message }); }
   });
@@ -74,8 +74,8 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
       events?.add('inventory.removed', 'warning', { name, removed: out.removed });
       inventoryRepo.recordHistory({ kind: 'package', name, action: 'uninstall', result: out.ok === false ? 'failed' : 'ok',
         detail: (out.removed && out.removed.length > 1) ? `with ${out.removed.length - 1} dependent package(s)` : null });
-      const items = await inventory.collectAll();
-      inventoryRepo.sync(items, ['package', 'service', 'container']);
+      const { items, kinds } = await inventory.collectAll();
+      if (kinds.length) inventoryRepo.sync(items, kinds);
       send('done', out);
     } catch (err) { inventoryRepo.recordHistory({ kind: 'package', name, action: 'uninstall', result: 'failed', detail: err.message }); send('failed', { message: err.message }); }
     res.end();
@@ -94,8 +94,8 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
       const out = await inventory.installPackage(name, (line) => send('progress', { line }));
       events?.add('inventory.installed', 'info', { name });
       inventoryRepo.recordHistory({ kind: 'package', name, action: 'install', result: out.ok === false ? 'failed' : 'ok' });
-      const items = await inventory.collectAll();
-      inventoryRepo.sync(items, ['package', 'service', 'container']);
+      const { items, kinds } = await inventory.collectAll();
+      if (kinds.length) inventoryRepo.sync(items, kinds);
       send('done', out);
     } catch (err) { inventoryRepo.recordHistory({ kind: 'package', name, action: 'install', result: 'failed', detail: err.message }); send('failed', { message: err.message }); }
     res.end();
@@ -132,9 +132,13 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
   // Force a re-sync now.
   r.post('/sync', async (req, res) => {
     try {
-      const items = await inventory.collectAll();
-      inventoryRepo.sync(items, ['package', 'service', 'container']);
-      res.json({ ok: true, synced: items.length, counts: inventoryRepo.counts() });
+      const { items, kinds, failures } = await inventory.collectAll();
+      if (kinds.length) inventoryRepo.sync(items, kinds);
+      res.json({
+        ok: failures.length === 0, synced: items.length, counts: inventoryRepo.counts(),
+        // Kinds we couldn't read were left alone, not emptied — say so.
+        skipped: failures.map((f) => f.kind), failures,
+      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
