@@ -75,8 +75,24 @@ export function createMetricsRepo(db) {
     return out;
   }
 
+  /**
+   * Resolution tiers, coarsest last. Kept in sync with the retention service.
+   * `purgeOlderThan` walks these explicitly so every delete can use the
+   * (res, ts) index — a bare `WHERE ts < ?` has no res prefix and degrades to
+   * a full table scan.
+   */
+  const RES_TIERS = ['10s', '1m', '10m', '1h'];
+
+  const purgeStmt = db.prepare(`DELETE FROM metrics WHERE res = ? AND ts < ?`);
+
+  const purgeAllTiers = db.transaction((ts) => {
+    let changes = 0;
+    for (const res of RES_TIERS) changes += purgeStmt.run(res, ts).changes;
+    return changes;
+  });
+
   function purgeOlderThan(ts) {
-    return db.prepare(`DELETE FROM metrics WHERE ts < ?`).run(ts);
+    return { changes: purgeAllTiers(ts) };
   }
 
   return { writeBatch, query, listMetrics, downsample, purgeOlderThan, latestValues };
