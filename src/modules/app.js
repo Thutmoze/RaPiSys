@@ -9,7 +9,7 @@
  * Everything reuses the existing design tokens (.card, --accent-*, glass).
  */
 
-import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs } from './layout.js';
+import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs, OVERVIEW_WIDGETS } from './layout.js';
 import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
 
@@ -51,6 +51,7 @@ const TRASH_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" 
 const SAVE_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>';
 const INSTALL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>';
 const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const INSTALL_UP_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 9l5-5 5 5"/><path d="M12 4v12"/></svg>';
 const RESTART_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
 const CHECK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const WARN_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>';
@@ -1780,6 +1781,9 @@ pageRenderers.settings = (() => {
     // ---- display preferences ----
     renderPrefs(host);
 
+    // ---- dashboard tabs & widgets (export / import) ----
+    renderLayoutIO(host);
+
     // ---- account pane ----
     let me = null;
     try { me = await api('/auth/me'); } catch { /* */ }
@@ -2087,7 +2091,7 @@ pageRenderers.settings = (() => {
           <label>Bot token <input data-tg="token" type="password" placeholder="${tg.hasToken ? '•••••• (unchanged)' : '123456:ABC-DEF…'}" autocomplete="off"></label>
           <div class="al-form-row" style="grid-template-columns:1fr auto">
             <label>Chat ID <input data-tg="chatid" value="${esc(tg.chatId || '')}" placeholder="123456789"></label>
-            <label style="align-self:end"><button class="set-btn" data-tg="detect" style="margin-top:2px">Detect</button></label>
+            <label style="align-self:end"><button class="set-btn set-btn-detect" data-tg="detect" style="margin-top:2px">Detect</button></label>
           </div>
           <label class="wz-inline"><input type="checkbox" data-tg="enabled" ${tg.enabled ? 'checked' : ''}> Enable Telegram notifications</label>
           <div class="set-actions">
@@ -2177,7 +2181,7 @@ pageRenderers.settings = (() => {
               <img src="${r.qrDataUrl}" alt="2FA QR code" class="acc-qr">
               <p class="hw-hint">Scan with your authenticator app, or enter the secret manually: <code>${esc(r.secret)}</code></p>
               <label>Enter the 6-digit code to confirm <input data-acc="enrollcode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
-              <div class="set-actions"><button class="set-btn set-btn-primary" data-acc="mfaconfirm">${SAVE_ICON}<span>Confirm &amp; activate</span></button><button class="set-btn" data-acc="mfaabort">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="mfamsg"></span></div>
+              <div class="set-actions"><button class="set-btn set-btn-primary" data-acc="mfaconfirm">${SAVE_ICON}<span>Confirm &amp; activate</span></button><button class="set-btn set-btn-cancel" data-acc="mfaabort">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="mfamsg"></span></div>
             </div>`;
           const confirm = $('[data-acc=mfaconfirm]', host);
           confirm.onclick = async () => {
@@ -2200,7 +2204,7 @@ pageRenderers.settings = (() => {
             <h4 class="sess-h">Disable two-factor authentication</h4>
             <p class="hw-hint">Enter a current code from your authenticator app to confirm.</p>
             <label>Authenticator code <input data-acc="discode" inputmode="numeric" autocomplete="off" placeholder="123456" maxlength="6"></label>
-            <div class="set-actions"><button class="set-btn set-btn-danger" data-acc="mfadisable">${TRASH_ICON}<span>Disable 2FA</span></button><button class="set-btn" data-acc="mfaabort">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="mfamsg"></span></div>
+            <div class="set-actions"><button class="set-btn set-btn-danger" data-acc="mfadisable">${TRASH_ICON}<span>Disable 2FA</span></button><button class="set-btn set-btn-cancel" data-acc="mfaabort">${CANCEL_ICON}<span>Cancel</span></button><span data-acc="mfamsg"></span></div>
           </div>`;
         const disable = $('[data-acc=mfadisable]', host);
         disable.onclick = async () => {
@@ -3665,8 +3669,8 @@ pageRenderers.settings = (() => {
             <p class="up-sec-hint">Click <b>Install on Pi</b> to authorize this key for the SSH user automatically — or add it to <code>~/.ssh/authorized_keys</code> on the Pi by hand.</p>
             <pre class="rm-pubkey" data-rm="pubkey">${cfg.sshPublicKey ? esc(cfg.sshPublicKey) : '(generate a key to see it here)'}</pre>
             <div class="set-actions" style="border:0;padding-top:0">
-              <button class="set-btn" data-rm="genkey">${cfg.sshKeyConfigured ? 'Regenerate Key' : 'Generate Key'}</button>
-              ${cfg.sshPublicKey ? '<button class="set-btn" data-rm="copykey">Copy Public Key</button>' : ''}
+              <button class="set-btn set-btn-primary" data-rm="genkey">${cfg.sshKeyConfigured ? 'Regenerate Key' : 'Generate Key'}</button>
+              ${cfg.sshPublicKey ? '<button class="set-btn set-btn-edit" data-rm="copykey">Copy Public Key</button>' : ''}
               ${cfg.sshPublicKey ? `<button class="set-btn set-btn-primary" data-rm="installkey">${INSTALL_ICON}<span>Install on Pi</span></button>` : ''}
               <span class="rm-msg" data-rm="keymsg"></span>
             </div>
@@ -3748,7 +3752,7 @@ pageRenderers.settings = (() => {
       if (st && st.installed === false) {
         boxEl.innerHTML = `<div class="rm-key-head"><b>wayvnc is not installed</b></div>
           <p class="up-sec-hint">The one-click enable needs the <b>wayvnc</b> package. Install it on the Pi with <code>sudo apt install wayvnc</code>, then this box will offer to enable it.</p>
-          <div class="set-actions" style="border:0;padding-top:0"><button class="set-btn" disabled>${POWER_SVG}<span>Enable VNC</span></button></div>`;
+          <div class="set-actions" style="border:0;padding-top:0"><button class="set-btn set-btn-primary" disabled>${POWER_SVG}<span>Enable VNC</span></button></div>`;
         return;
       }
       const badge = (st && st.installed) ? ' <span class="inv-dim">wayvnc installed</span>' : '';
@@ -3842,6 +3846,203 @@ pageRenderers.settings = (() => {
   }
 
   // ---- Display preferences: date & time format (stored in localStorage) ----
+  // ---- Dashboard Tabs & Widgets: portable export / import (patch 0294) ------
+  // The arrangement lives in `dashboards` + `layouts` on the server; this card
+  // moves it between nodes as a plain JSON file. Widget availability is judged
+  // in the browser, because whether a widget exists depends on what this node
+  // actually renders (no Case widget without a Pironman controller, and so on).
+  let lxLastExport = null;
+
+  function lxAvailableWidgets() {
+    return OVERVIEW_WIDGETS.filter((w) => document.querySelector(w.sel)).map((w) => w.id);
+  }
+  function lxWidgetTitle(id) {
+    return OVERVIEW_WIDGETS.find((w) => w.id === id)?.title || id;
+  }
+
+  async function renderLayoutIO(host) {
+    const box = $('[data-set=layoutio]', host);
+    if (!box) return;
+    let reg;
+    try { reg = await api('/layouts/dashboards'); }
+    catch { box.innerHTML = '<p class="sess-empty">Sign in as the administrator to export or import dashboards.</p>'; return; }
+
+    // Widget counts come from each tab's stored layout; a tab with no saved
+    // layout is on the built-in arrangement and reports as such.
+    const tabs = [];
+    for (const d of reg.dashboards) {
+      const page = d.id === 'default' ? 'overview' : `overview:${d.id}`;
+      let layout = null;
+      try { layout = (await api(`/layouts/${page}`)).layout; } catch { /* default */ }
+      tabs.push({ ...d, layout });
+    }
+
+    box.innerHTML = `
+      <p class="up-sec-hint">Move your Overview tabs and their widget arrangement to another node, or keep a copy as a backup.</p>
+      <div class="set-kv"><span>Tabs on this node</span><b>${tabs.length} ${tabs.length === 1 ? 'tab' : 'tabs'}, ${tabs.reduce((n, t) => n + (t.layout?.filter((p) => p.visible !== false).length || 0), 0)} widget placements</b></div>
+      <div class="set-kv"><span>Last export</span><b data-lx="last">${lxLastExport ? esc(rapisysFmtTime(lxLastExport)) : 'Never'}</b></div>
+
+      <h4 class="sess-h">Export</h4>
+      <div class="lx-list">
+        ${tabs.map((t) => {
+          const vis = t.layout?.filter((p) => p.visible !== false).length || 0;
+          const hid = (t.layout?.length || 0) - vis;
+          return `<label class="lx-row">
+            <input type="checkbox" data-lx-tab="${esc(t.id)}" checked>
+            <span class="lx-name">${esc(t.name)}</span>
+            ${t.id === 'default' ? '<span class="lx-badge">Built in</span>' : ''}
+            <span class="lx-meta">${t.layout ? `${vis} widgets${hid ? `, ${hid} hidden` : ''}` : 'default arrangement'}</span>
+          </label>`;
+        }).join('')}
+      </div>
+      <p class="hw-hint">The file carries tab names, glyphs, order and widget positions only. No credentials, metrics or history travel with it.</p>
+      <div class="set-actions">
+        <button class="set-btn set-btn-primary" data-lx="export">${INSTALL_ICON}<span>Export Selected</span></button>
+        <button class="set-btn set-btn-detect" data-lx="peek">${DETECT_ICON}<span>Preview File</span></button>
+        <span data-lx="msg" style="font-size:12px;color:var(--text-muted)"></span>
+      </div>
+      <pre class="lx-json" data-lx="json" style="display:none"></pre>
+
+      <h4 class="sess-h">Import</h4>
+      <div class="lx-drop" data-lx="drop">
+        ${INSTALL_UP_ICON}
+        <b>Choose a file</b> or drop it here
+        <div class="lx-drop-sub">rapisys-dashboards-*.json exported from any RaPiSys node</div>
+      </div>
+      <input type="file" data-lx="file" accept="application/json,.json" hidden>
+      <p class="hw-hint">Nothing is written until you confirm the preview. Widgets this node does not have are listed and skipped rather than saved as dead entries.</p>`;
+
+    const selected = () => [...box.querySelectorAll('[data-lx-tab]')].filter((c) => c.checked).map((c) => c.dataset.lxTab);
+    const fetchBundle = async () => {
+      const ids = selected();
+      if (!ids.length) { toast('error', 'Export', 'Select at least one tab.'); return null; }
+      return api(`/layouts/export?ids=${encodeURIComponent(ids.join(','))}`);
+    };
+
+    $('[data-lx=export]', box).onclick = async () => {
+      try {
+        const bundle = await fetchBundle();
+        if (!bundle) return;
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+        const nodeName = (window.location.hostname || 'node').replace(/[^a-z0-9.-]/gi, '');
+        const name = `rapisys-dashboards-${nodeName}-${stamp}.json`;
+        const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = name; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        lxLastExport = Date.now();
+        const last = $('[data-lx=last]', box); if (last) last.textContent = rapisysFmtTime(lxLastExport);
+        const msg = $('[data-lx=msg]', box); if (msg) msg.textContent = name;
+        toast('success', 'Layout exported', `${bundle.dashboards.length} tab${bundle.dashboards.length > 1 ? 's' : ''} written to ${name}`);
+      } catch (err) { toast('error', 'Export failed', err.message); }
+    };
+
+    $('[data-lx=peek]', box).onclick = async () => {
+      const pre = $('[data-lx=json]', box);
+      if (pre.style.display === 'block') { pre.style.display = 'none'; return; }
+      try {
+        const bundle = await fetchBundle();
+        if (!bundle) return;
+        pre.textContent = JSON.stringify(bundle, null, 2);
+        pre.style.display = 'block';
+      } catch (err) { toast('error', 'Preview failed', err.message); }
+    };
+
+    const fileEl = $('[data-lx=file]', box);
+    const drop = $('[data-lx=drop]', box);
+    const readFile = (f) => {
+      const r = new FileReader();
+      r.onload = () => {
+        let bundle;
+        try { bundle = JSON.parse(r.result); }
+        catch { toast('error', 'Import failed', 'That file is not valid JSON.'); return; }
+        if (!bundle || bundle.kind !== 'rapisys.dashboards' || !Array.isArray(bundle.dashboards)) {
+          toast('error', 'Import failed', 'Not a RaPiSys dashboard export.'); return;
+        }
+        lxImportDialog(host, bundle, f.name);
+      };
+      r.readAsText(f);
+    };
+    drop.onclick = () => fileEl.click();
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = () => drop.classList.remove('over');
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); };
+    fileEl.onchange = () => { if (fileEl.files[0]) readFile(fileEl.files[0]); fileEl.value = ''; };
+  }
+
+  function lxImportDialog(host, bundle, filename) {
+    const available = new Set(lxAvailableWidgets());
+    const placements = bundle.dashboards.reduce((n, d) => n + (d.layout?.length || 0), 0);
+    const unknown = new Set();
+    bundle.dashboards.forEach((d) => (d.layout || []).forEach((p) => { if (!available.has(p.id)) unknown.add(p.id); }));
+
+    const ov = el('div', 'wizard-overlay');
+    ov.innerHTML = `
+      <div class="wizard card lx-dlg">
+        <h3 class="lx-dlg-h">Import dashboards</h3>
+        <p class="lx-dlg-sub">${esc(filename)} · exported ${bundle.exportedAt ? esc(rapisysFmtTime(bundle.exportedAt)) : 'at an unknown time'}</p>
+        <div class="lx-stats">
+          <div class="lx-stat"><span>Tabs</span><b>${bundle.dashboards.length}</b></div>
+          <div class="lx-stat"><span>Widgets</span><b>${placements}</b></div>
+          <div class="lx-stat"><span>Not on this node</span><b style="color:${unknown.size ? 'var(--accent-orange)' : 'var(--accent-green)'}">${unknown.size}</b></div>
+        </div>
+        <div class="lx-list">
+          ${bundle.dashboards.map((d) => `<div class="lx-row"><span class="lx-name">${esc(d.name)}</span>
+            <span class="lx-meta">${(d.layout || []).filter((p) => p.visible !== false).length} widgets</span></div>`).join('')}
+        </div>
+        ${unknown.size ? `<div class="lx-warn"><b>${unknown.size} widget${unknown.size > 1 ? 's are' : ' is'} not available here:</b>
+          ${[...unknown].map((id) => esc(lxWidgetTitle(id))).join(', ')}. ${unknown.size > 1 ? 'They' : 'It'} will be skipped.</div>` : ''}
+        <div class="lx-mode">
+          <label class="sel" data-mode="merge"><input type="radio" name="lxmode" value="merge" checked>
+            <span><b>Add as new tabs</b><i>Keeps every tab already on this node and appends the imported ones at the end.</i></span></label>
+          <label data-mode="replace"><input type="radio" name="lxmode" value="replace">
+            <span><b>Replace everything</b><i>Deletes all tabs on this node and their layouts, then restores exactly what is in the file.</i></span></label>
+        </div>
+        <div class="lx-confirm" data-lx="ct" style="display:none">
+          <p>This removes every dashboard on this node. Type <code>REPLACE</code> to confirm.</p>
+          <input type="text" data-lx="ctin" placeholder="REPLACE" autocomplete="off">
+        </div>
+        <div class="wz-row rconfirm-row lx-dlg-actions">
+          <button class="action-btn wz-primary" data-lx="ok">${CHECK_ICON}<span>Import</span></button>
+          <button class="action-btn set-btn-cancel" data-lx="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    const ok = $('[data-lx=ok]', ov);
+    const ctIn = $('[data-lx=ctin]', ov);
+    const sync = () => {
+      const mode = $('input[name=lxmode]:checked', ov).value;
+      ov.querySelectorAll('.lx-mode label').forEach((l) => {
+        l.classList.toggle('sel', l.dataset.mode === mode);
+        l.classList.toggle('danger', mode === 'replace' && l.dataset.mode === 'replace');
+      });
+      $('[data-lx=ct]', ov).style.display = mode === 'replace' ? 'block' : 'none';
+      ok.classList.toggle('wz-primary', mode !== 'replace');
+      ok.classList.toggle('rconfirm-danger', mode === 'replace');
+      ok.querySelector('span').textContent = mode === 'replace' ? 'Replace All' : 'Import';
+      ok.disabled = mode === 'replace' && ctIn.value.trim() !== 'REPLACE';
+    };
+    ov.querySelectorAll('input[name=lxmode]').forEach((r) => { r.onchange = sync; });
+    ctIn.oninput = sync;
+    sync();
+
+    const close = () => ov.remove();
+    $('[data-lx=cancel]', ov).onclick = close;
+    ov.onclick = (e) => { if (e.target === ov) close(); };
+    ok.onclick = async () => {
+      const mode = $('input[name=lxmode]:checked', ov).value;
+      ok.disabled = true;
+      try {
+        const out = await api('/layouts/import', { method: 'POST', body: { bundle, mode, available: [...available] } });
+        close();
+        toast('success', mode === 'replace' ? 'Dashboards replaced' : 'Dashboards imported',
+          `${out.tabs} tab${out.tabs > 1 ? 's' : ''}, ${out.widgets} widgets${out.skipped?.length ? `, ${out.skipped.length} skipped` : ''}. Reload the Overview to see them.`);
+        renderLayoutIO(host);
+      } catch (err) { ok.disabled = false; toast('error', 'Import failed', err.message); }
+    };
+  }
+
   function renderPrefs(host) {
     const el2 = $('[data-set=prefs]', host);
     if (!el2) return;
@@ -3960,6 +4161,7 @@ pageRenderers.settings = (() => {
             <div class="set-grid">
               <div class="set-card"><h4 class="sess-h">Display Preferences</h4><div data-set="prefs"></div></div>
               <div class="set-card"><h4 class="sess-h">Administrator Account</h4><div data-set="account"></div></div>
+              <div class="set-card set-card-wide"><h4 class="sess-h">Dashboard Tabs &amp; Widgets</h4><div data-set="layoutio"></div></div>
             </div>
           </div>
           <div class="card-body" data-pane="pironman" style="display:none">

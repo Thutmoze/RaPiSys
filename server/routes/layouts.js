@@ -84,6 +84,56 @@ export function layoutsRouter({ layoutsRepo, requireControl, events }) {
     res.json({ ok: true });
   });
 
+  // ---- Portable export / import (patch 0294) -------------------------------
+  // Registered before /:page so 'export' and 'import' are not captured as pages.
+
+  // Download the whole Tabs & Widgets arrangement, or a subset via ?ids=a,b.
+  r.get('/export', requireControl, (req, res) => {
+    const raw = String(req.query.ids || '').trim();
+    const ids = raw ? raw.split(',').map((s) => s.trim()).filter(Boolean) : null;
+    if (ids && (ids.length > 50 || ids.some((x) => !ID_RE.test(x)))) {
+      return res.status(400).json({ error: 'invalid ids' });
+    }
+    res.json(layoutsRepo.exportBundle(ids));
+  });
+
+  // Apply a bundle. `available` is the widget-id list the browser reports for
+  // this node; placements outside it are skipped rather than stored dead. It is
+  // an optional hint, so an absent or malformed list simply means "keep all".
+  r.post('/import', requireControl, (req, res) => {
+    const mode = req.body?.mode === 'replace' ? 'replace' : 'merge';
+    const bundle = req.body?.bundle;
+    if (!bundle || typeof bundle !== 'object') return res.status(400).json({ error: 'bundle required' });
+    if (!Array.isArray(bundle.dashboards)) return res.status(400).json({ error: 'bundle contains no dashboards' });
+
+    // Names and glyphs go through the same gates as the interactive endpoints,
+    // because a bundle is untrusted input: it arrives as a file from anywhere.
+    const clean = [];
+    for (const d of bundle.dashboards) {
+      const name = String(d?.name || '').slice(0, 40);
+      if (!NAME_RE.test(name)) return res.status(400).json({ error: `invalid dashboard name: ${name}` });
+      const glyph = d?.glyph;
+      if (glyph != null && glyph !== '' && !GLYPH_RE.test(String(glyph))) return res.status(400).json({ error: 'invalid glyph' });
+      if (d?.id != null && !ID_RE.test(String(d.id))) return res.status(400).json({ error: 'invalid dashboard id' });
+      let layout;
+      try { layout = sanitizeLayout(d?.layout || []); }
+      catch (e) { return res.status(400).json({ error: `${name}: ${e.message}` }); }
+      clean.push({ id: d?.id, name, glyph: glyph || null, layout });
+    }
+
+    const av = Array.isArray(req.body?.available)
+      ? req.body.available.filter((x) => ID_RE.test(String(x))).map(String)
+      : null;
+
+    try {
+      const out = layoutsRepo.importBundle({ ...bundle, dashboards: clean }, { mode, available: av });
+      events?.add('layout.imported', 'info', { mode, tabs: out.tabs, widgets: out.widgets, skipped: out.skipped.length });
+      res.json({ ok: true, ...out });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   // Active layout for a page (null → upstream default positions).
   r.get('/:page', (req, res) => {
     if (!PAGE_RE.test(req.params.page)) return res.status(400).json({ error: 'bad page' });
