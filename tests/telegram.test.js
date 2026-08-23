@@ -3,13 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { createTelegram } = await import('../server/services/telegram.js');
 
-function fixture({ token = 'TESTTOKEN', chatId = '999', enabled = true } = {}) {
+function fixture({ token = 'TESTTOKEN', chatId = '999', enabled = true, node = 'XRPi' } = {}) {
   const events = { add: vi.fn() };
   const secretsStore = { 'telegram.token': token };
   const secrets = { get: (k) => secretsStore[k], has: (k) => !!secretsStore[k] };
   const tg = createTelegram({
     getTelegramSettings: async () => ({ enabled, chatId }),
-    secrets, events,
+    secrets, events, getNodeName: async () => node,
   });
   return { tg, events };
 }
@@ -34,8 +34,21 @@ describe('telegram service', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/botTESTTOKEN/sendMessage');
     expect(calls[0].body.chat_id).toBe('12345');
-    expect(calls[0].body.text).toBe('hello');
+    // Every message opens with the sending node, so two Pis running the same
+    // alert rules produce distinguishable notifications.
+    expect(calls[0].body.text).toBe('<b>XRPi</b>\nhello');
     expect(calls[0].body.parse_mode).toBe('HTML');
+  });
+
+  it('labels the message with this node, so a second node is distinguishable', async () => {
+    const calls = [];
+    stubFetch(async (url, opts) => {
+      calls.push(JSON.parse(opts.body));
+      return { ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) };
+    });
+    const { tg } = fixture({ node: 'YRPi' });
+    await tg.send({ text: '🔴 <b>[CRITICAL] High CPU temperature</b>' });
+    expect(calls[0].text.split('\n')[0]).toBe('<b>YRPi</b>');
   });
 
   it('throws and records an event when the API returns an error', async () => {

@@ -578,9 +578,20 @@ CREATE TABLE peer_health (
 
 - **Header node switcher** — a pill listing all nodes with status dots, hidden entirely until a peer is configured so single-node installs are visually unchanged. Selecting a peer opens that node's own dashboard in a new tab (`noopener`). Deliberately not a proxied context swap: the one-click open *is* the failover story, and proxying would make the view depend on the node most likely to be dead when it is needed.
 - **Nodes summary widget** (`sum-nodes`) — a new entry in `src/modules/summary-widgets.js`, same shape as the existing five, showing per-node cpu/temp/mem/health with unreachable nodes greyed and timestamped.
-- **Settings → Nodes tab** — peer list with per-peer Test/Remove, the smart address field, and the network scan, following the established collapse-when-configured convention.
+- **Settings → Nodes tab** — a **This node** section (hostname + optional label, collapse-when-configured) above the peer list with per-peer Test/Remove, the smart address field, and the network scan.
 
-### 14.7 Implementation plan
+### 14.7 Node identity in notifications
+
+Both nodes run the same stack with the same alert rules, so an unlabelled notification is ambiguous: two identical emails arrive and neither says which Pi is hot. `core/node-identity.js` resolves one display name — `settings.rapisys.nodeLabel` if the operator set one, otherwise `os.hostname()` (the container runs `network_mode: host`, so that is the Pi's real name), never an empty string.
+
+The label is applied **inside `mailer.send()` and `telegram.send()`**, not at the call sites. Five senders exist today (alert fired/resolved, the update digest, the Pi-hole update notice, and the two Settings test buttons) and each was pasting its own `RaPiSys` prefix — labelling them individually would have drifted apart the moment a sixth was added. Centralizing it also means the brand prefix has one owner, so call sites now pass only the part that varies.
+
+- Email subject: `RaPiSys · <node> — <subject>`, plus a `Node: <name>` line in the text body and a footer in the HTML body (a forwarded or threaded mail can lose the subject).
+- Telegram: the node on its own bold **first** line, ahead of the icon and title, because the lock-screen preview truncates and the node is what decides whether to unlock the phone.
+
+The same resolver backs `GET /api/nodes` (`self`), the header switcher, and `GET /api/v1/node-summary`, so a peer adding this node suggests the label rather than the raw hostname. `PUT /api/nodes/self` (under `requireControl`) sets or clears it; labels are stripped of control characters, since a newline would split the Telegram prefix and mangle the subject header.
+
+### 14.8 Implementation plan
 
 | Patch | Scope | Rebuild | Status |
 |---|---|---|---|
@@ -590,6 +601,7 @@ CREATE TABLE peer_health (
 | 0287 | `services/peer-poller.js`, TOFU pinning on poll, `peer_health` writes, `peer.<name>.up` metric + transition events | container | shipped |
 | 0288 | `sum-nodes` summary widget + header node switcher | frontend | shipped |
 | 0289 | Settings → Nodes tab | frontend | shipped |
+| 0301 | `core/node-identity.js`; node name in every email/Telegram notification; Settings → Nodes **This node** label | container + frontend | shipped |
 
 **Alerting needs no new condition type.** The poller emits `peer.<name>.up` (1/0) as an ordinary metric, so it sits alongside `service.<name>.up` and `docker.<name>.up` and the existing rule engine supplies the sustain window ("unreachable for 5 minutes"), cooldown, severity and channels unchanged. The metric catalog gains a `Nodes` group and treats the key as a status metric so notifications read as a node name rather than a raw metric key.
 

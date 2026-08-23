@@ -9,7 +9,7 @@
  * there is no CORS surface and no cross-node session to reason about.
  */
 import express from 'express';
-import os from 'os';
+import { hostName, normalizeNodeLabel, resolveNodeName } from '../core/node-identity.js';
 import { probePeer } from '../services/peer-client.js';
 import { resolveAddress, scanLan } from '../services/peer-scan.js';
 
@@ -34,7 +34,7 @@ function toPublic(peer, health, hasKey) {
   };
 }
 
-export function nodesRouter({ peersRepo, requireControl, events }) {
+export function nodesRouter({ peersRepo, requireControl, events, loadSettings, saveSettings, withFileLock }) {
   const r = express.Router();
 
   // Peer list with each one's most recent poll result, plus this node's own
@@ -42,13 +42,44 @@ export function nodesRouter({ peersRepo, requireControl, events }) {
   // whatever the operator typed in the address bar, so a dashboard opened by
   // IP would label itself with the IP. The container runs network_mode: host,
   // so os.hostname() here is the Pi's real hostname.
-  r.get('/', (req, res) => {
+  //
+  // `label` is the operator's optional override and `hostname` the machine's
+  // own name; `name` is the resolved one actually used in notifications, so the
+  // Settings card can show both without repeating the resolution rule.
+  r.get('/', async (req, res) => {
     try {
       const health = peersRepo.latestHealthAll();
+      let settings = null;
+      try { settings = loadSettings ? await loadSettings() : null; } catch { /* fall back to hostname */ }
       res.json({
-        self: { name: os.hostname() },
+        self: {
+          name: resolveNodeName(settings),
+          hostname: hostName(),
+          label: normalizeNodeLabel(settings?.rapisys?.nodeLabel),
+        },
         nodes: peersRepo.list().map((p) => toPublic(p, health[p.id], peersRepo.hasApiKey(p.id))),
       });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Set (or clear) this node's label. An empty value falls back to the
+  // hostname rather than storing a blank name, so notifications always carry
+  // something identifiable.
+  r.put('/self', requireControl, async (req, res) => {
+    if (!loadSettings || !saveSettings || !withFileLock) {
+      return res.status(500).json({ error: 'settings storage is unavailable' });
+    }
+    const label = normalizeNodeLabel(req.body?.label);
+    try {
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        if (label) s.rapisys.nodeLabel = label; else delete s.rapisys.nodeLabel;
+        await saveSettings(s);
+      });
+      const settings = await loadSettings();
+      events?.add?.('node.label.changed', 'info', { label: label || null, name: resolveNodeName(settings) });
+      res.json({ ok: true, self: { name: resolveNodeName(settings), hostname: hostName(), label } });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

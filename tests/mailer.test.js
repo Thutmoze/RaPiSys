@@ -28,6 +28,30 @@ describe('mailer', () => {
       .rejects.toThrow(/SMTP password is not set.*Settings.*Email/);
   });
 
+  it('prefixes the subject with the brand and this node, and names the node in the body', async () => {
+    const f = fixture();
+    const sent = [];
+    const mailer = createMailer({
+      getSmtpSettings: async () => ({ host: 'localhost', port: 1, from: 'x@y.com', to: 'z@y.com' }),
+      secrets: f.secrets,
+      getNodeName: async () => 'XRPi',
+    });
+    // No SMTP server here, so the send fails — but lastDelivery records the
+    // composed subject either way, which is what we're asserting.
+    await mailer.send({ subject: '[CRITICAL] High CPU temperature', text: 'body' }).catch((e) => sent.push(e));
+    expect(mailer.getLastDelivery().subject).toBe('RaPiSys · XRPi — [CRITICAL] High CPU temperature');
+  });
+
+  it('falls back to the hostname when no label resolver is wired in', async () => {
+    const f = fixture();
+    const mailer = createMailer({
+      getSmtpSettings: async () => ({ host: 'localhost', port: 1 }),
+      secrets: f.secrets,
+    });
+    await mailer.send({ subject: 'hi', text: 't' }).catch(() => {});
+    expect(mailer.getLastDelivery().subject).toBe(`RaPiSys · ${os.hostname()} — hi`);
+  });
+
   it('does not throw the password check when no user/auth is configured at all', async () => {
     const f = fixture();
     // An unauthenticated relay (no user) should reach nodemailer, not the

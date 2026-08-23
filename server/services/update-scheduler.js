@@ -66,9 +66,10 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
   function buildTelegram(list) {
     const security = list.filter((u) => u.security);
     const shown = (security.length ? security : list).slice(0, 20);
+    // telegram.send() prepends the node name on its own line.
     const header = security.length
-      ? `🔒 <b>RaPiSys: ${security.length} security update${security.length === 1 ? '' : 's'}</b>`
-      : `📦 <b>RaPiSys: ${list.length} update${list.length === 1 ? '' : 's'} available</b>`;
+      ? `🔒 <b>${security.length} security update${security.length === 1 ? '' : 's'}</b>`
+      : `📦 <b>${list.length} update${list.length === 1 ? '' : 's'} available</b>`;
     const lines = shown.map((u) =>
       `• <b>${tgEsc(u.package)}</b> <code>${tgEsc(u.installed || '?')} → ${tgEsc(u.candidate)}</code>`
       + (u.cves ? ` (${u.cves} CVE${u.cves > 1 ? 's' : ''})` : ''));
@@ -81,9 +82,11 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
   // Build the email body listing security (and optionally all) updates.
   function buildEmail(list) {
     const security = list.filter((u) => u.security);
+    // mailer.send() prefixes "RaPiSys · <node> — ", so the subject here is
+    // only the part that varies.
     const subject = security.length
-      ? `RaPiSys: ${security.length} security update${security.length === 1 ? '' : 's'} available`
-      : `RaPiSys: ${list.length} update${list.length === 1 ? '' : 's'} available`;
+      ? `${security.length} security update${security.length === 1 ? '' : 's'} available`
+      : `${list.length} update${list.length === 1 ? '' : 's'} available`;
     const line = (u) => `  • ${u.package}  ${u.installed || '?'} → ${u.candidate}` +
       (u.cves ? `  [${u.cves} CVE${u.cves > 1 ? 's' : ''}]` : '') +
       (u.urgency ? `  urgency=${u.urgency}` : '');

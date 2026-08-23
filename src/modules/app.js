@@ -2232,6 +2232,7 @@ pageRenderers.settings = (() => {
   let nodesAddOpen = false;
   let nodesScan = null;
   let nodesRenaming = null;   // peer id currently being renamed, or null
+  let nodesSelfEditing = false;   // editing this node's own label
 
   async function loadNodes(host) {
     const el = $('[data-set=nodes]', host);
@@ -2239,7 +2240,8 @@ pageRenderers.settings = (() => {
     el.innerHTML = '<p class="net-dns-note">Loading…</p>';
 
     let nodes = [];
-    try { nodes = (await api('/nodes')).nodes || []; }
+    let self = {};
+    try { const body = await api('/nodes'); nodes = body.nodes || []; self = body.self || {}; }
     catch (err) { el.innerHTML = `<p class="set-err">Could not load nodes: ${esc(err.message)}</p>`; return; }
 
     const showForm = nodesAddOpen || !nodes.length;
@@ -2297,8 +2299,40 @@ pageRenderers.settings = (() => {
           </div>`;
         }).join('')}</div>`));
 
+    // This node's own name. It is what every notification this node sends is
+    // labelled with, so it belongs next to the peer list rather than buried in
+    // a general settings pane.
+    const selfMarkup = nodesSelfEditing ? `
+        <div class="set-summary">
+          <div class="set-kv"><span>Hostname</span><b>${esc(self.hostname || '')}</b></div>
+        </div>
+        <div class="wz-form">
+          <label>Label <span class="net-dns-note" style="display:inline">(optional)</span>
+            <input data-nd="self-label" maxlength="40" value="${esc(self.label || '')}"
+              placeholder="leave blank to use the hostname (${esc(self.hostname || '')})"></label>
+          <div class="set-actions">
+            <button class="set-btn set-btn-primary" data-nd="self-save">${SAVE_ICON}<span>Save label</span></button>
+            <button class="set-btn set-btn-cancel" data-nd="self-cancel">${CANCEL_ICON}<span>Cancel</span></button>
+            <span data-nd="self-msg"></span>
+          </div>
+        </div>
+        <p class="net-dns-note">Used wherever this node names itself: alert emails and Telegram messages, the header node switcher, and the name a peer suggests when it adds this node.</p>`
+      : `
+        <div class="set-summary">
+          <div class="set-kv"><span>Hostname</span><b>${esc(self.hostname || '')}</b></div>
+          <div class="set-kv"><span>Label</span><b>${self.label
+            ? esc(self.label)
+            : `<span style="color:var(--text-muted)">not set — using ${esc(self.hostname || 'the hostname')}</span>`}</b></div>
+          <div class="set-actions">
+            <button class="set-btn set-btn-edit" data-nd="self-edit">${EDIT_ICON}<span>Edit</span></button>
+          </div>
+        </div>
+        <p class="net-dns-note">This name identifies the node in every notification it sends, so an alert from one Pi can't be mistaken for one from another.</p>`;
+
     el.innerHTML = `
       <div class="set-card set-card-wide">
+        <h4 class="sess-h">This node</h4>
+        ${selfMarkup}
         <h4 class="sess-h">Nodes</h4>
         <p class="net-dns-note">Each node runs its own RaPiSys and keeps its own history. Peers are polled read-only over HTTPS every 60 seconds; if this node goes down, open a peer's dashboard directly. Add a <b>peer unreachable</b> alert rule to be told when one disappears.</p>
         ${nodes.length ? rows : '<p class="sess-empty">No peers configured. This is a single-node install.</p>'}
@@ -2327,6 +2361,22 @@ pageRenderers.settings = (() => {
 
     // ---- handlers ----
     const q = (sel) => $(sel, host);
+
+    const selfEdit = q('[data-nd=self-edit]');
+    if (selfEdit) selfEdit.onclick = () => { nodesSelfEditing = true; loadNodes(host); };
+    const selfCancel = q('[data-nd=self-cancel]');
+    if (selfCancel) selfCancel.onclick = () => { nodesSelfEditing = false; loadNodes(host); };
+    const selfSave = q('[data-nd=self-save]');
+    if (selfSave) selfSave.onclick = async () => {
+      const val = (q('[data-nd=self-label]')?.value || '').trim();
+      selfSave.disabled = true;
+      try {
+        const r = await api('/nodes/self', { method: 'PUT', body: { label: val } });
+        nodesSelfEditing = false;
+        toast('success', 'Nodes', `This node is now called ${r?.self?.name || val}`);
+        loadNodes(host);
+      } catch (err) { toast('error', 'Nodes', err.message); selfSave.disabled = false; }
+    };
 
     const addOpen = q('[data-nd=addopen]');
     if (addOpen) addOpen.onclick = () => { nodesAddOpen = true; loadNodes(host); };

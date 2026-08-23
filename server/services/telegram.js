@@ -11,13 +11,20 @@
  *   2. Send any message to the new bot, then use getChatId() (or @userinfobot)
  *      to obtain the numeric chat id.
  *
+ * Every message opens with this node's name on its own bold line (composed in
+ * core/node-identity.js). Telegram truncates the lock-screen preview, so the
+ * node goes first: with two Pis running identical alert rules, the notification
+ * shade would otherwise show two indistinguishable messages.
+ *
  * No SMTP, no domain, no verification — a single HTTPS POST to api.telegram.org.
  * Node 22 provides global fetch, so there is no extra dependency.
  */
 
 const API_BASE = 'https://api.telegram.org';
 
-export function createTelegram({ getTelegramSettings, secrets, events }) {
+import { resolveNodeName, telegramPrefix } from '../core/node-identity.js';
+
+export function createTelegram({ getTelegramSettings, secrets, events, getNodeName }) {
   let lastDelivery = null; // { ts, ok, error, chatId }
 
   function token() {
@@ -56,10 +63,13 @@ export function createTelegram({ getTelegramSettings, secrets, events }) {
     const cfg = await getTelegramSettings();
     const target = chatId || cfg?.chatId;
     if (!target) throw new Error('No Telegram chat id configured');
+    let node;
+    try { node = getNodeName ? await getNodeName() : resolveNodeName(null); }
+    catch { node = resolveNodeName(null); }
     try {
       const result = await call('sendMessage', {
         chat_id: target,
-        text,
+        text: telegramPrefix(node, text),
         parse_mode: parseMode,
         disable_web_page_preview: true,
       });
@@ -75,7 +85,7 @@ export function createTelegram({ getTelegramSettings, secrets, events }) {
   async function sendTest(chatId) {
     return send({
       chatId,
-      text: '<b>RaPiSys</b> ✅\nThis is a test message from your RaPiSys dashboard. '
+      text: '✅ <b>Test notification</b>\nThis is a test message from your RaPiSys dashboard. '
         + 'Telegram notifications are configured correctly. 🎉',
     });
   }

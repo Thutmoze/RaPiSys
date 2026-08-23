@@ -57,7 +57,9 @@ export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer,
         const smtp = await getSettings().then((s) => s.rapisys?.smtp);
         if (smtp?.host) {
           await mailer.send({
-            subject: `RaPiSys ${title}`,
+            // No brand prefix here: mailer.send() composes
+            // "RaPiSys · <node> — <subject>" for every sender.
+            subject: title,
             text: body,
             html: `<div style="font-family:Inter,sans-serif;background:#0a0a0a;color:#fff;padding:24px;border-radius:16px">
               <h2 style="margin:0 0 8px"><span style="color:#00d4ff">Ra</span><span style="color:#a855f7">Pi</span>Sys</h2>

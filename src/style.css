@@ -4599,9 +4599,10 @@ body.wizard-open .container, body.wizard-open .nav-rail { display: none; }
 /* Login field titles: white + bold (input value stays normal weight). */
 .login-card .wz-form label { color: var(--text-primary); font-weight: 700; }
 .login-card .wz-form .lg-ifield input { font-weight: 400; }
-/* Cancel in the login modal follows the site-wide cancel style (amber), not
-   the cyan primary that .wz-form .action-btn would otherwise apply. Scoped to
-   .login-card so it outranks .wz-form .action-btn regardless of source order. */
+/* Cancel in the login modal follows the site-wide cancel style (neutral white
+   outline, see .set-btn-cancel below), not the cyan primary that
+   .wz-form .action-btn would otherwise apply. Scoped to .login-card so it
+   outranks .wz-form .action-btn regardless of source order. */
 .login-card .wz-form .set-btn-cancel { color: #fff; border-color: rgba(255,255,255,0.32); background: rgba(255,255,255,0.06); }
 .login-card .wz-form .set-btn-cancel:hover { color: #fff; border-color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.13); box-shadow: none; }
 .wz-inline { flex-direction: row !important; align-items: center; gap: 8px !important; }
@@ -6362,7 +6363,9 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .sched-subnotif { padding-left: 4px; margin-top: 2px; }
 .sched-subnotif[hidden] { display: none; }
 
-/* Site-wide: shared Cancel button styling (red/danger), independent of context */
+/* Site-wide: shared Cancel button styling — neutral white outline, independent
+   of context. Deliberately NOT red or amber: cancelling is a way out, not a
+   destructive act. Red belongs to .set-btn-danger (Remove/Uninstall). */
 .set-btn-cancel, button.set-btn-cancel {
   color: #fff; border-color: rgba(255,255,255,0.32); background: rgba(255,255,255,0.06);
 }

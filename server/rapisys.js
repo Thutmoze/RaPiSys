@@ -29,6 +29,7 @@ import { createUpdatesRepo } from './repositories/updates.js';
 import { createPeersRepo } from './repositories/peers.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
+import { resolveNodeName } from './core/node-identity.js';
 import { createMailer } from './services/mailer.js';
 import { createTelegram } from './services/telegram.js';
 import { createUpdateScheduler } from './services/update-scheduler.js';
@@ -174,15 +175,22 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     eventsRepo: eventsFacade,
     getRetentionDays: async () => (await loadSettings()).rapisys?.retention?.days || 90,
   });
+  // One resolver for this node's display name, shared by both notification
+  // channels and /api/nodes so they can never disagree (§14.6).
+  const getNodeName = async () => {
+    try { return resolveNodeName(await loadSettings()); } catch { return resolveNodeName(null); }
+  };
   const mailer = createMailer({
     getSmtpSettings: async () => (await loadSettings()).rapisys?.smtp || null,
     secrets: secretsFacade,
     events: eventsFacade,
+    getNodeName,
   });
   const telegram = createTelegram({
     getTelegramSettings: async () => (await loadSettings()).rapisys?.telegram || null,
     secrets: secretsFacade,
     events: eventsFacade,
+    getNodeName,
   });
 
   let remoteAccessRef = null;   // set once remote-access is constructed (below)
@@ -303,7 +311,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     if (next.updateAvailable && !prev.updateAvailable) {
       eventsFacade.add('pihole.update.available', 'info', { method: next.method, current: next.currentVersion, latest: next.latestVersion });
       const verLine = next.latestVersion ? `${next.currentVersion || '?'} → ${next.latestVersion}` : 'a newer version';
-      const subject = 'RaPiSys: Pi-hole update available';
+      const subject = 'Pi-hole update available';   // mailer adds "RaPiSys · <node> — "
       const text = `A Pi-hole update is available (${next.method} install): ${verLine}. Update it from RaPiSys → Settings → DNS, or the Update Center.`;
       try { const cfg = await loadSettings(); if (cfg.rapisys?.updates?.emailEnabled !== false) await mailer.send({ subject, text, html: `<p>${text}</p>` }); } catch { /* mailer not configured */ }
       try { await telegram.send({ text }); } catch { /* telegram not configured */ }
@@ -531,6 +539,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app, loadSettings }));
   app.use('/api/nodes', rc, nodesRouter({
     peersRepo: peersFacade, requireControl: auth.requireControl, events: eventsFacade,
+    loadSettings, saveSettings, withFileLock,
   }));
 
   // Peer-facing read-only snapshot (§14.3). This is the ONLY endpoint another
@@ -552,7 +561,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
         res.json({
           ts: Date.now(),
           node: {
-            name: stats.os?.hostname || 'rapisys',
+            // The operator-chosen label when set, so a peer adding this node
+            // suggests the same name the notifications use.
+            name: await getNodeName(),
             hostname: stats.os?.hostname || null,
             distro: stats.os?.distro || null,
             arch: stats.os?.arch || null,
