@@ -77,7 +77,7 @@ function vercmp(x, y, defaultEpoch = 0) {
 // This is the correct, uniform rule: a CVE/security marker only matters if it
 // belongs to a version you don't yet have. Entries at or below the installed
 // version describe fixes you already received (or never needed).
-function newerThanInstalledWindow(text, installedVersion, candidateVersion) {
+export function newerThanInstalledWindow(text, installedVersion, candidateVersion) {
   const body = String(text || '');
   if (!installedVersion) return body;            // unknown — fall back to full
   // Default epoch for epoch-less changelog headers: take it from whichever of

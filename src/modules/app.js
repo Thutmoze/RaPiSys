@@ -6339,16 +6339,37 @@ pageRenderers.updates = (() => {
       const stubNote = isStub
         ? `<p class="up-cl-stubnote">This package ships only a minimal changelog — its build doesn't include detailed release notes${/docker/i.test(pkg) ? ` (Docker's packages are built without hand-written Debian changelogs)` : ''}. ${upstreamReleaseLink(pkg)}</p>`
         : '';
-      // newest = first section; expand it by default on first render
-      if (activeIdx === null && sections.length) { activeIdx = 0; expanded.add(0); }
+      // Which entries actually post-date what's installed. `+bN` binNMUs are
+      // binary-only rebuilds: Debian's buildds produce them with no source
+      // change, so they get no source-changelog entry. dirmngr going from
+      // 2.4.7-21+deb13u1+b3 to +b4 is one — its newest changelog entry is
+      // 2.4.7-21+deb13u1, which is ALREADY INSTALLED. Styling section 0 as
+      // "the candidate's entry" on index alone therefore presented installed
+      // notes (CVEs, urgency=high) as if they were the incoming change, and
+      // contradicted the security tags, which correctly found nothing new.
+      const isNewer = (s) => !!installed && cVercmp(s.version, installed, de) > 0;
+      const newestIdx = sections.findIndex(isNewer);   // -1 when nothing is new
+      const noNewEntries = sections.length > 0 && newestIdx === -1;
+      // With no installed version to compare against we can't tell, so fall
+      // back to the old behaviour and treat the first entry as the newest.
+      const highlightIdx = installed ? newestIdx : (sections.length ? 0 : -1);
+      const rebuildNote = noNewEntries
+        ? `<p class="up-cl-stubnote">No source changes: <b>${esc(data.candidateVersion || 'the new version')}</b> is a binary rebuild of the installed version. Every entry below is already installed.</p>`
+        : '';
+      // expand the newest genuinely-new entry by default (or the first entry
+      // when nothing is new, so the modal never opens blank)
+      if (activeIdx === null && sections.length) {
+        const start = highlightIdx >= 0 ? highlightIdx : 0;
+        activeIdx = start; expanded.add(start);
+      }
       const nav = sections.map((s, i) => {
-        const isNewest = i === 0;          // only the candidate's own entry is cyan
+        const isNewest = i === highlightIdx;   // only a genuinely-new entry is cyan
         const isActive = i === activeIdx;
         return `<button class="up-cl-navitem ${isNewest ? 'up-cl-nav-new' : ''} ${isActive ? 'up-cl-nav-active' : ''}" data-nav="${i}">${esc(s.version)}${isNewest ? ' <span class="up-cl-newdot">●</span>' : ''}</button>`;
       }).join('');
       const bodyHtml = sections.map((s, i) => {
-        const isNew = installed && cVercmp(s.version, installed, de) > 0;
-        const isNewest = i === 0;          // the candidate's own entry
+        const isNew = isNewer(s);
+        const isNewest = i === highlightIdx;
         const open = expanded.has(i);
         const headerLine = s.lines[0] || s.version;
         const restLines = s.lines.slice(1).join('\n');
@@ -6362,7 +6383,7 @@ pageRenderers.updates = (() => {
       }).join('');
       return `<div class="up-cl-layout">
           <div class="up-cl-nav">${nav || '<span class="up-cl-empty">No versions</span>'}</div>
-          <div class="up-cl-content" data-cl="content">${bodyHtml}${stubNote}</div>
+          <div class="up-cl-content" data-cl="content">${rebuildNote}${bodyHtml}${stubNote}</div>
         </div>`;
     };
     const instTitle = installed ? ` <span class="up-cl-inst">(installed: ${esc(installed)})</span>` : '';
