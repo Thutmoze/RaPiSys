@@ -5443,6 +5443,9 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-tag-kern { color: #a855f7; border: 1px solid rgba(168,85,247,0.4); }
 .up-tag-fw { color: var(--accent-cyan); border: 1px solid rgba(0,212,255,0.4); background: rgba(0,212,255,0.08); }
 .up-tag-rpi { color: #10b981; border: 1px solid rgba(16,185,129,0.4); background: rgba(16,185,129,0.08); }
+/* Deliberately the quietest tag on the row: a rebuild is informational, not a
+   reason to act, so it must not compete with security/kernel/firmware. */
+.up-tag-rebuild { color: var(--text-muted); border: 1px solid var(--border-color); background: rgba(255,255,255,0.03); cursor: help; }
 .up-link { background: none; border: none; color: var(--accent-cyan); cursor: pointer; font-size: 12px; font-family: inherit; padding: 0; }
 .up-link:hover { text-decoration: underline; }
 .up-progress { margin: 14px 0; padding: 14px; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); }

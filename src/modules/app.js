@@ -6120,7 +6120,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
             <td class="inv-dim">${u.releaseDate ? rapisysFmtDate(u.releaseDate) : '—'}</td>
             <td class="inv-dim">${u.installedAt ? rapisysFmtDate(u.installedAt) : '—'}</td>
-            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}${u.rpi ? '<span class="up-tag up-tag-rpi">raspberry pi</span>' : ''}</div></td>
+            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}${u.rpi ? '<span class="up-tag up-tag-rpi">raspberry pi</span>' : ''}${u.rebuild ? '<span class="up-tag up-tag-rebuild" title="Binary-only rebuild: same source, recompiled against updated libraries. Worth installing, but nothing changes functionally.">rebuild</span>' : ''}</div></td>
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
           </tr>`).join('')}</tbody>
@@ -6753,6 +6753,12 @@ pageRenderers.updates = (() => {
           if (isKernel) tags.push('<span class="up-tag up-tag-kern">Kernel</span>');
           if (isFirmware) tags.push('<span class="up-tag up-tag-fw">Firmware</span>');
           if (!isKernel && !isFirmware && (/^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/.test(e.package) || /raspberry\s*pi|raspi-config/i.test(e.description || ''))) tags.push('<span class="up-tag up-tag-rpi">Raspberry Pi</span>');
+        }
+        // Derived from the recorded versions, so it applies to both branches
+        // above and to history rows written before this tag existed.
+        const stripB = (v) => String(v || '').replace(/\+b\d+$/, '');
+        if (e.fromV && e.toV && e.fromV !== e.toV && /\+b\d+$/.test(e.toV) && stripB(e.fromV) === stripB(e.toV)) {
+          tags.push('<span class="up-tag up-tag-rebuild">Rebuild</span>');
         }
         return `<tr>
         <td class="inv-dim">${rapisysFmtTime(e.ts)}</td>

@@ -101,6 +101,34 @@ export function newerThanInstalledWindow(text, installedVersion, candidateVersio
   return keep.join('\n');
 }
 
+/**
+ * True when the candidate differs from the installed version ONLY by a binNMU
+ * suffix — i.e. this upgrade is a binary-only rebuild, not new software.
+ *
+ * Debian's build daemons append +b1, +b2, … when they recompile a package
+ * without any source change, typically because a library it links against
+ * bumped its soname and every dependent had to be rebuilt against it. The
+ * whole GnuPG set moving from 2.4.7-21+deb13u1+b3 to +b4 in one go is the
+ * classic shape. These upgrades are worth installing — the old binaries link
+ * against a library the archive no longer ships — but nothing about the
+ * program's behaviour changes, so they carry no changelog entry, no CVEs and
+ * no urgency, and users reasonably wonder why the row is there at all.
+ *
+ * Strip the suffix from both sides: if what remains is identical, the rebuild
+ * counter is the only difference. Note this is deliberately narrow — it does
+ * NOT treat Raspberry Pi's +rptN rebuilds the same way, since those DO carry
+ * source patches.
+ */
+export function isBinNmuRebuild(installedVersion, candidateVersion) {
+  const inst = String(installedVersion || '');
+  const cand = String(candidateVersion || '');
+  if (!inst || !cand || inst === cand) return false;
+  const strip = (v) => v.replace(/\+b\d+$/, '');
+  // The candidate must actually carry a binNMU suffix, or nothing was rebuilt.
+  if (!/\+b\d+$/.test(cand)) return false;
+  return strip(inst) === strip(cand);
+}
+
 export function createUpdatesCollector({ updatesRepo } = {}) {
   async function refresh(onProgress) {
     // Fast refresh: apt-get update + list. Security is detected lazily when a
@@ -129,6 +157,9 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     // carry forward known tags (skip re-scan when candidate unchanged)
     const known = updatesRepo?.getSecurityTags?.() || {};
     const toScan = [];
+    // Mark binary-only rebuilds. Derived from the two versions we already
+    // have, so it needs no agent call and costs nothing.
+    for (const u of updates) u.rebuild = isBinNmuRebuild(u.installed, u.candidate);
     for (const u of updates) {
       const k = known[u.package];
       if (k && k.candidate === u.candidate) { u.security = u.security || k.security; u.cves = k.cves; u.urgency = k.urgency; u.releaseDate = k.releaseDate; }
@@ -183,11 +214,14 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     const tags = updatesRepo.getSecurityTags?.() || {};
     const strip = (v) => String(v || '').replace(/^\d+:/, '');
     const updates = (c.updates || []).map((u) => {
+      // Derived, not stored: caches written before this existed still get the
+      // tag, and it can never go stale against the versions in the same row.
+      const rebuild = isBinNmuRebuild(u.installed, u.candidate);
       const t = tags[u.package];
       if (t && (!t.candidate || strip(t.candidate) === strip(u.candidate))) {
-        return { ...u, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency, releaseDate: t.releaseDate || u.releaseDate || null };
+        return { ...u, rebuild, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency, releaseDate: t.releaseDate || u.releaseDate || null };
       }
-      return u;
+      return { ...u, rebuild };
     });
     return { available: c.checkedAt != null, updates, checkedAt: c.checkedAt };
   }
