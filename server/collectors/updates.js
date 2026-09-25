@@ -129,6 +129,83 @@ export function isBinNmuRebuild(installedVersion, candidateVersion) {
   return strip(inst) === strip(cand);
 }
 
+/**
+ * Parse `apt-get -s` output into the packages it would change:
+ *   Inst name [old] (new Origin [arch])   -> upgrade (or install when no [old])
+ *   Remv name [old]                       -> remove
+ */
+export function parseAptPlan(plan) {
+  const out = [];
+  for (const line of String(plan || '').split('\n')) {
+    let m;
+    if ((m = line.match(/^Inst\s+(\S+)(?:\s+\[([^\]]+)\])?(?:\s+\((\S+))?/))) {
+      out.push({ name: m[1], action: m[2] ? 'upgrade' : 'install', from: m[2] || null, to: m[3] || null });
+    } else if ((m = line.match(/^Remv\s+(\S+)(?:\s+\[([^\]]+)\])?/))) {
+      out.push({ name: m[1], action: 'remove', from: m[2] || null, to: null });
+    }
+  }
+  return out;
+}
+
+// Names from a Depends-style field: "a (>= 1), b | c:any, d [arm64]" -> [a, b, c, d]
+function depNames(field) {
+  return String(field || '').split(/[,|]/)
+    .map((s) => s.trim().split(/[\s(\[]/)[0].replace(/:\S+$/, ''))
+    .filter(Boolean);
+}
+
+/**
+ * Parse `apt-cache show --no-all-versions` stanzas into
+ * { name: { summary, depends: Set, recommends: Set } }.
+ * Continuation lines (leading space) belong to the previous field; only the
+ * first Description line (the summary) is kept.
+ */
+export function parseAptCacheShow(text) {
+  const info = {};
+  for (const stanza of String(text || '').split(/\n\s*\n/)) {
+    const f = {};
+    let key = null;
+    for (const line of stanza.split('\n')) {
+      const m = line.match(/^([A-Za-z][A-Za-z0-9-]*):\s?(.*)$/);
+      if (m) { key = m[1]; f[key] = m[2]; }
+      else if (key && /^\s/.test(line) && !/^Description/.test(key)) f[key] += ' ' + line.trim();
+    }
+    const name = f.Package;
+    if (!name || info[name]) continue;   // first stanza = candidate version
+    info[name] = {
+      summary: (f.Description || f['Description-en'] || '').trim(),
+      depends: new Set([...depNames(f.Depends), ...depNames(f['Pre-Depends'])]),
+      recommends: new Set(depNames(f.Recommends)),
+    };
+  }
+  return info;
+}
+
+/**
+ * Enrich a parsed plan with summaries and, for each package the user did NOT
+ * select, which other plan packages pull it in. apt's dry run doesn't say why
+ * a package is included, so this is inferred from the candidate records of
+ * the other packages in the same plan: a hard dependency wins over a
+ * Recommends. Packages nothing in the plan points at get an empty list.
+ */
+export function describePlan(items, info, selected = []) {
+  const sel = new Set(selected);
+  const changing = items.filter((i) => i.action !== 'remove');
+  return items.map((it) => {
+    const own = info[it.name];
+    const out = { ...it, summary: own ? own.summary : null, requiredBy: [] };
+    if (sel.has(it.name) || it.action === 'remove') return out;
+    const hard = [], soft = [];
+    for (const o of changing) {
+      if (o.name === it.name || !info[o.name]) continue;
+      if (info[o.name].depends.has(it.name)) hard.push(o.name);
+      else if (info[o.name].recommends.has(it.name)) soft.push(o.name);
+    }
+    out.requiredBy = [...hard.map((n) => ({ name: n, recommends: false })), ...soft.map((n) => ({ name: n, recommends: true }))];
+    return out;
+  });
+}
+
 export function createUpdatesCollector({ updatesRepo } = {}) {
   async function refresh(onProgress) {
     // Fast refresh: apt-get update + list. Security is detected lazily when a
@@ -313,10 +390,22 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     return agentCall('apt.upgrade', params, onLine, 1800000); // up to 30 min
   }
 
+  // Describe a simulated plan for the confirm card. Best effort: a failure
+  // returns the plan without summaries rather than failing the simulation.
+  async function planDetails(planText, selected) {
+    const items = parseAptPlan(planText);
+    if (!items.length || !agentConfigured()) return describePlan(items, {}, selected);
+    try {
+      const names = [...new Set(items.map((i) => i.name))].slice(0, 300);
+      const r = await agentCall('apt.planInfo', { packages: names }, null, 35000);
+      return describePlan(items, parseAptCacheShow(r && r.show), selected);
+    } catch { return describePlan(items, {}, selected); }
+  }
+
   async function firmwareUpdate(onLine) {
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('eeprom.update', {}, onLine, 300000);
   }
 
-  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, firmwareUpdate };
+  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, planDetails, firmwareUpdate };
 }

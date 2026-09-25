@@ -5495,6 +5495,62 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-cascade-list { display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; margin-top: 2px; }
 .up-cascade-pkg { display: block; font-size: 13px; font-weight: 700; color: #ffffff;
   font-family: ui-monospace, monospace; line-height: 1.5; }
+/* Upgrade confirm card: expandable package rows (summary + changelog inline) */
+.rconfirm.up-plan { max-width: 620px; }
+.up-plan-list { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; margin-top: 4px; padding-right: 2px; }
+.up-plan-row { border: 1px solid transparent; border-radius: var(--radius-sm); transition: background 0.15s, border-color 0.15s; }
+.up-plan-row.open { border-color: var(--border-color); background: rgba(255,255,255,0.025); }
+.up-plan-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: none; border: none;
+  color: inherit; font: inherit; cursor: pointer; text-align: left; border-radius: var(--radius-sm); }
+.up-plan-head:hover:not(:disabled) { background: rgba(255,255,255,0.04); }
+.up-plan-head:disabled { cursor: default; }
+.up-plan-head:focus-visible { outline: 1px solid var(--accent-cyan); outline-offset: -1px; }
+.up-plan-caret { width: 12px; height: 12px; flex-shrink: 0; color: var(--text-muted); transition: transform 0.15s; }
+.up-plan-row.open .up-plan-caret { transform: rotate(90deg); color: var(--accent-cyan); }
+.up-plan-name { font-family: ui-monospace, monospace; font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; }
+.up-plan-ver { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-muted); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.up-plan-ver b { color: var(--accent-cyan); font-weight: 500; }
+.up-plan-tags { display: flex; flex-shrink: 0; }
+.up-tag-new { color: var(--accent-purple); border: 1px solid rgba(168,85,247,0.4); background: rgba(168,85,247,0.08); }
+.up-plan-body { padding: 2px 10px 10px 28px; }
+.up-plan-desc { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px; }
+.up-plan-why { font-size: 11px; color: var(--text-muted); margin: -4px 0 8px; }
+.up-plan-why span { font-family: ui-monospace, monospace; color: var(--text-secondary); }
+.up-plan-clh { margin-bottom: 4px; }
+.up-plan-clh span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.up-plan-cl { max-height: 220px; overflow-y: auto; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); padding: 8px 10px; }
+.up-plan-cl .up-cl-pre { margin: 0; }
+.up-plan-cl .up-cl-pre + .up-cl-pre { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-color); }
+.up-plan-cl .up-plan-note { margin: 0 0 8px; }
+.up-plan-cl .up-cl-pre + .up-plan-note { margin: 8px 0 0; }
+.up-plan-cl-older { color: var(--text-muted); }
+.up-plan-state { font-size: 12px; color: var(--text-muted); padding: 6px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.up-plan-state.up-plan-err { color: #f87171; }
+.up-plan-tools { display: flex; justify-content: flex-end; gap: 14px; margin-top: 4px; }
+.up-plan-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 8px; font-size: 12px; }
+.up-plan-more { font-size: 12px; padding: 2px 8px; }
+body.compact .rconfirm.up-plan { max-width: 560px; }
+body.compact .up-plan-head { padding: 3px 6px; gap: 6px; }
+body.compact .up-plan-name { font-size: 12px; }
+body.compact .up-plan-body { padding: 0 8px 8px 24px; }
+body.compact .up-plan-desc { font-size: 12px; margin-bottom: 6px; }
+body.compact .up-plan-cl { max-height: 180px; padding: 6px 8px; }
+body.ultra .rconfirm.up-plan { max-width: 520px; }
+body.ultra .up-plan-list { gap: 2px; }
+body.ultra .up-plan-head { padding: 2px 4px; gap: 5px; }
+body.ultra .up-plan-name { font-size: 11px; }
+body.ultra .up-plan-ver { font-size: 10px; }
+body.ultra .up-plan-tags .up-tag { font-size: 9px; padding: 1px 6px; }
+body.ultra .up-plan-body { padding: 0 6px 6px 20px; }
+body.ultra .up-plan-desc { font-size: 11px; margin-bottom: 4px; }
+body.ultra .up-plan-cl { max-height: 150px; padding: 5px 7px; }
+body.ultra .up-plan-cl .up-cl-pre { font-size: 10px; }
+@media (max-width: 600px) {
+  .up-plan-ver { display: none; }
+  .up-plan-body { padding-left: 10px; }
+}
 /* stub-changelog explanatory note */
 .up-cl-stubnote { font-size: 12px; color: var(--text-secondary); line-height: 1.55;
   background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.3);

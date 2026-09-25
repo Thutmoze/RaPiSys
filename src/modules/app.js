@@ -126,12 +126,12 @@ async function api(path, opts = {}, retried = false) {
 // App-native confirm dialog (replaces window.confirm's browser chrome)
 // ---------------------------------------------------------------------------
 
-function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', html = false, confirmIcon = null } = {}) {
+function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', html = false, confirmIcon = null, cls = '', onMount = null } = {}) {
   return new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay rconfirm-overlay');
     ov.innerHTML = `
-      <div class="wizard card rconfirm">
-        <p class="rconfirm-msg"></p>
+      <div class="wizard card rconfirm ${cls}">
+        <div class="rconfirm-msg"></div>
         <div class="wz-row rconfirm-row">
           <button class="action-btn ${danger ? 'rconfirm-danger' : 'wz-primary'}" data-rc="ok"></button>
           <button class="action-btn set-btn-cancel" data-rc="cancel">${CANCEL_ICON}<span>Cancel</span></button>
@@ -143,6 +143,8 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', htm
     else ov.querySelector('.rconfirm-msg').textContent = message;
     ov.querySelector('[data-rc=ok]').innerHTML = (confirmIcon || (danger ? TRASH_ICON : CHECK_ICON)) + '<span>' + confirmLabel + '</span>';
     document.body.appendChild(ov);
+    // Interactive content (e.g. expandable rows) wires itself up here.
+    if (onMount) onMount(ov.querySelector('.rconfirm-msg'));
     const done = (v) => { ov.remove(); resolve(v); };
     ov.querySelector('[data-rc=ok]').onclick = () => done(true);
     ov.querySelector('[data-rc=cancel]').onclick = () => done(false);
@@ -6290,6 +6292,20 @@ pageRenderers.updates = (() => {
     return sections;
   }
 
+  // A "stub" changelog: entries that carry no real notes, just a version
+  // header and maybe a bare "Version: x" line (common in vendor-built
+  // packages like Docker's, which don't ship hand-written Debian changelogs).
+  function isStubChangelog(sections) {
+    if (!sections.length) return false;
+    return !sections.some((s) => s.lines.slice(1).some((ln) => {
+      const t = ln.trim();
+      if (!t || t.startsWith('--')) return false;          // blank / maintainer trailer
+      const bullet = t.replace(/^[*-]\s*/, '');
+      if (/^version:\s*\S+$/i.test(bullet)) return false;  // bare "Version: vX"
+      return bullet.length > 0;                            // any other content = real note
+    }));
+  }
+
   function openChangelogModal(host, pkg, data, installed) {
     // data: { changelog, candidateVersion, needsFull, error }
     const ov = el('div', 'wizard-overlay up-cl-overlay');
@@ -6325,17 +6341,7 @@ pageRenderers.updates = (() => {
       // Detect a "stub" changelog: entries that carry no real notes — just a
       // version header and maybe a bare "Version: x" line (common in vendor-built
       // packages like Docker's, which don't ship hand-written Debian changelogs).
-      const isStub = (() => {
-        if (!sections.length) return false;
-        const meaningful = sections.some((s) => s.lines.slice(1).some((ln) => {
-          const t = ln.trim();
-          if (!t || t.startsWith('--')) return false;          // blank / maintainer trailer
-          const bullet = t.replace(/^[*-]\s*/, '');
-          if (/^version:\s*\S+$/i.test(bullet)) return false;  // bare "Version: vX"
-          return bullet.length > 0;                            // any other content = real note
-        }));
-        return !meaningful;
-      })();
+      const isStub = isStubChangelog(sections);
       const stubNote = isStub
         ? `<p class="up-cl-stubnote">This package ships only a minimal changelog — its build doesn't include detailed release notes${/docker/i.test(pkg) ? ` (Docker's packages are built without hand-written Debian changelogs)` : ''}. ${upstreamReleaseLink(pkg)}</p>`
         : '';
@@ -6519,38 +6525,172 @@ pageRenderers.updates = (() => {
     let anPct = 8;
     const anTick = setInterval(() => { anPct = Math.min(90, anPct + 6); if (anBar) anBar.style.width = anPct + '%'; }, 300);
     const stopAnalyzing = () => { clearInterval(anTick); if (anBar) anBar.style.width = '100%'; setTimeout(() => analyzing.remove(), 150); };
-    let plan = null;
-    try { const r = await api('/updates/simulate', { method: 'POST', body: { packages } }); plan = r.plan || ''; }
+    let plan = null, details = null;
+    try { const r = await api('/updates/simulate', { method: 'POST', body: { packages } }); plan = r.plan || ''; details = Array.isArray(r.details) ? r.details : null; }
     catch (e) { plan = null; toast('error', 'Updates', `Could not analyze dependencies: ${e.message}`); }
     stopAnalyzing();
 
-    let extras = [], removed = [];
-    if (plan) {
+    // Prefer the server's parsed plan (versions, summaries, required-by);
+    // fall back to parsing the raw text when the server sent none.
+    if (plan && !details) {
       const parsed = parseAptPlan(plan);
-      removed = parsed.remove;
-      extras = [...new Set([...parsed.install, ...parsed.upgrade])].filter((p) => !selectedSet.has(p));
+      details = [...parsed.upgrade.map((n) => ({ name: n, action: 'upgrade' })), ...parsed.install.map((n) => ({ name: n, action: 'install' })),
+        ...parsed.remove.map((n) => ({ name: n, action: 'remove' }))];
     }
+    const byName = new Map((details || []).map((d) => [d.name, d]));
+    const selItems = packages.map((n) => byName.get(n) || { name: n, action: 'upgrade' });
+    const extras = (details || []).filter((d) => d.action !== 'remove' && !selectedSet.has(d.name));
+    const removed = (details || []).filter((d) => d.action === 'remove');
 
-    // Each package on its own line, bold white (via .up-cascade-pkg).
-    const block = (title, arr, cls) => {
-      if (!arr.length) return '';
-      const shown = arr.slice(0, 60);
-      const rows = shown.map((p) => `<span class="up-cascade-pkg">${esc(p)}</span>`).join('');
-      const more = arr.length > 60 ? `<span class="inv-dim">+${arr.length - 60} more</span>` : '';
-      return `<div class="up-cascade-grp"><span class="up-cascade-h ${cls || ''}">${title} (${arr.length})</span><div class="up-cascade-list">${rows}${more}</div></div>`;
-    };
-    let msg = `Update <b>${packages.length}</b> selected package(s) — ${esc(label)}?`;
+    let msg = `Update <b>${packages.length}</b> selected package(s): ${esc(label)}?`;
+    let onMount = null;
     if (plan) {
-      msg += `<br><br>${block('You selected', packages, 'up-cascade-sel')}`;
-      if (extras.length) msg += block('Also installed/upgraded as dependencies', extras, 'up-cascade-extra');
-      if (removed.length) msg += block('Removed', removed, 'up-cascade-rem');
-      const total = new Set([...packages, ...extras]).size;
-      msg += `<br><span class="inv-dim">${total} package(s) will change in total${removed.length ? `, ${removed.length} removed` : ''}.</span>`;
+      msg += `<br><br><div data-plan></div>`;
+      onMount = (root) => mountPlanRows(host, root.querySelector('[data-plan]'), { selItems, extras, removed });
     } else {
       msg += `<br><br><div class="up-cascade-list">${packages.slice(0, 30).map((p) => `<span class="up-cascade-pkg">${esc(p)}</span>`).join('')}</div><br>apt will also pull in any required dependencies.`;
     }
-    if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true })) return;
+    if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true, cls: plan ? 'up-plan' : '', onMount })) return;
     startUpgrade(host, { packages, label, onComplete });
+  }
+
+  // Expandable package rows for the upgrade confirm card. Each row opens in
+  // place to show the package's summary, what pulls it in, and the changelog
+  // entries newer than the installed version, fetched on first open through
+  // the same endpoint (and cache) as the changelog modal.
+  const PLAN_CARET = '<svg class="up-plan-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+  const PLAN_CAP = 60;
+  function mountPlanRows(host, root, { selItems, extras, removed }) {
+    if (!root) return;
+    const st = new Map();   // name -> { open, loading, data, error, showOlder }
+    const get = (n) => { if (!st.has(n)) st.set(n, {}); return st.get(n); };
+    const upd = (n) => updates.find((u) => u.package === n);
+
+    const tags = (d) => {
+      const u = upd(d.name) || {};
+      const t = [];
+      if (d.action === 'install') t.push('<span class="up-tag up-tag-new">new</span>');
+      if (u.security) t.push('<span class="up-tag up-tag-sec">security</span>');
+      if (u.cves) t.push(`<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>`);
+      if (u.rebuild) t.push('<span class="up-tag up-tag-rebuild" title="Binary-only rebuild: same source, recompiled against updated libraries.">rebuild</span>');
+      return t.join('');
+    };
+    const verHtml = (d) => {
+      const from = d.from || upd(d.name)?.installed || null;
+      const to = d.to || upd(d.name)?.candidate || null;
+      if (d.action === 'remove') return from ? esc(from) : '';
+      if (!to) return '';
+      return from ? `${esc(from)} → <b>${esc(to)}</b>` : `<b>${esc(to)}</b>`;
+    };
+
+    const clHtml = (d, s) => {
+      if (s.loading) return '<div class="up-plan-state"><span class="up-spinner-sm"></span>Loading changelog…</div>';
+      if (s.error) return `<div class="up-plan-state up-plan-err">Could not load the changelog. <button class="up-link" data-plan-retry="${esc(d.name)}">Retry</button></div>`;
+      const r = s.data;
+      if (!r) return '';
+      const full = `<button class="up-link" data-plan-full="${esc(d.name)}">Open full changelog</button>`;
+      if (r.none) return `<div class="up-cl-stubnote">This package doesn't ship a bundled changelog. ${upstreamReleaseLink(d.name)}</div>`;
+      if (r.source === 'installed' || r.source === 'none' || !r.changelog) {
+        return `<div class="up-plan-state">Large package: the new version's changelog isn't cached yet. ${full}</div>`;
+      }
+      const installed = d.from || upd(d.name)?.installed || null;
+      const sections = parseSections(r.changelog).filter((x) => x.version !== '(header)');
+      const candE = parseVerEpoch(r.candidateVersion);
+      const instE = parseVerEpoch(installed);
+      const de = candE != null ? candE : (instE != null ? instE : 0);
+      // New installs have nothing to compare against: the newest entry is "new".
+      const isNewer = (x, i) => installed ? cVercmp(x.version, installed, de) > 0 : i === 0;
+      const fresh = sections.filter(isNewer);
+      const older = sections.filter((x, i) => !isNewer(x, i));
+      const pre = (x, cls) => `<pre class="up-cl-pre ${cls}">${hlSec(x.lines.join('\n').trim())}</pre>`;
+      let inner = '';
+      if (!fresh.length && sections.length) inner += `<div class="up-cl-stubnote up-plan-note">Binary-only rebuild: same source, recompiled against updated libraries. No new changelog entry.</div>`;
+      inner += fresh.map((x) => pre(x, 'up-cl-pre-new')).join('');
+      if (isStubChangelog(sections)) inner += `<div class="up-cl-stubnote up-plan-note">This package ships only a minimal changelog. ${upstreamReleaseLink(d.name)}</div>`;
+      if (s.showOlder) inner += older.slice(0, 5).map((x) => pre(x, 'up-plan-cl-older')).join('');
+      const tools = [];
+      if (older.length) {
+        const what = fresh.length ? (installed ? 'installed entries' : 'older entries') : 'latest source entry';
+        tools.push(`<button class="up-link" data-plan-older="${esc(d.name)}">${s.showOlder ? 'Hide' : 'Show'} ${what}</button>`);
+      }
+      tools.push(full);
+      return `${inner ? `<div class="up-plan-cl">${inner}</div>` : ''}<div class="up-plan-tools">${tools.join('')}</div>`;
+    };
+
+    const rowHtml = (d, openable = true) => {
+      const s = get(d.name);
+      const open = openable && s.open;
+      let body = '';
+      if (open) {
+        const summary = d.summary || upd(d.name)?.description || '';
+        const req = (d.requiredBy || []).slice(0, 4).map((x) => `<span>${esc(x.name)}</span>${x.recommends ? ' (recommends)' : ''}`).join(', ');
+        body = `<div class="up-plan-body">
+            ${summary ? `<div class="up-plan-desc">${esc(summary)}</div>` : ''}
+            ${req ? `<div class="up-plan-why">Required by ${req}${d.requiredBy.length > 4 ? ` +${d.requiredBy.length - 4} more` : ''}</div>` : ''}
+            <div class="up-plan-clh"><span>${(d.from || upd(d.name)?.installed) ? 'What’s new since your version' : 'Changelog'}</span></div>
+            ${clHtml(d, s)}
+          </div>`;
+      }
+      return `<div class="up-plan-row${open ? ' open' : ''}">
+          <button type="button" class="up-plan-head" ${openable ? `data-plan-toggle="${esc(d.name)}" aria-expanded="${!!open}"` : 'disabled'}>
+            ${openable ? PLAN_CARET : '<span class="up-plan-caret"></span>'}<span class="up-plan-name">${esc(d.name)}</span>
+            <span class="up-plan-ver">${verHtml(d)}</span><span class="up-plan-tags">${tags(d)}</span>
+          </button>${body}
+        </div>`;
+    };
+
+    const group = (title, cls, arr, openable = true) => {
+      if (!arr.length) return '';
+      const more = arr.length > PLAN_CAP ? `<span class="inv-dim up-plan-more">+${arr.length - PLAN_CAP} more</span>` : '';
+      return `<div class="up-cascade-grp"><span class="up-cascade-h ${cls}">${title} (${arr.length})</span>
+          <div class="up-plan-list">${arr.slice(0, PLAN_CAP).map((d) => rowHtml(d, openable)).join('')}${more}</div></div>`;
+    };
+
+    const render = () => {
+      const newCount = extras.filter((d) => d.action === 'install').length;
+      const total = new Set([...selItems.map((d) => d.name), ...extras.map((d) => d.name)]).size;
+      const anyOpen = extras.some((d) => get(d.name).open);
+      const summary = `${total} package(s) will change in total${newCount ? `, ${newCount} new` : ''}${removed.length ? `, ${removed.length} removed` : ''}.`;
+      root.innerHTML = group('You selected', 'up-cascade-sel', selItems)
+        + group('Also installed/upgraded as dependencies', 'up-cascade-extra', extras)
+        + group('Removed', 'up-cascade-rem', removed, false)
+        + `<div class="up-plan-foot"><span class="inv-dim">${summary}</span>`
+        + (extras.length ? `<button type="button" class="up-link" data-plan-all>${anyOpen ? 'Collapse all' : 'Expand all dependencies'}</button>` : '')
+        + '</div>';
+    };
+
+    const load = async (name) => {
+      const s = get(name);
+      if (s.loading || s.data) return;
+      s.loading = true; s.error = null; render();
+      try { s.data = await api(`/updates/changelog/${encodeURIComponent(name)}`); }
+      catch (e) { s.error = e.message; }
+      s.loading = false;
+      if (root.isConnected) render();
+    };
+
+    root.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-plan-toggle],[data-plan-older],[data-plan-retry],[data-plan-full],[data-plan-all]');
+      if (!t) return;
+      e.preventDefault();
+      if (t.dataset.planToggle) {
+        const s = get(t.dataset.planToggle); s.open = !s.open; render();
+        if (s.open) load(t.dataset.planToggle);
+      } else if (t.dataset.planOlder) {
+        const s = get(t.dataset.planOlder); s.showOlder = !s.showOlder; render();
+      } else if (t.dataset.planRetry) {
+        load(t.dataset.planRetry);
+      } else if (t.dataset.planFull) {
+        showChangelog(host, t.dataset.planFull);
+      } else if (t.hasAttribute('data-plan-all')) {
+        const open = !extras.some((d) => get(d.name).open);
+        const shown = extras.slice(0, PLAN_CAP);
+        shown.forEach((d) => { get(d.name).open = open; });
+        render();
+        if (open) shown.forEach((d) => load(d.name));
+      }
+    });
+    render();
   }
 
   // Parse `apt-get -s` plan text into the packages it would install/upgrade/remove.

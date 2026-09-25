@@ -16,3 +16,6 @@ data/*
 
 # Patch files (applied from the repo root, never committed)
 *.patch
+
+# UI mockups (local review only)
+mockups/

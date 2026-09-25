@@ -136,7 +136,10 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     let out = '';
     try {
       await updates.upgrade({ packages: packages || null, full: !!full, simulate: true }, (line) => { out += line + '\n'; });
-      res.json({ ok: true, plan: out });
+      // `details`: per-package summary, versions and "required by", for the
+      // expandable rows on the confirm card. `plan` stays for older clients.
+      const details = await updates.planDetails(out, Array.isArray(packages) ? packages : []);
+      res.json({ ok: true, plan: out, details });
     } catch (err) { res.status(502).json({ error: err.message, plan: out }); }
   });
 

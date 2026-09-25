@@ -2661,6 +2661,17 @@ WantedBy=multi-user.target
     const r = await runStreaming('apt-get', args, env, send);
     return { code: r.code, simulated: simulate };
   },
+  // Candidate package records for an upgrade plan (summary + dependency
+  // fields), so the confirm card can describe each package and say why a
+  // dependency is being pulled in. Read-only: apt-cache reads the local lists.
+  // Returns raw stanzas; the server parses them. apt-cache exits non-zero when
+  // any name is unknown but still prints the rest, so stdout is used as-is.
+  async 'apt.planInfo'({ packages }) {
+    assert(Array.isArray(packages) && packages.length >= 1 && packages.length <= 300, 'packages required');
+    for (const p of packages) assert(PKG_RE.test(p), `invalid package name: ${p}`);
+    const r = await run('apt-cache', ['show', '--no-all-versions', ...packages], 30000).catch(() => ({ stdout: '' }));
+    return { show: (r.stdout || '').slice(0, 4 * 1024 * 1024) };
+  },
   async 'eeprom.check'() {
     const r = await run('rpi-eeprom-update', [], 20000).catch((e) => ({ code: 1, stdout: '', stderr: e.message }));
     return { output: (r.stdout + r.stderr).trim(), updateAvailable: /UPDATE AVAILABLE/i.test(r.stdout) };
