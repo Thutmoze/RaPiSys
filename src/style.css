@@ -6858,12 +6858,13 @@ body.ultra .ns-sub { display: none; }
 /* ---- Updates: package "About" panel ---- */
 .up-pkg-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .up-pkg-cell b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.up-about-btn { flex-shrink: 0; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 6px; border: 1px solid rgba(168,85,247,0.35); background: rgba(168,85,247,0.08); color: var(--accent-purple);
-  cursor: pointer; padding: 0; opacity: 0.75; transition: opacity 0.15s, background 0.15s, box-shadow 0.15s; }
-.up-about-btn svg { width: 12px; height: 12px; }
+.up-about-btn { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; color: var(--accent-purple); cursor: pointer; padding: 0;
+  opacity: 0.75; transition: opacity 0.15s, filter 0.15s; }
+.up-about-btn svg { width: 15px; height: 15px; }
 tr:hover .up-about-btn, .up-about-btn:focus-visible { opacity: 1; }
-.up-about-btn:hover { background: rgba(168,85,247,0.18); box-shadow: 0 0 12px rgba(168,85,247,0.3); }
+.up-about-btn:hover { filter: drop-shadow(0 0 6px rgba(168,85,247,0.6)); }
+.up-about-btn:focus-visible { outline: 1px solid var(--accent-purple); outline-offset: 2px; border-radius: 50%; }
 
 .up-ab-modal { max-width: 680px; width: 92vw; max-height: 86vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; outline: none; }
 .up-ab-modal .up-cl-head { gap: 12px; }
@@ -6916,8 +6917,7 @@ body.compact .up-ab-summary { font-size: 14px; }
 body.compact .up-ab-desc { font-size: 12.5px; line-height: 1.5; }
 body.compact .up-ab-sect { margin-top: 14px; }
 body.compact .up-ab-facts { font-size: 12px; }
-body.ultra .up-about-btn { width: 17px; height: 17px; }
-body.ultra .up-about-btn svg { width: 10px; height: 10px; }
+body.ultra .up-about-btn svg { width: 12px; height: 12px; }
 body.ultra .up-ab-body { padding: 10px 12px 12px; }
 body.ultra .up-ab-modal .up-cl-head, body.ultra .up-ab-foot { padding: 8px 12px; }
 body.ultra .up-ab-title b { font-size: 13px; }
