@@ -5452,6 +5452,8 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-rb-procs td { padding: 3px 8px 3px 0; color: var(--text-secondary); vertical-align: top; }
 .up-rb-procs td:first-child { font-family: ui-monospace, monospace; color: var(--text-primary); white-space: nowrap; }
 .up-rb-procs td.mono { font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
+.up-rb-procs td.desc { color: var(--text-secondary); min-width: 180px; }
+@media (max-width: 760px) { .up-rb-procs th:nth-child(3), .up-rb-procs td:nth-child(3) { display: none; } }
 /* "reboot" tag (table + plan) and the plan card's reboot notice */
 .up-tag-reboot { color: var(--accent-orange); border: 1px solid rgba(249,115,22,0.4); background: rgba(249,115,22,0.08); }
 .up-plan-reboot { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
@@ -5479,6 +5481,7 @@ body.ultra .up-rb-item code { font-size: 10.5px; }
 body.ultra .up-rb-kind { width: 64px; font-size: 9px; }
 body.ultra .up-banner-actions .action-btn { padding: 4px 8px; font-size: 11px; }
 body.ultra .up-rb-procs table { font-size: 10.5px; }
+body.ultra .up-rb-procs td.desc { min-width: 140px; }
 body.ultra .up-plan-reboot { padding: 6px 8px; font-size: 11px; }
 
 /* Run-history status badges (Auto-Check tab) */

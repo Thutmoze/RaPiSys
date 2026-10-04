@@ -12,7 +12,7 @@ import { flagWording } from '../server/core/metric-catalog.js';
 
 const require = createRequire(import.meta.url);
 process.env.AGENT_SECRET = 'test-secret-not-used-for-any-real-hmac';
-const { newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner } = require('../agent/rapisys-agent.cjs');
+const { newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow } = require('../agent/rapisys-agent.cjs');
 
 describe('newestKernel', () => {
   const boot = ['vmlinuz-6.18.34+rpt-rpi-2712', 'vmlinuz-6.18.34+rpt-rpi-v8',
@@ -99,6 +99,38 @@ describe('libOwnerPattern / libOwner', () => {
   it('does not confuse similarly named libraries', () => {
     expect(libOwner('/usr/lib/aarch64-linux-gnu/libxkbcommon-x11.so.0.0.0', dpkgOut)).toBeNull();
     expect(libOwner('/usr/lib/aarch64-linux-gnu/libfoo.so.1', '')).toBeNull();
+  });
+});
+
+describe('program descriptions', () => {
+  it('maps binaries to packages from dpkg -S', () => {
+    expect(parseDpkgSearch([
+      'labwc: /usr/bin/labwc',
+      'openssh-server: /usr/sbin/sshd',
+      'mate-polkit:arm64: /usr/libexec/polkit-mate-authentication-agent-1',
+      'dpkg-query: no path found matching pattern /opt/thing/bin/x',
+    ].join('\n'))).toEqual({
+      '/usr/bin/labwc': 'labwc',
+      '/usr/sbin/sshd': 'openssh-server',
+      '/usr/libexec/polkit-mate-authentication-agent-1': 'mate-polkit',
+    });
+  });
+
+  it('reads unit descriptions from systemctl show blocks', () => {
+    const out = 'Id=ssh.service\nDescription=OpenBSD Secure Shell server\n\nId=docker.service\nDescription=Docker Application Container Engine\n';
+    expect(parseSystemctlShow(out)).toEqual({
+      'ssh.service': 'OpenBSD Secure Shell server',
+      'docker.service': 'Docker Application Container Engine',
+    });
+    expect(parseSystemctlShow('')).toEqual({});
+  });
+
+  it('passes the description through to the page', () => {
+    const s = summarizeRebootStatus({ bootTime: 1, kernel: {}, procs: [
+      { name: 'labwc', kind: 'desktop', files: ['/usr/lib/aarch64-linux-gnu/libxkbcommon.so.0.0.0'], packages: ['libxkbcommon0'], description: 'window-stacking Wayland compositor' },
+      { name: 'mystery', kind: 'process', files: [], packages: [] },
+    ] });
+    expect(s.libs.procs.map((p) => p.description)).toEqual(['window-stacking Wayland compositor', null]);
   });
 });
 

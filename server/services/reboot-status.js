@@ -33,7 +33,7 @@ export function summarizeRebootStatus(raw, history = []) {
   if (raw.rebootRequiredFile && (flagged.length || !reasons.length)) reasons.push({ kind: 'packages', pkgs: flagged });
 
   const procs = (raw.procs || []).map((p) => ({
-    name: p.name, unit: p.unit || null, kind: p.kind || 'process',
+    name: p.name, unit: p.unit || null, kind: p.kind || 'process', description: p.description || null,
     pids: p.pids || [], files: p.files || [], packages: p.packages || [],
   }));
   const libs = { count: procs.length, packages: [...new Set(procs.flatMap((p) => p.packages))], procs };

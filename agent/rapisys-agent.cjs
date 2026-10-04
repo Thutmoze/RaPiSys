@@ -517,6 +517,27 @@ function libOwner(file, dpkgOut) {
   return fallback;
 }
 
+/** `dpkg -S` output -> { path: package } (arch qualifiers dropped). */
+function parseDpkgSearch(text) {
+  const out = {};
+  for (const line of String(text || '').split('\n')) {
+    const m = line.match(/^([^:,\s]+)(?::\S+)?(?:,\s*\S+)*:\s+(\/\S+)$/);
+    if (m) out[m[2]] = m[1];
+  }
+  return out;
+}
+
+/** `systemctl show -p Id -p Description a b ...` output -> { Id: Description }. */
+function parseSystemctlShow(text) {
+  const out = {};
+  for (const block of String(text || '').split(/\n\s*\n/)) {
+    const id = (block.match(/^Id=(.+)$/m) || [])[1];
+    const desc = (block.match(/^Description=(.+)$/m) || [])[1];
+    if (id && desc) out[id.trim()] = desc.trim();
+  }
+  return out;
+}
+
 /** Who owns a process, from /proc/<pid>/cgroup (cgroup v2). */
 function classifyCgroup(cgroupText) {
   const line = String(cgroupText || '').split('\n').find((l) => l.startsWith('0::')) || '';
@@ -2827,7 +2848,13 @@ WantedBy=multi-user.target
         if (owner.kind === 'container') continue;
         const comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
         const key = owner.unit || comm;
-        const g = groups.get(key) || { name: comm, unit: owner.unit, kind: owner.kind, pids: [], files: new Set() };
+        let g = groups.get(key);
+        if (!g) {
+          // The binary itself may have been replaced too: "/usr/bin/labwc (deleted)".
+          let exe = null;
+          try { exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch { /* exited */ }
+          g = { name: comm, unit: owner.unit, kind: owner.kind, exe, pids: [], files: new Set() };
+        }
         g.pids.push(Number(pid));
         files.forEach((f) => g.files.add(f));
         groups.set(key, g);
@@ -2847,6 +2874,30 @@ WantedBy=multi-user.target
       dpkgOut = s.stdout || '';
     }
     for (const p of procs) p.packages = [...new Set(p.files.map((f) => libOwner(f, dpkgOut)).filter(Boolean))];
+
+    // What each program is: the summary of the package that installed its
+    // binary, else the systemd unit's Description.
+    const exes = [...new Set(procs.map((p) => p.exe).filter(Boolean))];
+    const exeOwner = {}, summary = {};
+    if (exes.length) {
+      const s = await run('dpkg', ['-S', ...exes], 15000).catch(() => ({ stdout: '' }));
+      Object.assign(exeOwner, parseDpkgSearch(s.stdout));
+      const pkgs = [...new Set(Object.values(exeOwner))];
+      if (pkgs.length) {
+        const q = await run('dpkg-query', ['-W', '-f=${Package}\t${binary:Summary}\n', ...pkgs], 15000).catch(() => ({ stdout: '' }));
+        for (const line of (q.stdout || '').split('\n')) {
+          const i = line.indexOf('\t');
+          if (i > 0) summary[line.slice(0, i)] = line.slice(i + 1).trim();
+        }
+      }
+    }
+    const units = [...new Set(procs.filter((p) => p.unit && !summary[exeOwner[p.exe]]).map((p) => p.unit))];
+    let unitDesc = {};
+    if (units.length) {
+      const u = await run('systemctl', ['show', '-p', 'Id', '-p', 'Description', ...units], 15000).catch(() => ({ stdout: '' }));
+      unitDesc = parseSystemctlShow(u.stdout);
+    }
+    for (const p of procs) p.description = summary[exeOwner[p.exe]] || (p.unit && unitDesc[p.unit]) || null;
 
     return { bootTime: btime, kernel: { running, latest }, firmware, eeprom, rebootRequiredFile, procs };
   },
@@ -2985,4 +3036,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
 
-module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner };
+module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow };

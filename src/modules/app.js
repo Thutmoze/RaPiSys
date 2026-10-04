@@ -6127,8 +6127,8 @@ pageRenderers.updates = (() => {
     const procs = st.libs?.procs || [];
     if (!procs.length) return '';
     return `<div class="up-rb-procs${rbProcsOpen ? ' open' : ''}">
-        <table><thead><tr><th>Program</th><th>Kind</th><th>Still using the old copy of</th></tr></thead>
-        <tbody>${procs.map((p) => `<tr><td>${esc(p.unit ? p.unit.replace(/\.service$/, '') : p.name)}</td><td>${esc(p.kind)}</td>
+        <table><thead><tr><th>Program</th><th>Description</th><th>Kind</th><th>Still using the old copy of</th></tr></thead>
+        <tbody>${procs.map((p) => `<tr><td>${esc(p.unit ? p.unit.replace(/\.service$/, '') : p.name)}</td><td class="desc">${p.description ? esc(p.description) : '<span class="inv-dim">not from a package</span>'}</td><td>${esc(p.kind)}</td>
           <td class="mono">${p.files.map((f) => esc(f.split('/').slice(-1)[0])).join(', ')}</td></tr>`).join('')}</tbody></table>
       </div>`;
   }
