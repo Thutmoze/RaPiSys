@@ -2861,7 +2861,11 @@ WantedBy=multi-user.target
         groups.set(key, g);
       } catch { /* process exited mid-scan, or kernel thread */ }
     }
-    const procs = [...groups.values()].slice(0, 60)
+    // PID 1 first, so the cap below can never drop it: it is what turns a
+    // replaced libc/systemd into a reboot rather than a restart.
+    const all = [...groups.values()].sort((a, b) => (b.pids.includes(1) ? 1 : 0) - (a.pids.includes(1) ? 1 : 0));
+    const procsTotal = all.length;
+    const procs = all.slice(0, 60)
       .map((g) => ({ ...g, files: [...g.files].slice(0, 12) }));
 
     // Which packages own those libraries. The upgrade may have renamed the
@@ -2900,7 +2904,7 @@ WantedBy=multi-user.target
     }
     for (const p of procs) p.description = summary[exeOwner[p.exe]] || (p.unit && unitDesc[p.unit]) || null;
 
-    return { bootTime: btime, kernel: { running, latest }, firmware, eeprom, rebootRequiredFile, procs };
+    return { bootTime: btime, kernel: { running, latest }, firmware, eeprom, rebootRequiredFile, procs, procsTotal };
   },
 
   async 'sys.reboot'({ confirm }) {

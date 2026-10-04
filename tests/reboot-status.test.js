@@ -205,6 +205,24 @@ describe('summarizeRebootStatus', () => {
     expect(s.libs.packages).toEqual(['libssl3t64', 'wfplug-batt']);
   });
 
+  it('is "reboot" when PID 1 runs a replaced library (libc6 upgraded)', () => {
+    const s = summarizeRebootStatus({ ...clean, procsTotal: 74, procs: [
+      { name: 'systemd', kind: 'process', pids: [1], files: ['/usr/lib/aarch64-linux-gnu/libc.so.6'], packages: ['libc6'] },
+      { name: 'sshd', unit: 'ssh.service', kind: 'service', pids: [1319], files: ['/usr/lib/aarch64-linux-gnu/libc.so.6'], packages: ['libc6'] },
+    ] });
+    expect(s.level).toBe('reboot');
+    expect(s.reasons).toEqual([{ kind: 'system', packages: ['libc6'] }]);
+  });
+
+  it('reports the real program count when the agent capped the list', () => {
+    const procs = Array.from({ length: 60 }, (_, i) => ({ name: `p${i}`, pids: [100 + i], files: [], packages: ['libc6'] }));
+    const s = summarizeRebootStatus({ ...clean, procs, procsTotal: 74 });
+    expect(s.libs.count).toBe(74);
+    expect(s.libs.shown).toBe(60);
+    // Older agents send no total: fall back to what was listed.
+    expect(summarizeRebootStatus({ ...clean, procs: procs.slice(0, 3) }).libs.count).toBe(3);
+  });
+
   it('handles a missing agent result', () => {
     expect(summarizeRebootStatus(null).level).toBe('none');
   });

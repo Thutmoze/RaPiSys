@@ -32,11 +32,18 @@ export function summarizeRebootStatus(raw, history = []) {
   const flagged = (raw.rebootRequiredFile?.pkgs || []).filter((p) => !/^linux-image|^raspi-firmware$/.test(p));
   if (raw.rebootRequiredFile && (flagged.length || !reasons.length)) reasons.push({ kind: 'packages', pkgs: flagged });
 
+  // PID 1 (systemd) running a replaced library: libc6, systemd or dbus was
+  // upgraded under it. Nothing short of a reboot restarts it cleanly.
+  const pid1 = (raw.procs || []).find((p) => (p.pids || []).includes(1));
+  if (pid1) reasons.push({ kind: 'system', packages: pid1.packages || [] });
+
   const procs = (raw.procs || []).map((p) => ({
     name: p.name, unit: p.unit || null, kind: p.kind || 'process', description: p.description || null,
     pids: p.pids || [], files: p.files || [], packages: p.packages || [],
   }));
-  const libs = { count: procs.length, packages: [...new Set(procs.flatMap((p) => p.packages))], procs };
+  // The agent lists at most 60 programs; `count` is the real total.
+  const count = Math.max(raw.procsTotal || 0, procs.length);
+  const libs = { count, shown: procs.length, packages: [...new Set(procs.flatMap((p) => p.packages))], procs };
 
   const level = reasons.length ? 'reboot' : (procs.length ? 'restart' : 'none');
 

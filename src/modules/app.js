@@ -6113,6 +6113,7 @@ pageRenderers.updates = (() => {
       if (r.kind === 'kernel') rows.push(['Kernel', `running <code>${esc(shortKernel(r.running))}</code>, installed <code class="up-rb-to">${esc(shortKernel(r.latest))}</code>`]);
       else if (r.kind === 'firmware') rows.push(['Firmware', `<code>raspi-firmware</code>${r.version ? ` <code class="up-rb-to">${esc(r.version.replace(/^\d+:/, ''))}</code>` : ''} installed to /boot/firmware`]);
       else if (r.kind === 'bootloader') rows.push(['Bootloader', 'EEPROM update staged, flashed during the next boot']);
+      else if (r.kind === 'system') rows.push(['System', `the system manager (PID 1) runs replaced libraries${r.packages?.length ? ` (${r.packages.map((p) => `<code>${esc(p)}</code>`).join(', ')})` : ''}`]);
       else if (r.kind === 'packages') rows.push(['Packages', r.pkgs?.length ? r.pkgs.map((p) => `<code>${esc(p)}</code>`).join(', ') + ' asked for a reboot' : 'a package asked for a reboot']);
     }
     const libs = st.libs || {};
@@ -6130,6 +6131,7 @@ pageRenderers.updates = (() => {
         <table><thead><tr><th>Program</th><th>Description</th><th>Kind</th><th>Still using the old copy of</th></tr></thead>
         <tbody>${procs.map((p) => `<tr><td>${esc(p.unit ? p.unit.replace(/\.service$/, '') : p.name)}</td><td class="desc">${p.description ? esc(p.description) : '<span class="inv-dim">not from a package</span>'}</td><td>${esc(p.kind)}</td>
           <td class="mono">${p.files.map((f) => esc(f.split('/').slice(-1)[0])).join(', ')}</td></tr>`).join('')}</tbody></table>
+        ${st.libs.count > procs.length ? `<div class="up-rb-more inv-dim">Showing ${procs.length} of ${st.libs.count} programs.</div>` : ''}
       </div>`;
   }
 
@@ -6199,7 +6201,7 @@ pageRenderers.updates = (() => {
     if (!st) return;
     reboot = st; setNavRebootDot(st);
     if (st.level === 'reboot' && logEl) {
-      const parts = (st.reasons || []).map((r) => r.kind === 'kernel' ? `kernel ${shortKernel(r.latest)}` : r.kind === 'bootloader' ? 'the bootloader' : r.kind === 'firmware' ? 'raspi-firmware' : 'flagged packages');
+      const parts = (st.reasons || []).map((r) => r.kind === 'kernel' ? `kernel ${shortKernel(r.latest)}` : r.kind === 'bootloader' ? 'the bootloader' : r.kind === 'firmware' ? 'raspi-firmware' : r.kind === 'system' ? 'system libraries' : 'flagged packages');
       logEl.textContent += `\n↻ Reboot required: ${parts.join(', ')} take effect after a reboot.\n`;
     }
     if (host.isConnected) renderBanner(host);

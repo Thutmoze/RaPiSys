@@ -5454,6 +5454,7 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-rb-procs td:first-child { font-family: ui-monospace, monospace; color: var(--text-primary); white-space: nowrap; }
 .up-rb-procs td.mono { font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
 .up-rb-procs td.desc { color: var(--text-secondary); min-width: 180px; }
+.up-rb-more { font-size: 11px; margin-top: 6px; }
 @media (max-width: 760px) { .up-rb-procs th:nth-child(3), .up-rb-procs td:nth-child(3) { display: none; } }
 /* "reboot" tag (table + plan) and the plan card's reboot notice */
 .up-tag-reboot { color: var(--accent-orange); border: 1px solid rgba(249,115,22,0.4); background: rgba(249,115,22,0.08); }
