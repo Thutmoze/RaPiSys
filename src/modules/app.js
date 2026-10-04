@@ -6680,7 +6680,7 @@ pageRenderers.updates = (() => {
     const n = d.requiredByCount;
     const pl = (k) => `${k.toLocaleString()} installed package${k === 1 ? '' : 's'}`;
     const why = (all) => {
-      if (d.essential) return `<div class="up-ab-why up-ab-why-ess"><strong>Core system package.</strong> Marked essential: the system cannot run without it, so it can never be removed.${n ? ` Used by <strong>${pl(n)}</strong>.` : ''}${chipsHtml(all)}</div>`;
+      if (d.essential || d.protected) return `<div class="up-ab-why up-ab-why-ess"><strong>Core system package.</strong> ${d.essential ? 'Marked essential: the system cannot run without it, so it can never be removed.' : 'Marked protected: the system needs it to boot, so apt refuses to remove it.'}${n ? ` Used by <strong>${pl(n)}</strong>.` : ''}${chipsHtml(all)}</div>`;
       if (d.manual) return `<div class="up-ab-why up-ab-why-manual"><strong>You installed this directly</strong> (marked manual in apt). ${n ? `Also used by <strong>${pl(n)}</strong>:` : 'Nothing else depends on it.'}${chipsHtml(all)}</div>`;
       const by = d.manualDependents || [];
       return `<div class="up-ab-why"><strong>Installed automatically</strong>${by.length ? ` as a dependency of <strong>${by.slice(0, 3).map(esc).join(', ')}</strong>${by.length > 3 ? ` and ${by.length - 3} more you installed` : ''}` : ' as a dependency'}. ${n ? `Needed by <strong>${pl(n)}</strong>:` : 'Nothing installed depends on it anymore, so <code>apt autoremove</code> may remove it.'}${chipsHtml(all)}</div>`;
@@ -6708,7 +6708,7 @@ pageRenderers.updates = (() => {
           <dl class="up-ab-facts">
             ${fact('Source', d.source && esc(d.source), true)}
             ${fact('Section', d.section && esc(d.section))}
-            ${fact('Priority', d.priority && `${esc(d.priority)}${d.essential ? ' <span class="inv-dim">(essential)</span>' : ''}`)}
+            ${fact('Priority', d.priority && `${esc(d.priority)}${d.essential ? ' <span class="inv-dim">(essential)</span>' : d.protected ? ' <span class="inv-dim">(protected)</span>' : ''}`)}
             ${fact('Comes from', archive && esc(archive))}
             ${fact('Maintainer', d.maintainer && esc(d.maintainer))}
             ${fact('Installed size', d.installedSize ? fmtBytes(d.installedSize) : null)}

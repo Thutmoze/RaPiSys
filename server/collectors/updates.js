@@ -291,6 +291,7 @@ export function parsePackageAbout(pkg, raw = {}) {
     summary: (f.Description || f['Description-en'] || '').trim(),
     description: parseLongDescription(descLines),
     essential: /^yes$/i.test(f.Essential || ''),
+    protected: /^yes$/i.test(f.Protected || ''),
     priority: f.Priority || null,
     section: f.Section || null,
     source: (f.Source || f.Package).split(/\s/)[0],

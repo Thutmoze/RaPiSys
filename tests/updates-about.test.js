@@ -96,6 +96,10 @@ describe('parsePackageAbout', () => {
     });
     expect(e).toMatchObject({ essential: true, manual: true, origin: 'raspberrypi', source: 'libc6', requiredByCount: 0 });
   });
+  it('marks protected packages (trixie libc6 is Protected, not Essential)', () => {
+    const e = parsePackageAbout('libc6', { show: 'Package: libc6\nProtected: yes\nPriority: optional\nDescription: GNU C Library\n' });
+    expect(e).toMatchObject({ essential: false, protected: true });
+  });
   it('drops a non-http homepage', () => {
     const e = parsePackageAbout('x', { show: 'Package: x\nHomepage: javascript:alert(1)\nDescription: x\n' });
     expect(e.homepage).toBeNull();
