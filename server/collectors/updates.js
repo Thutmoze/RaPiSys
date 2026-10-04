@@ -131,13 +131,17 @@ export function isBinNmuRebuild(installedVersion, candidateVersion) {
 
 /**
  * Packages whose new version only takes effect after a reboot: the kernel,
- * the GPU firmware and bootloader images in /boot/firmware, the EEPROM
- * updater (it stages the new bootloader for the next boot), and the libraries
- * and daemons PID 1 itself holds (libc, systemd, dbus). Shown as the "reboot"
- * tag before install; what is actually pending afterwards comes from the
- * host (see services/reboot-status.js), not from this list.
+ * the GPU firmware and bootloader images in /boot/firmware, and the EEPROM
+ * updater (it stages the new bootloader for the next boot). Shown as the
+ * "reboot" tag before install; what is actually pending afterwards comes
+ * from the host (see services/reboot-status.js), not from this list.
+ *
+ * Deliberately not libc6/systemd/dbus: their maintainer scripts re-execute
+ * PID 1, so afterwards only individual programs run old code, which the
+ * page reports as "restart recommended". Tagging them "reboot" promised
+ * something the banner then contradicted.
  */
-const REBOOT_PKG_RE = /^(linux-image-|raspberrypi-kernel$|raspberrypi-bootloader$|raspi-firmware$|rpi-eeprom$|libc6$|systemd$|libsystemd0$|dbus$|dbus-daemon$|dbus-broker$)/;
+const REBOOT_PKG_RE = /^(linux-image-|raspberrypi-kernel$|raspberrypi-bootloader$|raspi-firmware$|rpi-eeprom$)/;
 export function needsReboot(pkg) {
   return REBOOT_PKG_RE.test(String(pkg || ''));
 }

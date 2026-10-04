@@ -265,12 +265,13 @@ describe('createRebootStatus', () => {
 });
 
 describe('needsReboot (pre-install tag)', () => {
-  it('tags kernel, firmware, bootloader and PID 1 libraries', () => {
-    for (const p of ['linux-image-rpi-2712', 'linux-image-6.18.50+rpt-rpi-2712', 'raspi-firmware', 'rpi-eeprom', 'libc6', 'systemd', 'dbus'])
+  it('tags kernel, GPU firmware and bootloader', () => {
+    for (const p of ['linux-image-rpi-2712', 'linux-image-6.18.50+rpt-rpi-2712', 'raspi-firmware', 'rpi-eeprom'])
       expect(needsReboot(p)).toBe(true);
   });
-  it('does not tag ordinary packages or look-alikes', () => {
-    for (const p of ['linux-headers-rpi-2712', 'linux-libc-dev', 'wf-panel-pi', 'libssl3t64', 'systemd-timesyncd', 'rpi-eeprom-tools', 'libc6-dev', '', null])
+  it('does not tag libraries PID 1 re-executes onto, ordinary packages or look-alikes', () => {
+    // libc6/systemd/dbus postinst re-exec PID 1; what remains is "restart recommended".
+    for (const p of ['libc6', 'systemd', 'dbus', 'linux-headers-rpi-2712', 'linux-libc-dev', 'wf-panel-pi', 'libssl3t64', 'systemd-timesyncd', 'rpi-eeprom-tools', 'libc6-dev', '', null])
       expect(needsReboot(p)).toBe(false);
   });
   it('is carried on upgrade-plan rows', () => {
