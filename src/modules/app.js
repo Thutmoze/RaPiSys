@@ -6706,7 +6706,10 @@ pageRenderers.updates = (() => {
     } else {
       msg += `<br><br><div class="up-cascade-list">${packages.slice(0, 30).map((p) => `<span class="up-cascade-pkg">${esc(p)}</span>`).join('')}</div><br>apt will also pull in any required dependencies.`;
     }
-    if (!await rapisysConfirm(msg, { confirmLabel: `Update ${packages.length}`, html: true, cls: plan ? 'up-plan' : '', onMount })) return;
+    // Count what apt will actually change, not just what was ticked, so the
+    // button agrees with the "N package(s) will change in total" line.
+    const changeCount = new Set([...packages, ...extras.map((d) => d.name)]).size;
+    if (!await rapisysConfirm(msg, { confirmLabel: `Update ${changeCount}`, html: true, cls: plan ? 'up-plan' : '', onMount })) return;
     startUpgrade(host, { packages, label, onComplete });
   }
 
