@@ -350,13 +350,14 @@ function removePironmanOverlay(send, overlay) {
 // Configure the Pi to fully power off on shutdown (POWER_OFF_ON_HALT=1) so the
 // GPIO-powered RGB fan does not keep running after halt. SunFounder requires
 // this for the Mini/Max/Pro variants. Idempotent: skip if already set.
+// Returns 'already' (no change), 'applied' (staged, needs reboot) or false.
 async function pironmanEepromPowerOff(send) {
   const have = await run('sh', ['-c', 'command -v rpi-eeprom-config >/dev/null && echo OK'], 5000).catch(() => ({ stdout: '' }));
   if (!/OK/.test(have.stdout)) { send && send('rpi-eeprom-config not available; skipping shutdown power-off config.'); return false; }
   const cur = await run('rpi-eeprom-config', [], 8000).catch(() => ({ stdout: '' }));
   if (/^\s*POWER_OFF_ON_HALT=1\s*$/m.test(cur.stdout || '')) {
     send && send('EEPROM already set to full power-off on shutdown.');
-    return true;
+    return 'already';
   }
   send && send('Configuring EEPROM: full power-off on shutdown (POWER_OFF_ON_HALT=1)…');
   // Build the new config: keep existing lines, set/replace POWER_OFF_ON_HALT.
@@ -365,7 +366,7 @@ async function pironmanEepromPowerOff(send) {
   const tmp = '/tmp/rapisys-eeprom.conf';
   fs.writeFileSync(tmp, cfg);
   const r = await run('rpi-eeprom-config', ['--apply', tmp], 30000).catch((e) => ({ code: 1, stderr: String(e) }));
-  if (r.code === 0) { send && send('EEPROM updated (applies on next reboot).'); return true; }
+  if (r.code === 0) { send && send('EEPROM updated (applies on next reboot).'); return 'applied'; }
   send && send('Warning: EEPROM update failed (' + (r.stderr || '').slice(0,120) + '). You can set it via raspi-config → Advanced → Shutdown Behaviour.');
   return false;
 }
@@ -745,8 +746,9 @@ const OPS = {
 
   // Configure full power-off on shutdown on demand (same as during install).
   async 'pironman.eepromConfigure'(_, send) {
-    const ok = await pironmanEepromPowerOff(send);
-    return { ok, rebootRecommended: ok };
+    // Only a real EEPROM write needs a reboot; an already-set config does not.
+    const res = await pironmanEepromPowerOff(send);
+    return { ok: !!res, changed: res === 'applied', rebootRecommended: res === 'applied' };
   },
 
   async 'pironman.restart'() {

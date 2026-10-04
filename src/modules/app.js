@@ -3260,6 +3260,7 @@ pageRenderers.settings = (() => {
       try { snap = await api('/pironman/status'); } catch { /* agent/api maybe absent */ }
       if (snap.installed) { try { upd = await api('/pironman/update-check'); } catch { /* */ } }
       if (snap.installed) { try { sched = await api('/pironman/schedule'); } catch { /* */ } }
+      if (snap.installed) { try { eeprom = await api('/pironman/eeprom/status'); } catch { /* */ } }
     }
 
     const masterSub = !enabled
@@ -3531,7 +3532,7 @@ pageRenderers.settings = (() => {
       try {
         const r = await api('/pironman/eeprom/configure', { method: 'POST', body: {} });
         if (r.ok) {
-          toast('success', 'Case', 'Shutdown power-off configured' + (r.rebootRecommended ? ' — reboot recommended' : ''));
+          toast('success', 'Case', r.changed === false ? 'Shutdown power-off was already configured' : 'Shutdown power-off configured' + (r.rebootRecommended ? ', reboot recommended' : ''));
           if (r.rebootRecommended) {
             const go = await rapisysConfirm('EEPROM updated to fully power off on shutdown. A reboot is needed for it to take effect. Reboot the Pi now?', { confirmLabel: 'Reboot now' });
             if (go) { try { await api('/pironman/reboot', { method: 'POST', body: {} }); toast('success', 'Case', 'Rebooting the Pi…'); } catch (e) { toast('error', 'Case', e.message); } }
