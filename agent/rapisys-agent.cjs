@@ -487,6 +487,36 @@ function parseDeletedLibs(mapsText) {
   return [...out];
 }
 
+/**
+ * dpkg -S glob for a replaced library, keeping the soname major so the new
+ * copy matches even when the upgrade renamed the file:
+ *   /usr/lib/aarch64-linux-gnu/libxkbcommon.so.0.0.0 -> star/libxkbcommon.so.0*
+ *   /usr/lib/aarch64-linux-gnu/wf-panel-pi/libbatt.so -> star/libbatt.so*
+ * The leading star (written out above to keep this comment closed) covers
+ * the /lib vs /usr/lib split in older dpkg databases.
+ */
+function libOwnerPattern(file) {
+  const m = path.basename(String(file)).match(/^(.*?\.so(?:\.\d+)?)/);
+  return `*/${m ? m[1] : path.basename(String(file))}*`;
+}
+
+/** Owning package for `file` in `dpkg -S` output (from libOwnerPattern globs). */
+function libOwner(file, dpkgOut) {
+  const pat = libOwnerPattern(file).slice(2, -1);   // the bare soname prefix
+  const dir = path.dirname(String(file)).replace(/^\/usr/, '');
+  let fallback = null;
+  for (const line of String(dpkgOut || '').split('\n')) {
+    const m = line.match(/^([^:,\s]+)(?::\S+)?(?:,\s*\S+)*:\s+(\/\S+)$/);
+    if (!m) continue;
+    const base = path.basename(m[2]);
+    if (!base.startsWith(pat) || /-dev$/.test(m[1])) continue;
+    // Prefer the same directory: two packages can ship one soname in different dirs.
+    if (path.dirname(m[2]).replace(/^\/usr/, '') === dir) return m[1];
+    fallback = fallback || m[1];
+  }
+  return fallback;
+}
+
 /** Who owns a process, from /proc/<pid>/cgroup (cgroup v2). */
 function classifyCgroup(cgroupText) {
   const line = String(cgroupText || '').split('\n').find((l) => l.startsWith('0::')) || '';
@@ -2806,17 +2836,17 @@ WantedBy=multi-user.target
     const procs = [...groups.values()].slice(0, 60)
       .map((g) => ({ ...g, files: [...g.files].slice(0, 12) }));
 
-    // Which packages own those libraries (the path now holds the new copy).
+    // Which packages own those libraries. The upgrade may have renamed the
+    // file (libxkbcommon.so.0.0.0 -> .so.0.13.1), so look up by soname pattern.
     const allFiles = [...new Set(procs.flatMap((p) => p.files))].slice(0, 40);
-    const owners = {};
-    if (allFiles.length) {
-      const s = await run('dpkg', ['-S', ...allFiles], 15000).catch(() => ({ stdout: '' }));
-      for (const line of (s.stdout || '').split('\n')) {
-        const m = line.match(/^([^:,\s]+)(?::\S+)?(?:,\s*\S+)*:\s+(\/\S+)$/);
-        if (m) owners[m[2]] = m[1];
-      }
+    const patterns = [...new Set(allFiles.map(libOwnerPattern))];
+    let dpkgOut = '';
+    if (patterns.length) {
+      // Exits non-zero when any pattern is unowned, but still prints the rest.
+      const s = await run('dpkg', ['-S', ...patterns], 15000).catch(() => ({ stdout: '' }));
+      dpkgOut = s.stdout || '';
     }
-    for (const p of procs) p.packages = [...new Set(p.files.map((f) => owners[f]).filter(Boolean))];
+    for (const p of procs) p.packages = [...new Set(p.files.map((f) => libOwner(f, dpkgOut)).filter(Boolean))];
 
     return { bootTime: btime, kernel: { running, latest }, firmware, eeprom, rebootRequiredFile, procs };
   },
@@ -2955,4 +2985,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
 
-module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup };
+module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner };

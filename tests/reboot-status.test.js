@@ -12,7 +12,7 @@ import { flagWording } from '../server/core/metric-catalog.js';
 
 const require = createRequire(import.meta.url);
 process.env.AGENT_SECRET = 'test-secret-not-used-for-any-real-hmac';
-const { newestKernel, parseDeletedLibs, classifyCgroup } = require('../agent/rapisys-agent.cjs');
+const { newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner } = require('../agent/rapisys-agent.cjs');
 
 describe('newestKernel', () => {
   const boot = ['vmlinuz-6.18.34+rpt-rpi-2712', 'vmlinuz-6.18.34+rpt-rpi-v8',
@@ -67,6 +67,38 @@ describe('parseDeletedLibs', () => {
   it('returns nothing for clean or empty maps', () => {
     expect(parseDeletedLibs('7f8c000000-7f8c010000 r-xp 00000000 103:02 4001 /usr/lib/aarch64-linux-gnu/libc.so.6')).toEqual([]);
     expect(parseDeletedLibs('')).toEqual([]);
+  });
+});
+
+describe('libOwnerPattern / libOwner', () => {
+  // Real `dpkg -S` output for these globs on the Pi, after libxkbcommon0
+  // went 1.7.0 -> 1.13.1 and renamed libxkbcommon.so.0.0.0 to .so.0.13.1.
+  const dpkgOut = [
+    'libxkbcommon0:arm64: /usr/lib/aarch64-linux-gnu/libxkbcommon.so.0.13.1',
+    'libxkbcommon0:arm64: /usr/lib/aarch64-linux-gnu/libxkbcommon.so.0',
+    'wfplug-batt: /usr/lib/aarch64-linux-gnu/wf-panel-pi/libbatt.so',
+    'libssl3t64:arm64: /usr/lib/aarch64-linux-gnu/libssl.so.3',
+    'libssl-dev:arm64: /usr/lib/aarch64-linux-gnu/libssl.so',
+  ].join('\n');
+
+  it('builds a soname glob that survives a renamed file', () => {
+    expect(libOwnerPattern('/usr/lib/aarch64-linux-gnu/libxkbcommon.so.0.0.0')).toBe('*/libxkbcommon.so.0*');
+    expect(libOwnerPattern('/usr/lib/aarch64-linux-gnu/libssl.so.3')).toBe('*/libssl.so.3*');
+    expect(libOwnerPattern('/usr/lib/aarch64-linux-gnu/wf-panel-pi/libbatt.so')).toBe('*/libbatt.so*');
+  });
+
+  it('finds the owner of a library whose old filename no longer exists', () => {
+    expect(libOwner('/usr/lib/aarch64-linux-gnu/libxkbcommon.so.0.0.0', dpkgOut)).toBe('libxkbcommon0');
+  });
+
+  it('finds unversioned plugins and exact matches, never the -dev package', () => {
+    expect(libOwner('/usr/lib/aarch64-linux-gnu/wf-panel-pi/libbatt.so', dpkgOut)).toBe('wfplug-batt');
+    expect(libOwner('/usr/lib/aarch64-linux-gnu/libssl.so.3', dpkgOut)).toBe('libssl3t64');
+  });
+
+  it('does not confuse similarly named libraries', () => {
+    expect(libOwner('/usr/lib/aarch64-linux-gnu/libxkbcommon-x11.so.0.0.0', dpkgOut)).toBeNull();
+    expect(libOwner('/usr/lib/aarch64-linux-gnu/libfoo.so.1', '')).toBeNull();
   });
 });
 
