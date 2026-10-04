@@ -223,6 +223,88 @@ export function describePlan(items, info, selected = []) {
   });
 }
 
+/**
+ * Turn a Debian long description (the continuation lines of Description, one
+ * leading space already stripped) into blocks: a string is a paragraph, an
+ * array is a bullet list. " ." separates paragraphs; "* ", "- ", "+ " and
+ * "o " start bullets, and a deeper-indented line continues the last bullet.
+ */
+export function parseLongDescription(lines) {
+  const blocks = [];
+  let para = [], list = null;
+  const flushPara = () => { if (para.length) blocks.push(para.join(' ')); para = []; };
+  const flushList = () => { if (list) blocks.push(list); list = null; };
+  for (const raw of lines) {
+    if (raw.trim() === '.') { flushPara(); flushList(); continue; }
+    const b = raw.match(/^\s*[*\-+o]\s+(.*)$/);
+    if (b) { flushPara(); (list ||= []).push(b[1].trim()); continue; }
+    if (list && /^\s{2,}\S/.test(raw)) { list[list.length - 1] += ' ' + raw.trim(); continue; }
+    flushList();
+    if (raw.trim()) para.push(raw.trim());
+  }
+  flushPara(); flushList();
+  return blocks;
+}
+
+/** Package names from `apt-cache rdepends` output, minus `pkg` itself. */
+function parseRdepends(text, pkg) {
+  const out = new Set();
+  let inList = false;
+  for (const line of String(text || '').split('\n')) {
+    if (/^Reverse Depends:/.test(line)) { inList = true; continue; }
+    if (!inList) continue;
+    const name = line.trim().replace(/^\|/, '').replace(/:[a-z0-9]+$/, '');
+    if (name && name !== pkg) out.add(name);
+  }
+  return [...out];
+}
+
+/**
+ * Build the Updates "About" panel payload from the agent's apt.pkgInfo output:
+ * the candidate record from `apt-cache show`, `apt-cache rdepends --installed`,
+ * `apt-mark showmanual`, and the candidate's archive host.
+ */
+export function parsePackageAbout(pkg, raw = {}) {
+  const stanza = String(raw.show || '').split(/\n\s*\n/)[0] || '';
+  const f = {}, descLines = [];
+  let key = null;
+  for (const line of stanza.split('\n')) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9-]*):\s?(.*)$/);
+    if (m) { key = m[1]; f[key] = m[2]; continue; }
+    if (key && /^ /.test(line)) {
+      if (/^Description(-[a-z_A-Z]+)?$/.test(key)) descLines.push(line.slice(1));
+      else f[key] += ' ' + line.trim();
+    }
+  }
+  if (!f.Package) return null;
+  const manualSet = new Set(String(raw.manual || '').split('\n').map((l) => l.trim().replace(/:[a-z0-9]+$/, '')).filter(Boolean));
+  const requiredBy = parseRdepends(raw.rdepends, pkg);
+  const host = raw.origin || null;
+  const origin = !host ? null
+    : /(^|\.)raspberrypi\.(com|org)$/i.test(host) ? 'raspberrypi'
+    : /(^|\.)debian\.org$/i.test(host) ? 'debian' : 'other';
+  const kb = parseInt(f['Installed-Size'], 10);
+  const homepage = /^https?:\/\/\S+$/i.test(f.Homepage || '') ? f.Homepage : null;
+  return {
+    package: pkg,
+    version: f.Version || null,
+    summary: (f.Description || f['Description-en'] || '').trim(),
+    description: parseLongDescription(descLines),
+    essential: /^yes$/i.test(f.Essential || ''),
+    priority: f.Priority || null,
+    section: f.Section || null,
+    source: (f.Source || f.Package).split(/\s/)[0],
+    maintainer: (f.Maintainer || '').replace(/\s*<[^>]*>/g, '').trim() || null,
+    installedSize: Number.isFinite(kb) ? kb * 1024 : null,
+    homepage,
+    origin, originHost: host,
+    manual: manualSet.has(pkg),
+    requiredByCount: requiredBy.length,
+    requiredBy: requiredBy.slice(0, 200),
+    manualDependents: requiredBy.filter((n) => manualSet.has(n)).slice(0, 20),
+  };
+}
+
 export function createUpdatesCollector({ updatesRepo } = {}) {
   async function refresh(onProgress) {
     // Fast refresh: apt-get update + list. Security is detected lazily when a
@@ -420,10 +502,18 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     } catch { return describePlan(items, {}, selected); }
   }
 
+  // Facts for the "About" panel. Throws on agent failure so the route can
+  // report it (an old agent answers "operation not allowed").
+  async function about(pkg) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    const r = await agentCall('apt.pkgInfo', { pkg }, null, 30000);
+    return parsePackageAbout(pkg, r);
+  }
+
   async function firmwareUpdate(onLine) {
     if (!agentConfigured()) throw new Error('host agent required');
     return agentCall('eeprom.update', {}, onLine, 300000);
   }
 
-  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, planDetails, firmwareUpdate };
+  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, planDetails, about, firmwareUpdate };
 }

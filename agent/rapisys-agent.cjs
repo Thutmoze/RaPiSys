@@ -2861,6 +2861,26 @@ WantedBy=multi-user.target
     const r = await run('apt-cache', ['show', '--no-all-versions', ...packages], 30000).catch(() => ({ stdout: '' }));
     return { show: (r.stdout || '').slice(0, 4 * 1024 * 1024) };
   },
+  // Facts for the Updates "About" panel: the candidate record, whether the
+  // package was installed by hand, what installed packages depend on it, and
+  // which archive serves it. Read-only: apt-cache and apt-mark read local state.
+  // Raw output only; the server parses it.
+  async 'apt.pkgInfo'({ pkg }) {
+    assert(PKG_RE.test(pkg), 'invalid package name');
+    const [show, rdep, manual, pol] = await Promise.all([
+      run('apt-cache', ['show', '--no-all-versions', pkg], 15000),
+      run('apt-cache', ['rdepends', '--installed', '--no-recommends', '--no-suggests', '--no-conflicts',
+        '--no-breaks', '--no-replaces', '--no-enhances', pkg], 15000),
+      run('apt-mark', ['showmanual'], 15000),
+      run('apt-cache', ['policy', pkg], 15000),
+    ].map((p) => p.catch(() => ({ stdout: '' }))));
+    return {
+      show: (show.stdout || '').slice(0, 256 * 1024),
+      rdepends: (rdep.stdout || '').slice(0, 1024 * 1024),
+      manual: (manual.stdout || '').slice(0, 1024 * 1024),
+      origin: parsePolicyOrigins(pol.stdout || '')[pkg] || null,
+    };
+  },
   async 'eeprom.check'() {
     const r = await run('rpi-eeprom-update', [], 20000).catch((e) => ({ code: 1, stdout: '', stderr: e.message }));
     return { output: (r.stdout + r.stderr).trim(), updateAvailable: /UPDATE AVAILABLE/i.test(r.stdout) };

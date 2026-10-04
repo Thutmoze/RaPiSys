@@ -90,6 +90,17 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     catch { return null; }
   };
 
+  // "About" panel: what a package is and why it is installed (read-only).
+  r.get('/about/:pkg', async (req, res) => {
+    const pkg = req.params.pkg;
+    if (!/^[a-z0-9][a-z0-9+.:~-]*$/.test(pkg)) return res.status(400).json({ error: 'invalid package name' });
+    try {
+      const out = await updates.about(pkg);
+      if (!out) return res.status(404).json({ error: 'package not found in apt' });
+      res.json(out);
+    } catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
   r.get('/changelog/:pkg', async (req, res) => {
     // candidate=1 (default) extracts the NEW version's notes (range-fetch).
     const candidate = req.query.candidate !== '0';

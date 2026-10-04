@@ -5952,6 +5952,11 @@ pageRenderers.updates = (() => {
     power: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><path d="M12 2v10"/></svg>',
     rotate: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
     search: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
+    info: '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+    share: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/></svg>',
+    box: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>',
+    link: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>',
+    book: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
   };
   const REBOOT_TAG = '<span class="up-tag up-tag-reboot" title="Takes effect only after a reboot">reboot</span>';
   // Escape, then color-code CVE ids, security markers, and urgency by severity.
@@ -6271,7 +6276,7 @@ pageRenderers.updates = (() => {
         <tbody>${filteredUpdates().map((u) => `
           <tr>
             <td><input type="checkbox" class="up-cb" data-pkg="${esc(u.package)}" ${selected.has(u.package) ? 'checked' : ''}></td>
-            <td><b>${esc(u.package)}</b></td>
+            <td><div class="up-pkg-cell"><b>${esc(u.package)}</b><button class="up-about-btn" data-about="${esc(u.package)}" title="What is ${esc(u.package)}?" aria-label="About ${esc(u.package)}">${ICN.info}</button></div></td>
             <td class="inv-dim inv-desc">${esc(u.description || '')}</td>
             <td class="inv-dim up-ver">${esc(u.installed || '—')}</td>
             <td class="up-new up-ver">${esc(u.candidate)}</td>
@@ -6359,6 +6364,7 @@ pageRenderers.updates = (() => {
       if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
     });
     host.querySelectorAll('[data-changelog]').forEach((b) => b.onclick = () => showChangelog(host, b.dataset.changelog));
+    host.querySelectorAll('[data-about]').forEach((b) => b.onclick = () => showAbout(host, b.dataset.about));
     const b = $('[data-up=selected]', host);
     if (b) { b.disabled = selected.size === 0; b.classList.toggle('up-btn-dim', selected.size === 0); const sp = b.querySelector('span'); if (sp) sp.textContent = `Update selected (${selected.size})`; }
   }
@@ -6621,6 +6627,97 @@ pageRenderers.updates = (() => {
       }
     });
     ev.addEventListener('error', () => { ev.close(); if (prog) prog.innerHTML = '<span class="up-cl-empty">Download failed.</span>'; if (btn) btn.disabled = false; });
+  }
+
+  // "About" panel: what a package is, why it is installed, and where to read
+  // more. Facts come straight from apt via the agent (GET /updates/about/:pkg).
+  async function showAbout(host, pkg) {
+    const u = updates.find((x) => x.package === pkg) || {};
+    const ov = el('div', 'wizard-overlay');
+    const close = () => ov.remove();
+    ov.innerHTML = `<div class="wizard card up-ab-modal" role="dialog" aria-label="About ${esc(pkg)}" tabindex="-1">
+        <div class="up-cl-head">
+          <div class="up-ab-title"><b>${esc(pkg)}</b><span class="inv-dim">about</span>${u.candidate ? `<span class="up-cl-ver">${esc(u.installed || '')} → ${esc(u.candidate)}</span>` : ''}</div>
+          <div class="up-cl-head-actions"><button class="up-link" data-ab="x">close ✕</button></div>
+        </div>
+        <div class="up-ab-body" data-ab="body"><div class="up-log-loading"><span class="up-spinner-sm"></span>Reading package info…</div></div>
+        <div class="up-ab-foot">
+          <button class="action-btn set-btn-cancel" data-ab="x">Close</button>
+          <button class="action-btn set-btn-edit" data-ab="cl">${ICN.book}<span>View changelog</span></button>
+          ${u.candidate ? `<button class="action-btn set-btn-edit" data-ab="upd">${ICN.download}<span>Update</span></button>` : ''}
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelectorAll('[data-ab=x]').forEach((b) => b.onclick = close);
+    ov.querySelector('[data-ab=cl]').onclick = () => { close(); showChangelog(host, pkg); };
+    const upd = ov.querySelector('[data-ab=upd]');
+    if (upd) upd.onclick = () => { close(); confirmUpgrade(host, { packages: [pkg], label: pkg }); };
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    ov.querySelector('.up-ab-modal').focus();
+
+    const body = ov.querySelector('[data-ab=body]');
+    let d;
+    try { d = await api(`/updates/about/${encodeURIComponent(pkg)}`); }
+    catch (err) {
+      const old = /not allowed|unknown op/i.test(err.message);
+      body.innerHTML = `<div class="up-cl-stubnote up-ab-err">${old
+        ? 'The host agent does not know this operation yet. Reinstall the agent on this Pi and try again.'
+        : `Could not read package info: ${esc(err.message)}`}</div>`;
+      return;
+    }
+    if (!ov.isConnected) return;
+    const CHIPS = 8;
+    const chip = (n) => `<span class="up-ab-chip">${esc(n)}</span>`;
+    const chipsHtml = (all) => {
+      const shown = all ? d.requiredBy : d.requiredBy.slice(0, CHIPS);
+      const rest = d.requiredByCount - shown.length;
+      if (!shown.length) return '';
+      return `<div class="up-ab-chips">${shown.map(chip).join('')}${rest > 0
+        ? (all ? `<span class="up-ab-chip">and ${rest.toLocaleString()} more</span>` : `<button class="up-ab-chip up-ab-chip-more" data-ab="more">+${rest.toLocaleString()} more</button>`)
+        : ''}</div>`;
+    };
+    const n = d.requiredByCount;
+    const pl = (k) => `${k.toLocaleString()} installed package${k === 1 ? '' : 's'}`;
+    const why = (all) => {
+      if (d.essential) return `<div class="up-ab-why up-ab-why-ess"><strong>Core system package.</strong> Marked essential: the system cannot run without it, so it can never be removed.${n ? ` Used by <strong>${pl(n)}</strong>.` : ''}${chipsHtml(all)}</div>`;
+      if (d.manual) return `<div class="up-ab-why up-ab-why-manual"><strong>You installed this directly</strong> (marked manual in apt). ${n ? `Also used by <strong>${pl(n)}</strong>:` : 'Nothing else depends on it.'}${chipsHtml(all)}</div>`;
+      const by = d.manualDependents || [];
+      return `<div class="up-ab-why"><strong>Installed automatically</strong>${by.length ? ` as a dependency of <strong>${by.slice(0, 3).map(esc).join(', ')}</strong>${by.length > 3 ? ` and ${by.length - 3} more you installed` : ''}` : ' as a dependency'}. ${n ? `Needed by <strong>${pl(n)}</strong>:` : 'Nothing installed depends on it anymore, so <code>apt autoremove</code> may remove it.'}${chipsHtml(all)}</div>`;
+    };
+    const desc = (d.description || []).map((b) => Array.isArray(b)
+      ? `<ul>${b.map((li) => `<li>${esc(li)}</li>`).join('')}</ul>` : `<p>${esc(b)}</p>`).join('');
+    const tags = `${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}${u.rpi ? '<span class="up-tag up-tag-rpi">raspberry pi</span>' : ''}`;
+    const archive = d.origin === 'raspberrypi' ? 'Raspberry Pi archive' : d.origin === 'debian' ? 'Debian archive' : d.originHost || null;
+    const fact = (k, v, mono) => v ? `<dt>${k}</dt><dd${mono ? ' class="mono"' : ''}>${v}</dd>` : '';
+    const links = [];
+    const linkBtn = (href, label) => `<a class="up-ab-linkbtn" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${ICN.link}${label}</a>`;
+    if (d.homepage) links.push(linkBtn(d.homepage, 'Project homepage'));
+    if (d.origin === 'debian') {
+      links.push(linkBtn(`https://packages.debian.org/${encodeURIComponent(pkg)}`, 'Debian package page'));
+      links.push(linkBtn(`https://tracker.debian.org/pkg/${encodeURIComponent(d.source)}`, 'Debian tracker'));
+    }
+    const summary = d.summary || u.description || '';
+    const render = (all) => {
+      body.innerHTML = `
+        ${summary ? `<div class="up-ab-summary">${esc(summary.charAt(0).toUpperCase() + summary.slice(1))}</div>` : ''}
+        ${tags ? `<div class="up-ab-tags">${tags}</div>` : ''}
+        ${desc ? `<div class="up-ab-desc">${desc}</div>` : ''}
+        <div class="up-ab-sect"><div class="up-ab-h">${ICN.share}Why is this installed?</div>${why(all)}</div>
+        <div class="up-ab-sect"><div class="up-ab-h">${ICN.box}Package facts</div>
+          <dl class="up-ab-facts">
+            ${fact('Source', d.source && esc(d.source), true)}
+            ${fact('Section', d.section && esc(d.section))}
+            ${fact('Priority', d.priority && `${esc(d.priority)}${d.essential ? ' <span class="inv-dim">(essential)</span>' : ''}`)}
+            ${fact('Comes from', archive && esc(archive))}
+            ${fact('Maintainer', d.maintainer && esc(d.maintainer))}
+            ${fact('Installed size', d.installedSize ? fmtBytes(d.installedSize) : null)}
+          </dl></div>
+        ${links.length ? `<div class="up-ab-sect"><div class="up-ab-h">${ICN.book}Learn more</div><div class="up-ab-links">${links.join('')}</div></div>` : ''}`;
+      const more = body.querySelector('[data-ab=more]');
+      if (more) more.onclick = () => render(true);
+    };
+    render(false);
   }
 
   async function showChangelog(host, pkg) {
