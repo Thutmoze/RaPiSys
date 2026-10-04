@@ -2846,15 +2846,16 @@ WantedBy=multi-user.target
         if (!files.length) continue;
         const owner = classifyCgroup(fs.readFileSync(`/proc/${pid}/cgroup`, 'utf8'));
         if (owner.kind === 'container') continue;
+        // Name by the binary, not /proc/<pid>/comm: comm is cut at 15 chars, so
+        // xdg-desktop-portal and xdg-desktop-portal-gtk would merge into one
+        // "xdg-desktop-por". The binary may itself have been replaced too:
+        // "/usr/bin/labwc (deleted)".
+        let exe = null;
+        try { exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch { /* exited */ }
         const comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
-        const key = owner.unit || comm;
+        const key = owner.unit || exe || comm;
         let g = groups.get(key);
-        if (!g) {
-          // The binary itself may have been replaced too: "/usr/bin/labwc (deleted)".
-          let exe = null;
-          try { exe = fs.readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''); } catch { /* exited */ }
-          g = { name: comm, unit: owner.unit, kind: owner.kind, exe, pids: [], files: new Set() };
-        }
+        if (!g) g = { name: exe ? path.basename(exe) : comm, unit: owner.unit, kind: owner.kind, exe, pids: [], files: new Set() };
         g.pids.push(Number(pid));
         files.forEach((f) => g.files.add(f));
         groups.set(key, g);
