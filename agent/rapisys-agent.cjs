@@ -111,6 +111,71 @@ async function firstFreePort(preferred) {
   return preferred;   // give up gracefully; caller surfaces the bind error
 }
 
+// ---- Pi-hole in Docker: find the container and judge its image ------------
+// `docker ps --filter ancestor=pihole/pihole` stops matching once the tag is
+// re-pulled onto a newer image: the running container is left on an untagged
+// image ID. The container's configured image (.Config.Image) keeps the
+// `pihole/pihole:<tag>` reference, so match on that, then on the name.
+const PIHOLE_IMAGE_RE = /^(?:(?:docker\.io|index\.docker\.io|registry-1\.docker\.io)\/)?pihole\/pihole(?::([\w][\w.-]{0,127}))?(?:@sha256:[a-f0-9]{64})?$|^ghcr\.io\/pi-hole\/pihole(?::([\w][\w.-]{0,127}))?(?:@sha256:[a-f0-9]{64})?$/;
+const CONTAINER_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+
+/** The tag of a Pi-hole image reference ('latest' when untagged), or null if
+ *  the reference is not a Pi-hole image. */
+function piholeImageTag(ref) {
+  const m = String(ref || '').trim().match(PIHOLE_IMAGE_RE);
+  if (!m) return null;
+  return m[1] || m[2] || 'latest';
+}
+
+/** Pick the Pi-hole container from `docker inspect --format
+ *  '{{.Name}}\t{{.Config.Image}}'` output: a container configured from a
+ *  Pi-hole image first, else one named `pihole`. Returns its name or null. */
+function pickPiholeContainer(text) {
+  const rows = String(text || '').split('\n').map((l) => {
+    const [rawName = '', image = ''] = l.trim().split('\t');
+    return { name: rawName.replace(/^\//, ''), image: image.trim() };
+  }).filter((r) => CONTAINER_NAME_RE.test(r.name));
+  const byImage = rows.find((r) => piholeImageTag(r.image));
+  if (byImage) return byImage.name;
+  const byName = rows.find((r) => r.name === 'pihole');
+  return byName ? byName.name : null;
+}
+
+/** Is a Pi-hole Docker update available? Compares the image the container
+ *  RUNS against the local tag and, when known, the registry's index digest.
+ *   containerImageId  `docker inspect` .Image of the container
+ *   runningDigests    .RepoDigests of that image (often [] once it is untagged)
+ *   tagImageId        .Id of the local pihole/pihole:<tag> image, if present
+ *   remoteDigest      the tag's index digest from the registry, if reachable
+ *  `pending` means a newer image is already pulled but the container still
+ *  runs the old one (needs a recreate, not another pull). */
+function piholeDockerUpdateState({ containerImageId, runningDigests = [], tagImageId, remoteDigest } = {}) {
+  const sha = (s) => (String(s || '').match(/sha256:[a-f0-9]{64}/) || [])[0] || null;
+  const running = sha(containerImageId);
+  const tag = sha(tagImageId);
+  const remote = sha(remoteDigest);
+  const runningSet = new Set([running, ...runningDigests.map(sha)].filter(Boolean));
+  const pending = !!(running && tag && running !== tag);
+  if (remote) {
+    // Under the containerd image store the image ID IS the index digest; under
+    // the classic store it shows up in RepoDigests instead. Check both.
+    const current = runningSet.has(remote);
+    return { updateAvailable: !current, pending: pending && !current, checked: 'registry' };
+  }
+  return { updateAvailable: pending, pending, checked: 'local' };
+}
+
+/** Find the running Pi-hole container (name) without a shell. */
+async function findPiholeContainer() {
+  const ps = await run('docker', ['ps', '-q', '--no-trunc'], 6000).catch(() => ({ code: 1, stdout: '' }));
+  if (ps.code !== 0) return null;   // docker missing (ENOENT) or daemon down
+  const ids = ps.stdout.split(/\s+/).filter((s) => /^[a-f0-9]{12,64}$/.test(s));
+  if (!ids.length) return null;
+  const ins = await run('docker', ['inspect', '--format', '{{.Name}}\t{{.Config.Image}}', ...ids], 8000)
+    .catch(() => ({ stdout: '' }));
+  return pickPiholeContainer(ins.stdout);
+}
+
 /** systemd unit name for a mountpoint: /mnt/rapisys/nas1 -> mnt-rapisys-nas1.mount */
 function unitNameFor(mountpoint) {
   return mountpoint.replace(/^\//, '').replace(/-/g, '\\x2d').replace(/\//g, '-');
@@ -1584,18 +1649,18 @@ const OPS = {
       out.port = found.port; out.apiReachable = found.reachable;
       return out;
     }
-    // Docker: a running container from the pihole/pihole image.
-    const dk = await run('sh', ['-c', "command -v docker >/dev/null && docker ps --filter ancestor=pihole/pihole --format '{{.Names}}' 2>/dev/null | head -1"], 6000);
-    if (dk.code === 0 && dk.stdout.trim()) {
-      const name = dk.stdout.trim();
+    // Docker: a running container configured from a Pi-hole image (or named
+    // `pihole`) — see findPiholeContainer for why not `--filter ancestor=`.
+    const name = await findPiholeContainer();
+    if (name) {
       out.installed = true; out.method = 'docker'; out.container = name;
-      const v = await run('sh', ['-c', `docker exec ${shq(name)} pihole -v 2>/dev/null`], 10000).catch(() => ({ stdout: '' }));
+      const v = await run('docker', ['exec', name, 'pihole', '-v'], 10000).catch(() => ({ stdout: '' }));
       const m = (v.stdout || '').match(/Core\s+version\s+is\s+v?([\d.]+)/i);
       out.version = m ? m[1] : null;
       // Host networking shows no docker port map, so read the configured port from
       // inside the container, then VERIFY by probing where the API actually answers.
-      const portRead = await run('sh', ['-c', `docker exec ${shq(name)} pihole-FTL --config webserver.port 2>/dev/null | head -1`], 8000).catch(() => ({ stdout: '' }));
-      const found = await findPort(parsePort(portRead.stdout));
+      const portRead = await run('docker', ['exec', name, 'pihole-FTL', '--config', 'webserver.port'], 8000).catch(() => ({ stdout: '' }));
+      const found = await findPort(parsePort((portRead.stdout || '').split('\n')[0]));
       out.port = found.port; out.apiReachable = found.reachable;
       return out;
     }
@@ -1735,24 +1800,35 @@ const OPS = {
       return { installed: true, method: 'host', updateAvailable,
         currentVersion: cur.CORE || det.version || null, latestVersion: lat.CORE || null, components: { current: cur, latest: lat } };
     }
-    // docker: compare local image digest vs registry latest (no full pull).
+    // docker: compare the image the container RUNS against the local tag and the
+    // registry's index digest. Read-only: a check never pulls, because pulling
+    // moves the tag off the running container's image without updating it.
     const name = det.container || 'pihole';
-    const localDigest = await run('sh', ['-c', `docker inspect --format '{{index .RepoDigests 0}}' ${shq(name)} 2>/dev/null`], 8000).catch(() => ({ stdout: '' }));
-    const local = (localDigest.stdout || '').trim();
-    // `docker manifest inspect` needs experimental on older docker; try it, then
-    // fall back to a `docker pull` dry comparison.
-    const remote = await run('sh', ['-c', "docker manifest inspect pihole/pihole:latest 2>/dev/null | grep -m1 -oE '\"digest\": ?\"sha256:[a-f0-9]+\"' | head -1"], 20000).catch(() => ({ stdout: '' }));
-    let updateAvailable = false;
-    if (local && remote.stdout) {
-      const remoteSha = (remote.stdout.match(/sha256:[a-f0-9]+/) || [])[0];
-      updateAvailable = remoteSha ? !local.includes(remoteSha) : false;
-    } else {
-      // Fallback: pull and see if anything new was downloaded.
-      const pull = await run('sh', ['-c', 'docker pull pihole/pihole:latest 2>&1'], 120000).catch(() => ({ stdout: '' }));
-      updateAvailable = !/Image is up to date/i.test(pull.stdout || '');
+    const ctr = await run('docker', ['inspect', '--format', '{{.Image}}\t{{.Config.Image}}', name], 8000).catch(() => ({ stdout: '' }));
+    const [containerImageId = '', configImage = ''] = (ctr.stdout || '').trim().split('\t');
+    const tag = piholeImageTag(configImage) || 'latest';
+    const imgFmt = ['image', 'inspect', '--format', '{{.Id}}\t{{json .RepoDigests}}'];
+    const parseImg = (r) => {
+      const [id = '', digests = '[]'] = (r.stdout || '').trim().split('\t');
+      try { return { id, digests: JSON.parse(digests) || [] }; } catch { return { id, digests: [] }; }
+    };
+    const runningImg = /^sha256:[a-f0-9]{64}$/.test(containerImageId)
+      ? parseImg(await run('docker', [...imgFmt, containerImageId], 8000).catch(() => ({ stdout: '' })))
+      : { id: '', digests: [] };
+    const tagImg = parseImg(await run('docker', [...imgFmt, `pihole/pihole:${tag}`], 8000).catch(() => ({ stdout: '' })));
+    // Docker Hub's tag API returns the index (multi-arch) digest, which is what
+    // RepoDigests / a containerd-store image ID holds. (`docker manifest inspect`
+    // only lists per-platform digests, so it can't be compared directly.)
+    let remoteDigest = null;
+    if (!/^ghcr\.io\//.test(configImage)) {
+      const hub = await run('curl', ['-fsS', '--max-time', '15',
+        `https://hub.docker.com/v2/repositories/pihole/pihole/tags/${encodeURIComponent(tag)}`], 20000).catch(() => ({ stdout: '' }));
+      try { remoteDigest = JSON.parse(hub.stdout || '{}').digest || null; } catch { remoteDigest = null; }
     }
-    return { installed: true, method: 'docker', updateAvailable,
-      currentVersion: det.version || null, latestVersion: null, container: name };
+    const state = piholeDockerUpdateState({ containerImageId, runningDigests: runningImg.digests,
+      tagImageId: tagImg.id, remoteDigest });
+    return { installed: true, method: 'docker', updateAvailable: state.updateAvailable, pending: state.pending,
+      checked: state.checked, currentVersion: det.version || null, latestVersion: null, container: name };
   },
 
   // Apply a Pi-hole update, method-aware, streamed.
@@ -3041,4 +3117,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
 
-module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow };
+module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
