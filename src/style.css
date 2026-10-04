@@ -4460,6 +4460,13 @@ body.ultra .wireguard-section {
   overflow: hidden; white-space: nowrap;
 }
 .nav-item svg { width: 24px; height: 24px; flex-shrink: 0; }
+/* Reboot-required dot on the Updates item (all pages). Inline in the wide
+   rail; pinned to the icon's corner when the rail is collapsed or mobile. */
+.nav-item { position: relative; }
+.nav-reboot-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-orange); margin-left: auto;
+  box-shadow: 0 0 8px rgba(249,115,22,0.6); flex-shrink: 0; }
+.nav-reboot-dot[hidden] { display: none; }
+body.nav-collapsed .nav-reboot-dot { position: absolute; top: 9px; right: 9px; margin: 0; }
 .nav-label { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
 /* Brand block at the top of the rail: logo + wordmark/meta text column */
 .nav-brand {
@@ -4528,7 +4535,8 @@ body.nav-collapsed .container { margin-left: 64px; }
   body .container, body.nav-collapsed .container { margin-left: 0; padding-bottom: 72px; }
   .nav-item { width: 42px; height: 48px; justify-content: center; padding: 0; gap: 0; }
   .nav-label { display: none; }
-  .nav-toggle { display: none; }   /* collapse is meaningless on the mobile bottom bar */
+  .nav-toggle { display: none; }
+  .nav-reboot-dot { position: absolute; top: 9px; right: 6px; margin: 0; }   /* collapse is meaningless on the mobile bottom bar */
 }
 
 /* Hardware page */
@@ -5421,6 +5429,57 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .up-banner-warn { background: rgba(249,115,22,0.06); border-color: rgba(249,115,22,0.3); }
 .up-banner-warn .up-banner-icon { background: rgba(249,115,22,0.15); color: var(--accent-orange); }
 .up-banner-warn .up-banner-title { color: var(--accent-orange); }
+
+/* Reboot-required banner: info variant (restart recommended), busy state
+   while rebooting, actions, and the reason/program lists. */
+.up-banner-info { background: rgba(0,212,255,0.05); border-color: rgba(0,212,255,0.28); }
+.up-banner-info .up-banner-icon { background: rgba(0,212,255,0.13); color: var(--accent-cyan); }
+.up-banner-info .up-banner-title { color: var(--accent-cyan); }
+.up-banner-busy .up-banner-icon { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+.up-banner-busy .up-banner-title { color: var(--text-primary); }
+.up-banner-actions { display: flex; gap: 8px; flex-shrink: 0; align-self: center; }
+.up-banner-actions .action-btn { padding: 7px 12px; font-size: 12px; font-weight: 600; gap: 6px; width: auto; height: auto; }
+.up-banner-actions .action-btn svg { width: 14px; height: 14px; }
+.up-rb-list { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; }
+.up-rb-item { display: flex; align-items: baseline; gap: 10px; font-size: 12px; color: var(--text-secondary); }
+.up-rb-kind { flex-shrink: 0; width: 82px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.up-rb-item code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--text-primary); }
+.up-rb-item .up-rb-to { color: var(--accent-green); }
+.up-rb-procs { margin-top: 10px; border-top: 1px dashed var(--border-color); padding-top: 9px; display: none; }
+.up-rb-procs.open { display: block; }
+.up-rb-procs table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.up-rb-procs th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); font-weight: 700; padding: 3px 8px 5px 0; }
+.up-rb-procs td { padding: 3px 8px 3px 0; color: var(--text-secondary); vertical-align: top; }
+.up-rb-procs td:first-child { font-family: ui-monospace, monospace; color: var(--text-primary); white-space: nowrap; }
+.up-rb-procs td.mono { font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
+/* "reboot" tag (table + plan) and the plan card's reboot notice */
+.up-tag-reboot { color: var(--accent-orange); border: 1px solid rgba(249,115,22,0.4); background: rgba(249,115,22,0.08); }
+.up-plan-reboot { display: flex; gap: 10px; align-items: flex-start; margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.3); font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.up-plan-reboot svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--accent-orange); margin-top: 1px; }
+.up-plan-reboot b { color: var(--accent-orange); }
+.up-plan-reboot code { font-family: ui-monospace, monospace; font-size: 11.5px; color: var(--text-primary); }
+.up-log-reboot { color: var(--accent-orange); font-weight: 600; margin-top: 6px; }
+@media (max-width: 760px) { .up-banner { flex-wrap: wrap; } .up-banner-actions { width: 100%; justify-content: flex-end; } }
+body.compact .up-banner { padding: 10px 12px; gap: 10px; }
+body.compact .up-banner-icon { width: 26px; height: 26px; }
+body.compact .up-rb-list { gap: 3px; margin-top: 6px; }
+body.compact .up-rb-item { font-size: 11.5px; }
+body.compact .up-rb-kind { width: 74px; }
+body.compact .up-banner-actions .action-btn { padding: 6px 10px; font-size: 11.5px; }
+body.compact .up-plan-reboot { padding: 8px 10px; font-size: 11.5px; }
+body.ultra .up-banner { padding: 7px 10px; gap: 8px; margin-bottom: 10px; }
+body.ultra .up-banner-icon { width: 22px; height: 22px; }
+body.ultra .up-banner-icon svg { width: 13px; height: 13px; }
+body.ultra .up-banner-title { font-size: 12px; margin-bottom: 1px; }
+body.ultra .up-banner-desc { font-size: 11px; }
+body.ultra .up-rb-list { gap: 2px; margin-top: 4px; }
+body.ultra .up-rb-item { font-size: 11px; gap: 8px; }
+body.ultra .up-rb-item code { font-size: 10.5px; }
+body.ultra .up-rb-kind { width: 64px; font-size: 9px; }
+body.ultra .up-banner-actions .action-btn { padding: 4px 8px; font-size: 11px; }
+body.ultra .up-rb-procs table { font-size: 10.5px; }
+body.ultra .up-plan-reboot { padding: 6px 8px; font-size: 11px; }
 
 /* Run-history status badges (Auto-Check tab) */
 .up-hist-badge { font-size: 10.5px; font-weight: 600; padding: 3px 8px; border-radius: 6px;

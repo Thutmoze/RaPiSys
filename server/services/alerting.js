@@ -12,7 +12,7 @@
  *  - channels: "ui" (event log → toast/banner), "email" (mailer), "telegram"
  */
 
-import { describeMetric, isStatusMetric } from '../core/metric-catalog.js';
+import { describeMetric, isStatusMetric, flagWording } from '../core/metric-catalog.js';
 
 // Escape values interpolated into Telegram HTML-parse-mode messages.
 function esc(s) {
@@ -40,7 +40,10 @@ export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer,
       : `[RESOLVED] ${rule.name}`;
     // Service/container metrics are 1 (up) or 0 (down) — say so in words
     // instead of showing the raw number, which is what was happening before.
-    const body = statusMetric
+    const flag = flagWording(rule.metric, value);
+    const body = flag
+      ? flag
+      : statusMetric
       ? (kind === 'fired'
           ? `${label} is ${value >= 1 ? 'up' : 'down'}.`
           : `${label} is ${value >= 1 ? 'up' : 'down'} again.`)

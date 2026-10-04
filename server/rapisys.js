@@ -34,6 +34,7 @@ import { createMailer } from './services/mailer.js';
 import { createTelegram } from './services/telegram.js';
 import { createUpdateScheduler } from './services/update-scheduler.js';
 import { createAlertEngine } from './services/alerting.js';
+import { createRebootStatus } from './services/reboot-status.js';
 import { createSessionTracker } from './services/session-tracker.js';
 import { createAuth } from './services/auth.js';
 import { createRemoteAccess } from './services/remote-access.js';
@@ -166,7 +167,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // in case a future refactor of index.js drops these exports — the sampler
   // simply won't produce service.* metrics rather than failing to start.
   const servicesApi = (loadServices && checkService) ? { loadServices, checkService } : null;
-  const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware, servicesApi });
+  // Late-bound like the other facades: updatesRepo is (re)assigned when the DB opens.
+  const rebootStatus = createRebootStatus({ updatesRepo: new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) }) });
+  const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware, servicesApi, rebootStatus });
   const peerPoller = createPeerPoller({
     peersRepo: peersFacade, metricsRepo: metricsFacade, eventsRepo: eventsFacade,
   });
@@ -517,7 +520,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
   app.use('/api/disk', rc, diskRouter({ disk, requireControl: auth.requireControl, loadSettings, saveSettings, withFileLock, events: eventsFacade }));
-  app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
+  app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade, rebootStatus }));
   app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   app.use('/api/tailscale', rc, tailscaleRouter({ requireControl: auth.requireControl }));
   // TLS / HTTPS: self-signed or Tailscale certs, provisioned via the host agent.

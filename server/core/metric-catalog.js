@@ -19,7 +19,22 @@ const STATIC = {
   'power.core_v': { label: 'Core voltage (V)', group: 'Thermal & power' },
   'power.5v': { label: '5V rail (V)', group: 'Thermal & power' },
   'power.watts': { label: 'Board power (W)', group: 'Thermal & power' },
+  'updates.reboot_required': { label: 'Reboot required to finish updates (1 = yes)', group: 'System' },
 };
+
+// 1/0 flags that read better as a sentence than as "is 1 (threshold >= 1)".
+const FLAGS = {
+  'updates.reboot_required': {
+    on: 'A reboot is required to finish installing updates. Open Updates in RaPiSys to see what is waiting.',
+    off: 'No reboot is pending any more.',
+  },
+};
+
+/** Sentence for a 1/0 flag metric in an alert, or null for ordinary metrics. */
+export function flagWording(key, value) {
+  const f = FLAGS[key];
+  return f ? (value >= 1 ? f.on : f.off) : null;
+}
 
 const NET_RE = /^net\.(.+)\.(rx|tx)$/;
 const SVC_RE = /^service\.(.+)\.up$/;

@@ -130,6 +130,19 @@ export function isBinNmuRebuild(installedVersion, candidateVersion) {
 }
 
 /**
+ * Packages whose new version only takes effect after a reboot: the kernel,
+ * the GPU firmware and bootloader images in /boot/firmware, the EEPROM
+ * updater (it stages the new bootloader for the next boot), and the libraries
+ * and daemons PID 1 itself holds (libc, systemd, dbus). Shown as the "reboot"
+ * tag before install; what is actually pending afterwards comes from the
+ * host (see services/reboot-status.js), not from this list.
+ */
+const REBOOT_PKG_RE = /^(linux-image-|raspberrypi-kernel$|raspberrypi-bootloader$|raspi-firmware$|rpi-eeprom$|libc6$|systemd$|libsystemd0$|dbus$|dbus-daemon$|dbus-broker$)/;
+export function needsReboot(pkg) {
+  return REBOOT_PKG_RE.test(String(pkg || ''));
+}
+
+/**
  * Parse `apt-get -s` output into the packages it would change:
  *   Inst name [old] (new Origin [arch])   -> upgrade (or install when no [old])
  *   Remv name [old]                       -> remove
@@ -193,7 +206,7 @@ export function describePlan(items, info, selected = []) {
   const changing = items.filter((i) => i.action !== 'remove');
   return items.map((it) => {
     const own = info[it.name];
-    const out = { ...it, summary: own ? own.summary : null, requiredBy: [] };
+    const out = { ...it, summary: own ? own.summary : null, requiredBy: [], reboot: needsReboot(it.name) };
     if (sel.has(it.name) || it.action === 'remove') return out;
     const hard = [], soft = [];
     for (const o of changing) {
@@ -294,11 +307,12 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
       // Derived, not stored: caches written before this existed still get the
       // tag, and it can never go stale against the versions in the same row.
       const rebuild = isBinNmuRebuild(u.installed, u.candidate);
+      const reboot = needsReboot(u.package);
       const t = tags[u.package];
       if (t && (!t.candidate || strip(t.candidate) === strip(u.candidate))) {
-        return { ...u, rebuild, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency, releaseDate: t.releaseDate || u.releaseDate || null };
+        return { ...u, rebuild, reboot, security: !!t.security, cves: t.cves || 0, urgency: t.urgency || u.urgency, releaseDate: t.releaseDate || u.releaseDate || null };
       }
-      return { ...u, rebuild };
+      return { ...u, rebuild, reboot };
     });
     return { available: c.checkedAt != null, updates, checkedAt: c.checkedAt };
   }

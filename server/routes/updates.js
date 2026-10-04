@@ -5,7 +5,7 @@
 
 import express from 'express';
 
-export function updatesRouter({ updates, updateScheduler, updatesRepo, requireControl, events }) {
+export function updatesRouter({ updates, updateScheduler, updatesRepo, requireControl, events, rebootStatus }) {
   const r = express.Router();
 
   // -- automatic update check schedule (read public, write requires control) --
@@ -122,6 +122,22 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     res.end();
   });
 
+  // What is waiting on a reboot (cached ~5 min; ?force=1 re-reads the host).
+  r.get('/reboot-status', async (req, res) => {
+    if (!rebootStatus) return res.json({ level: 'none', reasons: [], libs: { count: 0, packages: [], procs: [] } });
+    try { res.json(await rebootStatus.get({ force: req.query.force === '1' })); }
+    catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
+  // Reboot the Pi to finish installing updates.
+  r.post('/reboot', requireControl, async (req, res) => {
+    if (!rebootStatus) return res.status(503).json({ error: 'host agent not available' });
+    try {
+      events?.add('updates.reboot', 'info', {});
+      res.json(await rebootStatus.reboot());
+    } catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
   // Update history.
   r.get('/history', (req, res) => {
     const limit = Number(req.query.limit) || 50;
@@ -223,7 +239,10 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
       }
       updatesRepo.recordBatch(entries);
       events?.add('updates.applied', ok ? 'info' : 'warning', { full, packages, ok });
-      send('done', { ok, code: result.code });
+      // Re-read the host so the page can say right away whether this install
+      // left something waiting on a reboot. A failure here never fails the run.
+      const reboot = rebootStatus ? await rebootStatus.get({ force: true }).catch(() => null) : null;
+      send('done', { ok, code: result.code, reboot });
     } catch (err) {
       updatesRepo.record({ ts: Date.now(), packageName: full ? 'dist-upgrade' : (packages || []).join(','), result: 'error', log: logBuf + '\n' + err.message });
       send('failed', { message: err.message });
@@ -241,7 +260,8 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     try {
       const result = await updates.firmwareUpdate((line) => send('line', { line }));
       events?.add('updates.firmware', 'info', {});
-      send('done', { ok: result.code === 0, note: result.note });
+      const reboot = rebootStatus ? await rebootStatus.get({ force: true }).catch(() => null) : null;
+      send('done', { ok: result.code === 0, note: result.note, reboot });
     } catch (err) { send('error', { message: err.message }); }
     res.end();
   });

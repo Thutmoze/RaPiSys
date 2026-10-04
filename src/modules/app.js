@@ -126,7 +126,7 @@ async function api(path, opts = {}, retried = false) {
 // App-native confirm dialog (replaces window.confirm's browser chrome)
 // ---------------------------------------------------------------------------
 
-function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', html = false, confirmIcon = null, cls = '', onMount = null } = {}) {
+function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', cancelLabel = 'Cancel', html = false, confirmIcon = null, cls = '', onMount = null } = {}) {
   return new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay rconfirm-overlay');
     ov.innerHTML = `
@@ -134,7 +134,7 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', htm
         <div class="rconfirm-msg"></div>
         <div class="wz-row rconfirm-row">
           <button class="action-btn ${danger ? 'rconfirm-danger' : 'wz-primary'}" data-rc="ok"></button>
-          <button class="action-btn set-btn-cancel" data-rc="cancel">${CANCEL_ICON}<span>Cancel</span></button>
+          <button class="action-btn set-btn-cancel" data-rc="cancel">${CANCEL_ICON}<span>${cancelLabel}</span></button>
         </div>
       </div>`;
     // html:true is only ever passed our own escaped strings (names run
@@ -565,6 +565,7 @@ function buildNav() {
       <span class="nav-label">${p.label}</span>`);
     btn.dataset.page = p.id;
     btn.title = p.label + (p.soon ? ' (coming soon)' : '');
+    if (p.id === 'updates') btn.insertAdjacentHTML('beforeend', '<span class="nav-reboot-dot" hidden title="Reboot required to finish installing updates"></span>');
     if (p.soon) btn.classList.add('nav-soon');
     btn.addEventListener('click', () => { window.location.hash = `#/${p.id}`; });
     rail.appendChild(btn);
@@ -608,14 +609,24 @@ function buildNav() {
 let _globalCheckTimer = null;
 function startGlobalCheckPoll(indEl) {
   if (_globalCheckTimer) clearInterval(_globalCheckTimer);
+  let n = 0;
   const tick = async () => {
     try {
       const c = await api('/updates/schedule');
       indEl.style.display = c?._running?.running ? 'flex' : 'none';
     } catch { /* leave as-is on error */ }
+    // Reboot-required dot: the server caches the host scan, so this is cheap.
+    if (n++ % 4 === 0) api('/updates/reboot-status').then(setNavRebootDot).catch(() => {});
   };
   tick();
   _globalCheckTimer = setInterval(tick, 15000);
+}
+
+// Orange dot on the Updates nav item while a reboot is needed to finish
+// installing updates. Fed by the global poll and by the Updates page.
+function setNavRebootDot(status) {
+  const dot = document.querySelector('.nav-item[data-page="updates"] .nav-reboot-dot');
+  if (dot) dot.hidden = status?.level !== 'reboot';
 }
 
 function route() {
@@ -5923,6 +5934,8 @@ pageRenderers.disk = (() => {
 
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set(), activeFilter = 'all', piholeUpd = null;
+  // Reboot-required status from /updates/reboot-status (see services/reboot-status.js).
+  let reboot = null, rbProcsOpen = false, rebooting = false;
   let hOffset = 0, hTotal = 0;
   const HIST_LIMIT = 50;
   let streaming = false, expandedLog = null, logCache = {}, editSchedule = false, schedPollHost = null;
@@ -5936,7 +5949,11 @@ pageRenderers.updates = (() => {
     rocket: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0zM12 15l-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8zM9 12H4s.5-3 2-4 5 0 5 0M12 15v5s3-.5 4-2 0-5 0-5"/></svg>',
     chip: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
     alert: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>',
+    power: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><path d="M12 2v10"/></svg>',
+    rotate: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>',
+    search: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>',
   };
+  const REBOOT_TAG = '<span class="up-tag up-tag-reboot" title="Takes effect only after a reboot">reboot</span>';
   // Escape, then color-code CVE ids, security markers, and urgency by severity.
   const hlSec = (s) => esc(s)
     .replace(/(CVE-\d{4}-\d+)/g, '<span class="up-cve">$1</span>')
@@ -6002,8 +6019,10 @@ pageRenderers.updates = (() => {
     autoCheck = await api('/updates/schedule').then((c) => c.lastRun || null).catch(() => null);
     firmware = await api('/updates/firmware').catch(() => null);
     piholeUpd = await api('/network/dns/pihole/update-status').catch(() => null);
+    if (!rebooting) { reboot = await api('/updates/reboot-status').catch(() => reboot); setNavRebootDot(reboot); }
     if (data.available) render(host);   // we have a cached scan (even if 0 updates)
     else {
+      renderBanner(host);
       // never checked on this install
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip">never checked</span>';
       $('[data-up=actions]', host).innerHTML = ACTION_BTN('refresh', ICN.refresh, 'Check for updates');
@@ -6049,6 +6068,12 @@ pageRenderers.updates = (() => {
   function renderBanner(host) {
     const el = $('[data-up=banner]', host);
     if (!el) return;
+    renderCheckBanner(el);
+    el.insertAdjacentHTML('beforeend', rebootBannerHtml());
+    wireRebootBanner(host, el);
+  }
+
+  function renderCheckBanner(el) {
     if (autoCheck && autoCheck.ok === false) {
       el.innerHTML = `
         <div class="up-banner up-banner-fail">
@@ -6072,6 +6097,135 @@ pageRenderers.updates = (() => {
     } else {
       el.innerHTML = '';
     }
+  }
+
+  const piName = () => {
+    const h = document.getElementById('hostname')?.textContent?.trim();
+    return h && h !== 'Loading...' ? h : 'the Pi';
+  };
+  const shortKernel = (r) => String(r || '').replace(/\+.*$/, '');
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+  // One line per thing waiting on the reboot, plus the program list.
+  function rebootReasonRows(st) {
+    const rows = [];
+    for (const r of st.reasons || []) {
+      if (r.kind === 'kernel') rows.push(['Kernel', `running <code>${esc(shortKernel(r.running))}</code>, installed <code class="up-rb-to">${esc(shortKernel(r.latest))}</code>`]);
+      else if (r.kind === 'firmware') rows.push(['Firmware', `<code>raspi-firmware</code>${r.version ? ` <code class="up-rb-to">${esc(r.version.replace(/^\d+:/, ''))}</code>` : ''} installed to /boot/firmware`]);
+      else if (r.kind === 'bootloader') rows.push(['Bootloader', 'EEPROM update staged, flashed during the next boot']);
+      else if (r.kind === 'packages') rows.push(['Packages', r.pkgs?.length ? r.pkgs.map((p) => `<code>${esc(p)}</code>`).join(', ') + ' asked for a reboot' : 'a package asked for a reboot']);
+    }
+    const libs = st.libs || {};
+    if (libs.count) {
+      const pk = libs.packages?.length ? ` (${libs.packages.slice(0, 4).map((p) => `<code>${esc(p)}</code>`).join(', ')}${libs.packages.length > 4 ? ` +${libs.packages.length - 4}` : ''})` : '';
+      rows.push(['Libraries', `${plural(libs.count, 'running program')} still use replaced libraries${pk}`]);
+    }
+    return rows.map(([k, v]) => `<div class="up-rb-item"><span class="up-rb-kind">${k}</span><span>${v}</span></div>`).join('');
+  }
+
+  function rebootProcsHtml(st) {
+    const procs = st.libs?.procs || [];
+    if (!procs.length) return '';
+    return `<div class="up-rb-procs${rbProcsOpen ? ' open' : ''}">
+        <table><thead><tr><th>Program</th><th>Kind</th><th>Still using the old copy of</th></tr></thead>
+        <tbody>${procs.map((p) => `<tr><td>${esc(p.unit ? p.unit.replace(/\.service$/, '') : p.name)}</td><td>${esc(p.kind)}</td>
+          <td class="mono">${p.files.map((f) => esc(f.split('/').slice(-1)[0])).join(', ')}</td></tr>`).join('')}</tbody></table>
+      </div>`;
+  }
+
+  function rebootBannerHtml() {
+    if (rebooting) return `
+      <div class="up-banner up-banner-busy">
+        <div class="up-banner-icon"><span class="up-spinner"></span></div>
+        <div class="up-banner-text">
+          <div class="up-banner-title">Rebooting ${esc(piName())}…</div>
+          <div class="up-banner-desc">Waiting for the Pi to come back. This page reconnects on its own, usually within a minute.</div>
+        </div>
+      </div>`;
+    const st = reboot;
+    if (!st || (st.level !== 'reboot' && st.level !== 'restart')) return '';
+    const procsBtn = st.libs?.count
+      ? `<button class="action-btn set-btn-detect" data-rb="procs">${ICN.search}<span>${rbProcsOpen ? 'Hide programs' : 'Show programs'}</span></button>` : '';
+    const actions = `<div class="up-banner-actions">${procsBtn}
+        <button class="action-btn set-btn-edit" data-rb="reboot">${ICN.power}<span>Reboot now</span></button></div>`;
+    if (st.level === 'reboot') {
+      const since = st.since ? `Pending since ${esc(rapisysFmtTime(st.since))}${st.installed ? `, after installing ${plural(st.installed, 'package')}` : ''}. ` : '';
+      return `
+      <div class="up-banner up-banner-warn">
+        <div class="up-banner-icon">${ICN.power}</div>
+        <div class="up-banner-text">
+          <div class="up-banner-title">Reboot required to finish installing updates</div>
+          <div class="up-banner-desc">${since}${esc(piName())} keeps running the old versions below until it restarts.</div>
+          <div class="up-rb-list">${rebootReasonRows(st)}</div>
+          ${rebootProcsHtml(st)}
+        </div>${actions}
+      </div>`;
+    }
+    return `
+      <div class="up-banner up-banner-info">
+        <div class="up-banner-icon">${ICN.rotate}</div>
+        <div class="up-banner-text">
+          <div class="up-banner-title">Restart recommended: ${plural(st.libs.count, 'program')} ${st.libs.count === 1 ? 'is' : 'are'} running old code</div>
+          <div class="up-banner-desc">The kernel and firmware are current, but these programs loaded libraries that an update has since replaced. They keep the old copies until they restart, and may break the next time they do. A reboot restarts them all at once.</div>
+          <div class="up-rb-list">${rebootReasonRows(st)}</div>
+          ${rebootProcsHtml(st)}
+        </div>${actions}
+      </div>`;
+  }
+
+  function wireRebootBanner(host, el) {
+    const p = el.querySelector('[data-rb=procs]');
+    if (p) p.onclick = () => { rbProcsOpen = !rbProcsOpen; renderBanner(host); };
+    const r = el.querySelector('[data-rb=reboot]');
+    if (r) r.onclick = async () => {
+      const ok = await rapisysConfirm(`Reboot ${piName()} now? Running containers and services stop and come back after the restart. The dashboard will be unreachable for about a minute.`,
+        { confirmLabel: 'Reboot now', confirmIcon: ICN.power });
+      if (ok) doReboot(host);
+    };
+  }
+
+  // Asked once when an install leaves a reboot pending. "Later" keeps the
+  // banner and nav dot; nothing reboots without this click.
+  async function promptReboot(host, st) {
+    const k = (st.reasons || []).find((r) => r.kind === 'kernel');
+    const what = k ? `load kernel ${shortKernel(k.latest)}${st.reasons.length > 1 ? ' and the new firmware' : ''}` : 'finish installing them';
+    const ok = await rapisysConfirm(`Updates installed. A reboot is required to ${what}. Reboot ${piName()} now? The dashboard will be unreachable for about a minute.`,
+      { confirmLabel: 'Reboot now', cancelLabel: 'Later', confirmIcon: ICN.power });
+    if (ok) doReboot(host);
+  }
+
+  // Feed a fresh status (from an install's 'done' event) into the page.
+  function applyRebootStatus(host, st, logEl) {
+    if (!st) return;
+    reboot = st; setNavRebootDot(st);
+    if (st.level === 'reboot' && logEl) {
+      const parts = (st.reasons || []).map((r) => r.kind === 'kernel' ? `kernel ${shortKernel(r.latest)}` : r.kind === 'bootloader' ? 'the bootloader' : r.kind === 'firmware' ? 'raspi-firmware' : 'flagged packages');
+      logEl.textContent += `\n↻ Reboot required: ${parts.join(', ')} take effect after a reboot.\n`;
+    }
+    if (host.isConnected) renderBanner(host);
+  }
+
+  async function doReboot(host) {
+    try { await api('/updates/reboot', { method: 'POST', body: {} }); }
+    catch (e) { toast('error', 'Updates', 'Reboot request failed: ' + e.message); return; }
+    rebooting = true; setNavRebootDot(null); renderBanner(host);
+    toast('success', 'Updates', `Rebooting ${piName()}…`);
+    // Wait for the server to drop, then to answer again (3 min cap).
+    const t0 = Date.now();
+    let wentDown = false;
+    while (Date.now() - t0 < 180000) {
+      await new Promise((r) => setTimeout(r, 4000));
+      const up = await fetch('/api/health', { cache: 'no-store' }).then((r) => r.ok).catch(() => false);
+      if (!up) wentDown = true;
+      else if (wentDown || Date.now() - t0 > 90000) break;
+    }
+    rebooting = false;
+    reboot = await api('/updates/reboot-status?force=1').catch(() => null);
+    setNavRebootDot(reboot);
+    if (host.isConnected) load(host);
+    if (reboot && reboot.level === 'none') toast('success', 'Updates', `Back online${reboot.kernel ? `, running kernel ${shortKernel(reboot.kernel)}` : ''}. Nothing else is waiting on a reboot.`);
+    else if (reboot) toast('info', 'Updates', 'Back online, but something is still waiting on a reboot.');
+    else toast('error', 'Updates', 'The Pi has not answered yet. Reload the page in a minute.');
   }
 
   function render(host) {
@@ -6122,7 +6276,7 @@ pageRenderers.updates = (() => {
             <td class="inv-dim">${u.sizeBytes ? fmtBytes(u.sizeBytes) : '—'}</td>
             <td class="inv-dim">${u.releaseDate ? rapisysFmtDate(u.releaseDate) : '—'}</td>
             <td class="inv-dim">${u.installedAt ? rapisysFmtDate(u.installedAt) : '—'}</td>
-            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}${u.rpi ? '<span class="up-tag up-tag-rpi">raspberry pi</span>' : ''}${u.rebuild ? '<span class="up-tag up-tag-rebuild" title="Binary-only rebuild: same source, recompiled against updated libraries. Worth installing, but nothing changes functionally.">rebuild</span>' : ''}</div></td>
+            <td class="up-tags-cell"><div class="up-tags-stack">${u.security ? '<span class="up-tag up-tag-sec">security</span>' : ''}${u.cves ? `<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>` : ''}${u.kernel ? '<span class="up-tag up-tag-kern">kernel</span>' : ''}${u.firmware ? '<span class="up-tag up-tag-fw">firmware</span>' : ''}${u.rpi ? '<span class="up-tag up-tag-rpi">raspberry pi</span>' : ''}${u.rebuild ? '<span class="up-tag up-tag-rebuild" title="Binary-only rebuild: same source, recompiled against updated libraries. Worth installing, but nothing changes functionally.">rebuild</span>' : ''}${u.reboot ? REBOOT_TAG : ''}</div></td>
             <td>${urgBadge(u.urgency)}</td>
             <td><button class="up-link" data-changelog="${esc(u.package)}">view</button></td>
           </tr>`).join('')}</tbody>
@@ -6573,6 +6727,7 @@ pageRenderers.updates = (() => {
       if (u.security) t.push('<span class="up-tag up-tag-sec">security</span>');
       if (u.cves) t.push(`<span class="up-tag up-tag-cve">${u.cves} CVE${u.cves > 1 ? 's' : ''}</span>`);
       if (u.rebuild) t.push('<span class="up-tag up-tag-rebuild" title="Binary-only rebuild: same source, recompiled against updated libraries.">rebuild</span>');
+      if (d.reboot || u.reboot) t.push(REBOOT_TAG);
       return t.join('');
     };
     const verHtml = (d) => {
@@ -6646,6 +6801,15 @@ pageRenderers.updates = (() => {
           <div class="up-plan-list">${arr.slice(0, PLAN_CAP).map((d) => rowHtml(d, openable)).join('')}${more}</div></div>`;
     };
 
+    // Warn before confirming when the plan includes packages that only take
+    // effect after a reboot.
+    const rebootNotice = () => {
+      const rb = [...selItems, ...extras].filter((d) => d.reboot || upd(d.name)?.reboot).map((d) => d.name);
+      if (!rb.length) return '';
+      const list = rb.slice(0, 5).map((n) => `<code>${esc(n)}</code>`).join(', ') + (rb.length > 5 ? ` +${rb.length - 5} more` : '');
+      return `<div class="up-plan-reboot">${ICN.power}<span><b>Reboot required afterwards.</b> ${list} only take${rb.length === 1 ? 's' : ''} effect after the Pi restarts. You'll be asked when the install finishes; nothing reboots on its own.</span></div>`;
+    };
+
     const render = () => {
       const newCount = extras.filter((d) => d.action === 'install').length;
       const total = new Set([...selItems.map((d) => d.name), ...extras.map((d) => d.name)]).size;
@@ -6654,6 +6818,7 @@ pageRenderers.updates = (() => {
       root.innerHTML = group('You selected', 'up-cascade-sel', selItems)
         + group('Also installed/upgraded as dependencies', 'up-cascade-extra', extras)
         + group('Removed', 'up-cascade-rem', removed, false)
+        + rebootNotice()
         + `<div class="up-plan-foot"><span class="inv-dim">${summary}</span>`
         + (extras.length ? `<button type="button" class="up-link" data-plan-all>${anyOpen ? 'Collapse all' : 'Expand all dependencies'}</button>` : '')
         + '</div>';
@@ -6766,6 +6931,13 @@ pageRenderers.updates = (() => {
       closeBtn.hidden = false; finished = true;
       toast(ok ? 'success' : 'error', 'Updates', ok ? 'Upgrade complete' : 'Upgrade had errors');
       streaming = false; selected.clear();
+      if (d.reboot) {
+        applyRebootStatus(host, d.reboot, logEl);
+        if (d.reboot.level === 'reboot') {
+          resultEl.insertAdjacentHTML('beforeend', '<div class="up-log-reboot">↻ Reboot required to finish installing</div>');
+          promptReboot(host, d.reboot);
+        }
+      }
     };
 
     const qs = full ? 'full=1' : `packages=${encodeURIComponent(pkgList.join(','))}`;
@@ -6857,7 +7029,10 @@ pageRenderers.updates = (() => {
     const logEl = panel.querySelector('[data-up=log]');
     const ev = new EventSource('/api/updates/firmware/stream');
     ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
-    ev.addEventListener('done', (e) => { const d = JSON.parse(e.data); logEl.textContent += `\n✓ ${d.note || 'done'}\n`; toast('success', 'Firmware', d.note || 'Staged'); ev.close(); streaming = false; });
+    ev.addEventListener('done', (e) => {
+      const d = JSON.parse(e.data); logEl.textContent += `\n✓ ${d.note || 'done'}\n`; toast('success', 'Firmware', d.note || 'Staged'); ev.close(); streaming = false;
+      if (d.reboot) { applyRebootStatus(host, d.reboot, logEl); if (d.reboot.level === 'reboot') promptReboot(host, d.reboot); }
+    });
     ev.addEventListener('error', () => { logEl.textContent += '\n✗ error\n'; ev.close(); streaming = false; });
   }
 

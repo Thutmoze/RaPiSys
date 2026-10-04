@@ -436,6 +436,68 @@ function parsePolicyOrigins(text) {
   return origins;
 }
 
+// ---- Reboot-required detection (pure helpers, exported for tests) ----------
+
+// Written by 'eeprom.update' on success. /run is tmpfs, so any reboot clears
+// it: exactly the lifetime of "bootloader staged, not yet booted".
+const EEPROM_STAGED_MARKER = path.join(SOCKET_DIR, 'eeprom-staged');
+
+/** Numeric dotted prefix of a kernel release: '6.18.39+rpt-rpi-2712' -> [6,18,39]. */
+function kernelVersionParts(release) {
+  const m = String(release || '').match(/^(\d+(?:\.\d+)*)/);
+  return m ? m[1].split('.').map(Number) : [];
+}
+
+/**
+ * Newest installed kernel of the same flavour as the running one, from the
+ * /boot/vmlinuz-* names. Flavour is everything after the numeric prefix
+ * ('+rpt-rpi-2712'), so a Pi 5 never compares itself against the -v8 build
+ * that is installed alongside it.
+ */
+function newestKernel(running, vmlinuzNames) {
+  const flavour = String(running || '').replace(/^\d+(?:\.\d+)*/, '');
+  let best = running;
+  for (const n of vmlinuzNames || []) {
+    const rel = String(n).replace(/^vmlinuz-/, '');
+    if (rel === n || rel.replace(/^\d+(?:\.\d+)*/, '') !== flavour) continue;
+    const a = kernelVersionParts(rel), b = kernelVersionParts(best);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const x = a[i] || 0, y = b[i] || 0;
+      if (x !== y) { if (x > y) best = rel; break; }
+    }
+  }
+  return best;
+}
+
+/**
+ * Shared libraries a process still maps after they were deleted on disk, i.e.
+ * an upgrade replaced them and the process keeps running the old copy (the
+ * method needrestart uses). Only real library paths count: memfd, /dev/shm and
+ * /tmp mappings are deleted on purpose and say nothing about updates.
+ */
+function parseDeletedLibs(mapsText) {
+  const out = new Set();
+  for (const line of String(mapsText || '').split('\n')) {
+    if (!line.endsWith(' (deleted)')) continue;
+    const p = line.slice(0, -' (deleted)'.length).replace(/^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+/, '');
+    if (!/^\/(usr\/)?lib/.test(p)) continue;
+    if (!/\.so(\.|$)/.test(path.basename(p))) continue;
+    out.add(p);
+  }
+  return [...out];
+}
+
+/** Who owns a process, from /proc/<pid>/cgroup (cgroup v2). */
+function classifyCgroup(cgroupText) {
+  const line = String(cgroupText || '').split('\n').find((l) => l.startsWith('0::')) || '';
+  const p = line.slice(3);
+  if (/\/docker-[0-9a-f]+\.scope$|\/docker\//.test(p)) return { kind: 'container', unit: null };
+  const svc = p.match(/^\/system\.slice\/(?:.*\/)?([^/]+\.service)$/);
+  if (svc) return { kind: 'service', unit: svc[1] };
+  if (p.startsWith('/user.slice/')) return { kind: 'desktop', unit: null };
+  return { kind: 'process', unit: null };
+}
+
 const OPS = {
 
   // ---- Pironman 5 Mini -----------------------------------------------------
@@ -2678,10 +2740,87 @@ WantedBy=multi-user.target
   },
   async 'eeprom.update'(_, send) {
     const r = await runStreaming('rpi-eeprom-update', ['-a'], {}, send);
+    if (r.code === 0) {
+      try { fs.writeFileSync(EEPROM_STAGED_MARKER, String(Date.now())); } catch { /* reboot status just misses it */ }
+    }
     return { code: r.code, note: 'firmware staged; takes effect on next reboot' };
   },
 
   // ---- System --------------------------------------------------------------
+  // What is waiting on a reboot. Read-only: stats and /proc reads, plus one
+  // dpkg-query and one dpkg -S. The server decides the level and wording.
+  async 'sys.rebootStatus'() {
+    const btime = Number((fs.readFileSync('/proc/stat', 'utf8').match(/^btime (\d+)/m) || [])[1]) * 1000 || null;
+    const os = require('os');
+
+    // Kernel: running release vs the newest installed of the same flavour.
+    const running = os.release();
+    let vmlinuz = [];
+    try { vmlinuz = fs.readdirSync('/boot').filter((n) => n.startsWith('vmlinuz-')); } catch { /* no /boot */ }
+    const latest = newestKernel(running, vmlinuz);
+
+    // GPU firmware: raspi-firmware (re)installed after this boot started.
+    let firmware = null;
+    try {
+      const changedAt = Math.floor(fs.statSync('/var/lib/dpkg/info/raspi-firmware.list').mtimeMs);
+      if (btime && changedAt > btime) {
+        const q = await run('dpkg-query', ['-W', '-f=${Version}', 'raspi-firmware'], 10000).catch(() => ({ stdout: '' }));
+        firmware = { version: q.stdout.trim() || null, changedAt };
+      }
+    } catch { /* not installed */ }
+
+    // Bootloader EEPROM: staged by us (marker) or by a manual rpi-eeprom-update.
+    let eeprom = null;
+    try { eeprom = { stagedAt: Number(fs.readFileSync(EEPROM_STAGED_MARKER, 'utf8')) || null }; } catch { /* none */ }
+    if (!eeprom && fs.existsSync('/boot/firmware/pieeprom.upd')) eeprom = { stagedAt: null };
+
+    // Debian's own flag, created by some packages' postinst.
+    let rebootRequiredFile = null;
+    if (fs.existsSync('/run/reboot-required')) {
+      let pkgs = [];
+      try { pkgs = fs.readFileSync('/run/reboot-required.pkgs', 'utf8').split('\n').filter(Boolean); } catch { /* none */ }
+      rebootRequiredFile = { pkgs: [...new Set(pkgs)] };
+    }
+
+    // Host processes still running replaced libraries. Containers are skipped:
+    // their libraries come from the image, not from host package upgrades.
+    const rootSt = fs.statSync('/');
+    const groups = new Map();
+    for (const pid of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(pid)) continue;
+      try {
+        const st = fs.statSync(`/proc/${pid}/root`);
+        if (st.dev !== rootSt.dev || st.ino !== rootSt.ino) continue;
+        const files = parseDeletedLibs(fs.readFileSync(`/proc/${pid}/maps`, 'utf8'));
+        if (!files.length) continue;
+        const owner = classifyCgroup(fs.readFileSync(`/proc/${pid}/cgroup`, 'utf8'));
+        if (owner.kind === 'container') continue;
+        const comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+        const key = owner.unit || comm;
+        const g = groups.get(key) || { name: comm, unit: owner.unit, kind: owner.kind, pids: [], files: new Set() };
+        g.pids.push(Number(pid));
+        files.forEach((f) => g.files.add(f));
+        groups.set(key, g);
+      } catch { /* process exited mid-scan, or kernel thread */ }
+    }
+    const procs = [...groups.values()].slice(0, 60)
+      .map((g) => ({ ...g, files: [...g.files].slice(0, 12) }));
+
+    // Which packages own those libraries (the path now holds the new copy).
+    const allFiles = [...new Set(procs.flatMap((p) => p.files))].slice(0, 40);
+    const owners = {};
+    if (allFiles.length) {
+      const s = await run('dpkg', ['-S', ...allFiles], 15000).catch(() => ({ stdout: '' }));
+      for (const line of (s.stdout || '').split('\n')) {
+        const m = line.match(/^([^:,\s]+)(?::\S+)?(?:,\s*\S+)*:\s+(\/\S+)$/);
+        if (m) owners[m[2]] = m[1];
+      }
+    }
+    for (const p of procs) p.packages = [...new Set(p.files.map((f) => owners[f]).filter(Boolean))];
+
+    return { bootTime: btime, kernel: { running, latest }, firmware, eeprom, rebootRequiredFile, procs };
+  },
+
   async 'sys.reboot'({ confirm }) {
     assert(confirm === 'REBOOT', 'confirmation token required');
     setTimeout(() => run('systemctl', ['reboot']), 1500);
@@ -2816,4 +2955,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
 
-module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost };
+module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup };
