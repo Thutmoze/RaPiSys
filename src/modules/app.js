@@ -1404,7 +1404,10 @@ pageRenderers.alerts = (() => {
 
     host.querySelectorAll('.ch-cond').forEach((l) => l.classList.toggle('on', l.querySelector('input').checked));
     const warn = $('[data-ch=warn]', host);
-    const noCheck = healthWatched().map((s) => liveContainers.find((c) => c.slug === s)).filter((c) => c && c.health === 'none');
+    // Only containers that are up can be said to lack a HEALTHCHECK; removed
+    // or stopped ones also report 'none' and would make the warning misleading.
+    const noCheck = healthWatched().map((s) => liveContainers.find((c) => c.slug === s))
+      .filter((c) => c && c.health === 'none' && (c.state === 'running' || c.state === 'restarting'));
     if (healthConds(host).includes('unhealthy') && noCheck.length) {
       const n = noCheck.length === 1;
       warn.style.display = '';
