@@ -6,7 +6,7 @@
  * collector (legacy, untouched) plus the new hardware collector.
  */
 
-import { getSystemStats } from '../stats.js';
+import { getSystemStats, getContainerHealth } from '../stats.js';
 import { slugify } from '../core/metric-catalog.js';
 
 // A container that's fully removed (not just stopped) would otherwise go
@@ -17,9 +17,11 @@ import { slugify } from '../core/metric-catalog.js';
 // the window, if it's still gone, we stop emitting it entirely.
 const CONTAINER_GRACE_MS = 30 * 60 * 1000;
 
-export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, rebootStatus }) {
-  // slug -> { label, lastSeenTs } — used both for the grace window and to
-  // resolve friendly names in the Alerts metric picker.
+export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, rebootStatus,
+  containerHealth = getContainerHealth }) {
+  // slug -> { label, lastSeenTs, image, state, ...health } — used for the
+  // grace window, to resolve friendly names in the Alerts metric picker, and
+  // for the container health alert texts and Containers card bells.
   const knownContainers = new Map();
   const knownServices = new Map();
 
@@ -61,19 +63,31 @@ export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, 
       }
 
       // container status: 1 = running, 0 = present but not running.
+      // Health: 1 = healthy, 0 = unhealthy, nothing while "starting" or when
+      // the image has no HEALTHCHECK. Restarts: Docker's RestartCount.
       const seenSlugs = new Set();
+      const healthByName = containerHealth() || new Map();
       for (const c of stats.containers || []) {
         if (!c?.name) continue;
         const slug = slugify(c.name);
         seenSlugs.add(slug);
-        knownContainers.set(slug, { label: c.name, lastSeenTs: ts });
+        const h = healthByName.get(c.name) || {};
+        knownContainers.set(slug, { label: c.name, lastSeenTs: ts, image: c.image || null, state: c.state || null, ...h });
         samples.push({ metric: `docker.${slug}.up`, value: c.state === 'running' ? 1 : 0 });
+        if (h.health === 'healthy' || h.health === 'unhealthy') {
+          samples.push({ metric: `docker.${slug}.health`, value: h.health === 'healthy' ? 1 : 0 });
+        }
+        if (Number.isFinite(h.restartCount)) samples.push({ metric: `docker.${slug}.restarts`, value: h.restartCount });
       }
       // grace window: a container that vanished entirely (removed, not just
       // stopped) keeps reading 0 until the window elapses, then is retired.
       for (const [slug, info] of knownContainers) {
         if (seenSlugs.has(slug)) continue;
         if (ts - info.lastSeenTs <= CONTAINER_GRACE_MS) {
+          // Still listed by Docker = stopped (keep its exit code); else removed.
+          const h = healthByName.get(info.label);
+          info.state = h?.status || 'removed';
+          if (h) info.exitCode = h.exitCode;
           samples.push({ metric: `docker.${slug}.up`, value: 0 });
         } else {
           knownContainers.delete(slug);
@@ -120,5 +134,14 @@ export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, 
     return { services: knownServices, containers };
   }
 
-  return { sampleOnce, getLiveNames };
+  /** Live container details for the health rule picker, the Containers card
+   * bells and the alert texts: [{ slug, name, image, state, health, ... }]. */
+  function getContainers() {
+    return [...knownContainers].map(([slug, info]) => {
+      const { label, lastSeenTs, ...rest } = info;
+      return { slug, name: label, lastSeen: lastSeenTs, ...rest, health: rest.health || 'none' };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return { sampleOnce, getLiveNames, getContainers };
 }

@@ -170,6 +170,14 @@ function enhanceSelects(root) {
     if (!l._owner || !l._owner.isConnected) l.remove();
   });
 
+  // Already-enhanced selects: re-sync the button label, since code that sets
+  // .value directly (e.g. loading a rule into the form to edit it) fires no
+  // change event.
+  root.querySelectorAll('select[data-rsel]').forEach((sel) => {
+    const lab = sel.parentNode.querySelector('.rsel-label');
+    if (lab) lab.textContent = sel.options[sel.selectedIndex]?.text ?? '';
+  });
+
   root.querySelectorAll('select:not([data-rsel])').forEach((sel) => {
     sel.dataset.rsel = '1';
     const wrap = el('div', 'rsel');
@@ -1255,8 +1263,12 @@ pageRenderers.alerts = (() => {
   let timer = null, editingId = null;   // editingId: rule being edited (null = adding new)
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const SEV_CLASS = { info: 'sev-info', warning: 'sev-warning', critical: 'sev-critical' };
+  // Container health rule form state (metric 'docker.health').
+  let liveContainers = [];
+  let hc = { scope: 'some', picked: new Set(), excluded: new Set(), one: '' };
 
   function metricKind(key) {
+    if (key === 'docker.health') return 'health';
     if (/^service\..+\.up$/.test(key)) return 'service';
     if (/^docker\..+\.up$/.test(key)) return 'container';
     if (/^net\..+\.(rx|tx)$/.test(key)) return 'net';
@@ -1277,11 +1289,18 @@ pageRenderers.alerts = (() => {
     const opSel = $('[data-new=op]', host);
     const thrInput = $('[data-new=threshold]', host);
     const isStatus = kind === 'service' || kind === 'container';
+    const isHealth = kind === 'health';
 
-    condNum.style.display = isStatus ? 'none' : '';
+    condNum.style.display = isStatus || isHealth ? 'none' : '';
     condState.style.display = isStatus ? '' : 'none';
+    $('[data-new=condhealth]', host).style.display = isHealth ? '' : 'none';
 
-    if (isStatus) {
+    if (isHealth) {
+      opSel.value = '<'; thrInput.value = '1';
+      hint.style.display = 'block';
+      hint.textContent = 'Health comes from Docker\'s own HEALTHCHECK. "Starting" never counts as unhealthy, so slow-booting containers do not false-fire. Each container fires, notifies and recovers on its own.';
+      renderHealth(host);
+    } else if (isStatus) {
       stateSel.options[0].textContent = kind === 'container' ? 'Not running' : 'Down';
       stateSel.options[1].textContent = kind === 'container' ? 'Running again' : 'Back up';
       hint.style.display = 'block';
@@ -1305,6 +1324,95 @@ pageRenderers.alerts = (() => {
     renderPreview(host);
   }
 
+  // ---- container health form -------------------------------------------
+  const HEALTH_PILL = { healthy: ['ch-healthy', 'Healthy'], unhealthy: ['ch-unhealthy', 'Unhealthy'],
+    starting: ['ch-starting', 'Starting'], none: ['ch-nocheck', 'No healthcheck'] };
+  function healthPill(c) {
+    if (!c) return '';
+    if (c.state && c.state !== 'running') {
+      const word = c.state === 'removed' ? 'Removed' : c.state === 'restarting' ? 'Restarting' : 'Stopped';
+      return `<span class="ch-pill ${c.state === 'restarting' ? 'ch-starting' : 'ch-stopped'}">${word}</span>`;
+    }
+    const [cls, word] = HEALTH_PILL[c.health] || HEALTH_PILL.none;
+    return `<span class="ch-pill ${cls}">${word}</span>`;
+  }
+  const containerName = (slug) => liveContainers.find((c) => c.slug === slug)?.name || slug;
+  function healthWatched() {
+    if (hc.scope === 'one') return hc.one ? [hc.one] : [];
+    if (hc.scope === 'all') return liveContainers.map((c) => c.slug).filter((s) => !hc.excluded.has(s));
+    return [...hc.picked];
+  }
+  const healthConds = (host) => [...host.querySelectorAll('[data-ch-cond]')].filter((i) => i.checked).map((i) => i.dataset.chCond);
+  function healthConfig(host) {
+    return {
+      scope: hc.scope,
+      containers: hc.scope === 'one' ? (hc.one ? [hc.one] : []) : [...hc.picked],
+      exclude: [...hc.excluded],
+      conditions: healthConds(host),
+      restarts: { count: Number($('[data-ch=rcount]', host).value) || 3, window_min: Number($('[data-ch=rwin]', host).value) || 10 },
+    };
+  }
+  function loadHealthConfig(host, cfg) {
+    const c = cfg || {};
+    hc = { scope: c.scope || 'some', picked: new Set(c.scope === 'all' ? [] : c.containers || []),
+      excluded: new Set(c.exclude || []), one: c.scope === 'one' ? (c.containers || [])[0] || '' : '' };
+    const conds = c.conditions || ['down', 'unhealthy'];
+    host.querySelectorAll('[data-ch-cond]').forEach((i) => { i.checked = conds.includes(i.dataset.chCond); });
+    $('[data-ch=rcount]', host).value = c.restarts?.count ?? 3;
+    $('[data-ch=rwin]', host).value = c.restarts?.window_min ?? 10;
+  }
+  function healthCondText(cfg) {
+    const words = { down: 'stops running', unhealthy: 'turns unhealthy',
+      restarts: `restarts ${cfg.restarts?.count ?? 3}+ times in ${cfg.restarts?.window_min ?? 10} min` };
+    const w = (cfg.conditions || []).map((c) => words[c]).filter(Boolean);
+    return w.length ? (w.length === 1 ? w[0] : `${w.slice(0, -1).join(', ')} or ${w[w.length - 1]}`) : '(no condition)';
+  }
+  function healthScopeText(cfg) {
+    const names = (list) => list.map(containerName).join(', ');
+    if (cfg.scope === 'all') return `any container${cfg.exclude?.length ? ` except ${names(cfg.exclude)}` : ''} (new ones included)`;
+    if (cfg.scope === 'one') return `container "${names(cfg.containers || [])}"`;
+    return cfg.containers?.length ? `any of ${names(cfg.containers)}` : 'no containers yet (use the bells on the Containers card)';
+  }
+  function renderHealth(host) {
+    host.querySelectorAll('[data-ch=scope] button').forEach((b) => b.classList.toggle('on', b.dataset.scope === hc.scope));
+    $('[data-ch=onewrap]', host).style.display = hc.scope === 'one' ? '' : 'none';
+    $('[data-ch=listwrap]', host).style.display = hc.scope === 'one' ? 'none' : '';
+
+    // single-container select: live containers plus a configured one that is gone
+    const oneSel = $('[data-ch=one]', host);
+    const opts = liveContainers.map((c) => [c.slug, c.name]);
+    if (hc.one && !opts.some(([s]) => s === hc.one)) opts.push([hc.one, `${hc.one} (not running now)`]);
+    if (!hc.one && opts.length) hc.one = opts[0][0];
+    oneSel.innerHTML = opts.map(([v, n]) => `<option value="${esc(v)}">${esc(n)}</option>`).join('') || '<option value="">No containers found</option>';
+    oneSel.value = hc.one;
+    oneSel.dispatchEvent(new Event('change'));   // refresh the enhanced select's label
+
+    const all = hc.scope === 'all';
+    $('[data-ch=listhead]', host).textContent = all
+      ? 'Watching every container, including ones created later. Uncheck to exclude.'
+      : 'Watch these containers';
+    // containers in the config that are not running now still show, so they can be unticked
+    const rows = [...liveContainers];
+    for (const s of all ? hc.excluded : hc.picked) {
+      if (!rows.some((c) => c.slug === s)) rows.push({ slug: s, name: s, state: 'removed', health: 'none', image: '' });
+    }
+    $('[data-ch=list]', host).innerHTML = rows.map((c) => {
+      const on = all ? !hc.excluded.has(c.slug) : hc.picked.has(c.slug);
+      return `<label class="ch-item ${on ? '' : 'ch-off'}"><input type="checkbox" data-ch-slug="${esc(c.slug)}" ${on ? 'checked' : ''}>
+        <span><b>${esc(c.name)}</b><small>${esc(c.image || '')}</small></span>${healthPill(c)}</label>`;
+    }).join('') || '<p class="sess-empty" style="padding:10px 12px">No containers found on this node.</p>';
+
+    host.querySelectorAll('.ch-cond').forEach((l) => l.classList.toggle('on', l.querySelector('input').checked));
+    const warn = $('[data-ch=warn]', host);
+    const noCheck = healthWatched().map((s) => liveContainers.find((c) => c.slug === s)).filter((c) => c && c.health === 'none');
+    if (healthConds(host).includes('unhealthy') && noCheck.length) {
+      const n = noCheck.length === 1;
+      warn.style.display = '';
+      warn.innerHTML = `${noCheck.map((c) => `<b>${esc(c.name)}</b>`).join(', ')} ${n ? 'has' : 'have'} no HEALTHCHECK in ${n ? 'its' : 'their'} image, so "Turns unhealthy" cannot apply to ${n ? 'it' : 'them'}. Stop and restart conditions still do.`;
+    } else warn.style.display = 'none';
+    renderPreview(host);
+  }
+
   function renderPreview(host) {
     const el = $('[data-new=preview]', host);
     if (!el) return;
@@ -1321,6 +1429,11 @@ pageRenderers.alerts = (() => {
     if ($('[data-new=telegram]', host).checked) chans.push('Telegram');
     const chanTxt = chans.length === 1 ? chans[0] : `${chans.slice(0, -1).join(', ')} and ${chans[chans.length - 1]}`;
     let cond;
+    if (kind === 'health') {
+      const cfg = healthConfig(host);
+      el.textContent = `${name} (${sev}): alert when ${healthScopeText(cfg)} ${healthCondText(cfg)}, sustained for ${sustain}s. One alert per container. Notify ${chanTxt}.`;
+      return;
+    }
     if (kind === 'service' || kind === 'container') {
       const down = $('[data-new=state]', host).value === 'down';
       const word = down ? (kind === 'container' ? 'is not running' : 'is down') : 'is back up';
@@ -1366,18 +1479,21 @@ pageRenderers.alerts = (() => {
     const sev = $('[data-new=severity]', host); if (sev) sev.value = 'warning';
     const email = $('[data-new=email]', host); if (email) email.checked = false;
     const tgch = $('[data-new=telegram]', host); if (tgch) tgch.checked = false;
+    loadHealthConfig(host, null);
     enhanceSelects(host);
     syncCondition(host, { fromEdit: false });
     updateFormMode(host);
   }
 
   async function refresh(host) {
-    let rules, active, history, metrics;
+    let rules, active, history, metrics, conts;
     try {
-      [rules, active, history, metrics] = await Promise.all([
+      [rules, active, history, metrics, conts] = await Promise.all([
         api('/alerts/rules'), api('/alerts/active'), api('/alerts/history?limit=20'), api('/alerts/metrics'),
+        api('/alerts/containers').catch(() => ({ containers: [] })),
       ]);
     } catch { return; }
+    liveContainers = conts.containers || [];
 
     // active summary widget (count by severity)
     const summary = $('[data-al=summary]', host);
@@ -1407,7 +1523,9 @@ pageRenderers.alerts = (() => {
     // active banner (only when there ARE active alerts; all-clear is shown by the widget)
     const banner = $('[data-al=active]', host);
     banner.innerHTML = active.active.length
-      ? active.active.map((a) => `<div class="al-banner ${SEV_CLASS[a.severity]}">⚠ <b>${esc(a.name)}</b> — firing since ${new Date(a.since).toLocaleTimeString()}</div>`).join('')
+      ? active.active.map((a) => a.target
+        ? `<div class="al-banner ${SEV_CLASS[a.severity]}">⚠ <b>${esc(a.name)}</b>: <b>${esc(containerName(a.target))}</b> ${esc(a.reason || 'needs attention')}, firing since ${new Date(a.since).toLocaleTimeString()}</div>`
+        : `<div class="al-banner ${SEV_CLASS[a.severity]}">⚠ <b>${esc(a.name)}</b> — firing since ${new Date(a.since).toLocaleTimeString()}</div>`).join('')
       : '';
 
     // rules table — friendly condition text, reusing the same metric catalog
@@ -1418,6 +1536,13 @@ pageRenderers.alerts = (() => {
       const m = metricByKey[r.metric];
       const kind = metricKind(r.metric);
       const label = m ? m.label : r.metric;
+      if (kind === 'health' && r.config) {
+        const cfg = r.config;
+        const scope = cfg.scope === 'all'
+          ? `All containers${cfg.exclude.length ? ` except ${cfg.exclude.map(containerName).join(', ')}` : ''}`
+          : cfg.containers.length ? cfg.containers.map(containerName).join(', ') : 'No containers yet';
+        return `${scope}: ${healthCondText(cfg).replace('stops running', 'stopped').replace('turns unhealthy', 'unhealthy')}`;
+      }
       if (kind === 'service' || kind === 'container') {
         const down = r.op === '<' || (r.op === '<=' && r.threshold < 1);
         const noun = kind === 'container' ? 'Container' : 'Service';
@@ -1456,6 +1581,7 @@ pageRenderers.alerts = (() => {
     // notifications (a status-metric incident showing raw "service.dns.up"
     // and "peak 0" was the same underlying bug as the Telegram message).
     function histPeakText(h) {
+      if (h.target) return h.detail ? esc(h.detail.split(':')[0]) : '—';
       if (h.peak_value == null) return '—';
       if (metricKind(h.metric) === 'service' || metricKind(h.metric) === 'container') {
         return h.peak_value >= 1 ? 'up' : 'down';
@@ -1466,8 +1592,8 @@ pageRenderers.alerts = (() => {
       ? history.history.map((h) => `
         <div class="sess-row">
           <span class="al-sev ${SEV_CLASS[h.severity] || ''}">${esc(h.severity || '')}</span>
-          <span><b>${esc(h.name || 'deleted rule')}</b> <small>${esc(metricByKey[h.metric]?.label || h.metric || '')}</small></span>
-          <span>peak ${histPeakText(h)}</span>
+          <span><b>${esc(h.name || 'deleted rule')}</b> <small>${esc(h.target ? containerName(h.target) : (metricByKey[h.metric]?.label || h.metric || ''))}</small></span>
+          <span>${h.target ? histPeakText(h) : `peak ${histPeakText(h)}`}</span>
           <span>${rapisysFmtTime(h.fired_at)}${h.resolved_at ? '' : ' · <span class="sess-live">ongoing</span>'}</span>
         </div>`).join('')
       : '<p class="sess-empty">No incidents recorded</p>';
@@ -1486,6 +1612,7 @@ pageRenderers.alerts = (() => {
       $('[data-new=cooldown]', host).value = rule.cooldown_s ?? 900;
       $('[data-new=email]', host).checked = (rule.channels || []).includes('email');
       $('[data-new=telegram]', host).checked = (rule.channels || []).includes('telegram');
+      loadHealthConfig(host, rule.config);
       // re-sync any enhanced selects, then reflect edit mode in the form
       enhanceSelects(host);
       syncCondition(host, { fromEdit: true });
@@ -1539,6 +1666,35 @@ pageRenderers.alerts = (() => {
               <div class="al-form-row" data-new="condstate" style="display:none">
                 <label>Alert when <select data-new="state"><option value="down">Down</option><option value="up">Back up</option></select></label>
               </div>
+              <div class="ch-wrap" data-new="condhealth" style="display:none">
+                <div>
+                  <div class="ch-label">Which containers</div>
+                  <div class="ch-seg" data-ch="scope">
+                    <button type="button" data-scope="one">One container</button>
+                    <button type="button" data-scope="some">Selected containers</button>
+                    <button type="button" data-scope="all">All containers</button>
+                  </div>
+                </div>
+                <label data-ch="onewrap">Container <select data-ch="one"></select></label>
+                <div class="ch-list" data-ch="listwrap">
+                  <div class="ch-list-head"><span data-ch="listhead"></span>
+                    <span><button type="button" class="ch-link" data-ch="selall">Select all</button><button type="button" class="ch-link" data-ch="selnone">Clear</button></span></div>
+                  <div data-ch="list"></div>
+                </div>
+                <div>
+                  <div class="ch-label">Alert when a container</div>
+                  <div class="ch-conds">
+                    <label class="ch-cond"><input type="checkbox" data-ch-cond="down" checked>
+                      <span><b>Stops running</b><small>Exited or dead. A container picked by name also counts when removed (30 min grace after a redeploy).</small></span></label>
+                    <label class="ch-cond"><input type="checkbox" data-ch-cond="unhealthy" checked>
+                      <span><b>Turns unhealthy</b><small>Docker HEALTHCHECK reports unhealthy. Containers without a healthcheck are skipped.</small></span></label>
+                    <label class="ch-cond"><input type="checkbox" data-ch-cond="restarts">
+                      <span><b>Keeps restarting</b><small>Crash loop detected from the restart count.</small>
+                        <span class="ch-cond-extra"><input type="number" min="1" max="100" data-ch="rcount" value="3"> restarts in <input type="number" min="1" max="1440" data-ch="rwin" value="10"> min</span></span></label>
+                  </div>
+                </div>
+                <div class="warn-note ch-warn" data-ch="warn" style="display:none"></div>
+              </div>
               <div class="al-form-row">
                 <label>Sustain (s) <input data-new="sustain" type="number" value="120"></label>
                 <label>Severity <select data-new="severity"><option>warning</option><option>critical</option><option>info</option></select></label>
@@ -1549,7 +1705,7 @@ pageRenderers.alerts = (() => {
               <label class="wz-inline"><input type="checkbox" data-new="telegram"> Also send Telegram</label>
               <div class="set-actions"><button class="set-btn set-btn-primary" data-new="add"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span>Add rule</span></button><button class="set-btn set-btn-cancel" data-new="cancel" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg><span>Cancel</span></button><span data-new="status"></span></div>
             </div>
-            <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s. Service and container conditions reuse the same live checks as the Services and Containers cards — a service check keeps watching its port even if the container is removed, so a "DNS" rule still fires. A container that's fully removed is reported down for 30 minutes before RaPiSys stops tracking it, so a rebuild/redeploy won't falsely trigger an alert.</p>
+            <p class="hw-hint">Email notifications use the SMTP settings from Settings → Email (SMTP). Rules are evaluated every 30 s. Service and container conditions reuse the same live checks as the Services and Containers cards — a service check keeps watching its port even if the container is removed, so a "DNS" rule still fires. A container that's fully removed is reported down for 30 minutes before RaPiSys stops tracking it, so a rebuild/redeploy won't falsely trigger an alert. Container health rules can also be switched on per container with the bell on the Containers card.</p>
             </div>
           </div>
           <div class="card-body" data-pane="history" style="display:none">
@@ -1570,6 +1726,27 @@ pageRenderers.alerts = (() => {
         const el = $(`[data-new=${k}]`, host);
         if (el) el.addEventListener('input', () => renderPreview(host));
       });
+      // container health: scope buttons, picker, conditions
+      host.querySelectorAll('[data-ch=scope] button').forEach((b) => b.onclick = () => { hc.scope = b.dataset.scope; renderHealth(host); });
+      $('[data-ch=one]', host).addEventListener('change', (e) => {
+        if (e.target.value !== hc.one) { hc.one = e.target.value; renderPreview(host); }
+      });
+      $('[data-ch=list]', host).addEventListener('change', (e) => {
+        const slug = e.target.dataset?.chSlug;
+        if (!slug) return;
+        const set = hc.scope === 'all' ? hc.excluded : hc.picked;
+        if (hc.scope === 'all' ? !e.target.checked : e.target.checked) set.add(slug); else set.delete(slug);
+        renderHealth(host);
+      });
+      $('[data-ch=selall]', host).onclick = () => {
+        if (hc.scope === 'all') hc.excluded.clear(); else liveContainers.forEach((c) => hc.picked.add(c.slug));
+        renderHealth(host);
+      };
+      $('[data-ch=selnone]', host).onclick = () => {
+        if (hc.scope === 'all') liveContainers.forEach((c) => hc.excluded.add(c.slug)); else hc.picked.clear();
+        renderHealth(host);
+      };
+      host.querySelectorAll('[data-ch-cond], [data-ch=rcount], [data-ch=rwin]').forEach((i) => i.addEventListener('input', () => renderHealth(host)));
       syncCondition(host, { fromEdit: false });
 
       $('[data-new=opennew]', host).onclick = () => {
@@ -1593,6 +1770,7 @@ pageRenderers.alerts = (() => {
             ...($('[data-new=email]', host).checked ? ['email'] : []),
             ...($('[data-new=telegram]', host).checked ? ['telegram'] : [])],
         };
+        if (metricKind(body.metric) === 'health') body.config = healthConfig(host);
         try {
           const wasEditing = !!editingId;
           if (editingId) {
@@ -7904,6 +8082,104 @@ async function maybeShowWizard() {
 }
 
 // ---------------------------------------------------------------------------
+// Containers card: Docker health pill + alert bell per container
+// ---------------------------------------------------------------------------
+// The card itself is rendered by the upstream main.js on every stats tick, so
+// this decorates it after each render instead of changing that renderer. A
+// bell adds or removes the container from the bell-managed "Container
+// health" alert rule (created with defaults on first use).
+
+const containerBells = (() => {
+  let byName = new Map();
+  let grid = null;
+  const BELL_ON = '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>';
+  const BELL_OFF = '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>';
+  const PILL = { healthy: ['ch-healthy', 'Healthy'], unhealthy: ['ch-unhealthy', 'Unhealthy'], starting: ['ch-starting', 'Starting'] };
+  const escA = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function decorate() {
+    if (!grid || !byName.size) return;
+    grid.querySelectorAll('.container-card').forEach((card) => {
+      const name = card.querySelector('.container-name')?.textContent.trim();
+      const c = byName.get(name);
+      const header = card.querySelector('.container-header');
+      if (!c || !header) return;
+      let badges = header.querySelector('.container-badges');
+      if (!badges) {
+        badges = el('span', 'container-badges');
+        const status = header.querySelector('.container-status');
+        header.appendChild(badges);
+        if (status) badges.appendChild(status);
+      }
+      badges.querySelectorAll('.ch-pill, .ch-bell').forEach((n) => n.remove());
+      // Only images with a HEALTHCHECK get a pill; the status badge already says running/exited.
+      const p = c.state === 'running' && PILL[c.health];
+      if (p) badges.insertAdjacentHTML('afterbegin', `<span class="ch-pill ${p[0]}">${p[1]}</span>`);
+      const others = c.bell ? [] : c.watchedBy;
+      const title = c.bell
+        ? 'Health alerts on. Click to stop alerting for this container.'
+        : others.length
+          ? `Watched by the rule "${others.map((r) => r.name).join('", "')}". Click to also add it to the bell rule.`
+          : 'Alert me if this container stops running or turns unhealthy';
+      badges.insertAdjacentHTML('beforeend', `<button type="button" class="inv-act ch-bell ${c.bell ? 'on' : others.length ? 'other' : ''}"
+        data-ch-bell="${escA(c.slug)}" data-on="${c.bell ? 1 : 0}" title="${escA(title)}" aria-label="${escA(title)}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${c.bell || others.length ? BELL_ON : BELL_OFF}</svg></button>`);
+    });
+  }
+
+  async function load() {
+    try {
+      // Plain fetch: a signed-out viewer just gets no bells, never a login prompt.
+      const r = await fetch(`${API}/alerts/containers`, { credentials: 'same-origin' });
+      if (!r.ok) { byName = new Map(); return; }
+      const d = await r.json();
+      byName = new Map((d.containers || []).map((c) => [c.name, c]));
+      decorate();
+    } catch { /* offline: keep the last state */ }
+  }
+
+  async function toggle(btn) {
+    const c = [...byName.values()].find((x) => x.slug === btn.dataset.chBell);
+    const watch = btn.dataset.on !== '1';
+    btn.disabled = true;
+    try {
+      const res = await api(`/alerts/containers/${encodeURIComponent(btn.dataset.chBell)}/watch`, { method: 'POST', body: { watch } });
+      const name = c?.name || btn.dataset.chBell;
+      const still = (c?.watchedBy || []).filter((r) => r.id !== res.ruleId);
+      toast('success', 'Container health', watch
+        ? `✓ Alerting when ${name} stops or turns unhealthy${res.created ? '. Rule "Container health" created; fine-tune it in Alerts.' : ''}`
+        : `Stopped bell alerts for ${name}${still.length ? `. Still watched by "${still.map((r) => r.name).join('", "')}".` : ''}`);
+      await load();
+    } catch (err) {
+      toast('error', 'Container health', err.message);
+      btn.disabled = false;
+    }
+  }
+
+  function init() {
+    grid = document.getElementById('containers-grid');
+    if (!grid) return;
+    new MutationObserver(decorate).observe(grid, { childList: true });
+    // main.js re-renders the cards every stats tick, which can swap the bell
+    // out between mousedown and mouseup and swallow a click. Act on the
+    // press for pointers; `click` still covers the keyboard (detail 0).
+    const onBell = (e) => {
+      const b = e.target.closest('[data-ch-bell]');
+      if (!b || b.disabled) return;
+      if (e.type === 'pointerdown' && e.button !== 0) return;
+      if (e.type === 'click' && e.detail !== 0) return;
+      e.preventDefault();
+      toggle(b);
+    };
+    grid.addEventListener('pointerdown', onBell);
+    grid.addEventListener('click', onBell);
+    load();
+    setInterval(load, 15000);
+  }
+  return { init, load };
+})();
+
+// ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
 
@@ -7916,4 +8192,5 @@ window.addEventListener('DOMContentLoaded', () => {
   maybeShowWizard();
   refreshAuthBadge();
   initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings?tab=nodes'; } });
+  containerBells.init();
 });

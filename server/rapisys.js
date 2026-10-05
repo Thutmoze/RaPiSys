@@ -426,7 +426,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // (inventory, network, reports, …) were unguarded and readable without login in
   // full mode. Mutating routes keep their stricter requireControl on top.
   app.use('/api/hardware', rc, hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
-  app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig, sampler }));
+  app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig, sampler, getSettings: loadSettings }));
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,
     loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig }));

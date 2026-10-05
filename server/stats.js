@@ -499,13 +499,59 @@ function calculateCpuPercent(containerId, currentUsageUsec) {
   return Math.round(cpuPercent * 10) / 10;
 }
 
+// Container health, keyed by container name, refreshed by every
+// getDockerContainerStats() pass from the inspect data it already fetches.
+// Kept out of the legacy /api/stats payload (its shape stays upstream's);
+// the RaPiSys sampler and the container health alerts read it from here.
+let containerHealth = new Map();
+
+/** name -> { health, failingStreak, healthOutput, restartCount, exitCode, oomKilled, status } */
+export function getContainerHealth() {
+  return containerHealth;
+}
+
+function healthFromInspect(info) {
+  const h = info.State?.Health;
+  const last = h?.Log?.length ? h.Log[h.Log.length - 1] : null;
+  return {
+    // 'healthy' | 'unhealthy' | 'starting' | 'none' (image has no HEALTHCHECK)
+    health: h?.Status || 'none',
+    failingStreak: h?.FailingStreak ?? 0,
+    healthOutput: last ? String(last.Output || '').trim().slice(0, 500) : null,
+    restartCount: Number.isFinite(info.RestartCount) ? info.RestartCount : null,
+    exitCode: info.State?.ExitCode ?? null,
+    oomKilled: !!info.State?.OOMKilled,
+    status: info.State?.Status || null,
+  };
+}
+
+// Stopped containers are not in /containers/json; one ?all=1 call records
+// them too, so a stopped container (with its exit code) can be told apart
+// from one that was removed.
+async function addStoppedContainers(health) {
+  const everything = await dockerApiGet('/containers/json?all=1').catch(() => null);
+  for (const c of everything || []) {
+    const name = (c.Names?.[0] || '').replace(/^\//, '');
+    if (!name || health.has(name)) continue;
+    const exited = /Exited \((-?\d+)\)/.exec(c.Status || '');
+    health.set(name, { health: 'none', failingStreak: 0, healthOutput: null, restartCount: null,
+      exitCode: exited ? Number(exited[1]) : null, oomKilled: false, status: c.State || null });
+  }
+}
+
 // Get Docker container stats via Docker socket API + /proc for memory + cgroups for CPU
 // Works WITHOUT cgroup memory controller and without docker CLI
 async function getDockerContainerStats() {
   try {
     // Use Docker API via socket to get container info
     const containers = await dockerApiGet('/containers/json');
-    if (!containers || containers.length === 0) return new Map();
+    if (!containers || containers.length === 0) {
+      const stopped = new Map();
+      await addStoppedContainers(stopped);
+      containerHealth = stopped;
+      return new Map();
+    }
+    const health = new Map();
     
     // Get total system memory for percentage calculation
     const procPath = fs.existsSync('/host/proc/meminfo') ? '/host/proc/meminfo' : '/proc/meminfo';
@@ -523,6 +569,7 @@ async function getDockerContainerStats() {
       try {
         const info = await dockerApiGet(`/containers/${fullId}/json`);
         const pid = info.State?.Pid;
+        if (info.Name) health.set(info.Name.replace(/^\//, ''), healthFromInspect(info));
         
         // Memory from /proc/[PID]/status
         let memUsageKB = 0;
@@ -559,6 +606,8 @@ async function getDockerContainerStats() {
       }
     }
 
+    await addStoppedContainers(health);
+    containerHealth = health;
     return statsMap;
   } catch (error) {
     console.error('Docker stats failed:', error.message);
@@ -794,7 +843,8 @@ export async function getSystemStats() {
   try {
     // Get container list from systeminformation
     const dockerContainers = await si.dockerContainers();
-    
+    if (dockerContainers.length === 0) containerHealth = new Map();
+
     if (dockerContainers.length > 0) {
       // Get real stats using docker stats command
       const statsMap = await getDockerContainerStats();

@@ -27,7 +27,7 @@ The original design language is preserved exactly: same dark glassmorphism, same
 | **Pi 5 hardware** | Fan RPM, duty cycle, auto/manual control · CPU/SoC temperature with historical charts · throttle & undervoltage detection with a persistent event log · PMIC power telemetry (core voltage, 5 V rail, board watts) |
 | **History engine** | 10 s sampling into SQLite · tiered downsampling (10 s → 1 m → 10 m → 1 h) · configurable retention (7–3650 days) · DB relocatable to a NAS with automatic network-FS-safe journaling and local fallback |
 | **First-run wizard** | Guided setup for NAS mounting (SMB/CIFS incl. SMB1 legacy NAS, NFS), database location, retention policy, SMTP, all from the browser |
-| **Alerts & notifications** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · authenticated SMTP (STARTTLS/465) · **Telegram** push notifications · credentials encrypted at rest (AES-256-GCM) and write-only via API · test-send buttons |
+| **Alerts & notifications** | Server-side rule engine (anti-flap state machine, severities, cooldowns) · **Container health** rules: watch one container, a picked set, or all containers (new ones included, with an exclude list) and alert when a container stops running, turns unhealthy (Docker `HEALTHCHECK`; *starting* never counts) or keeps restarting (N restarts in M minutes); one alert per container, with the last healthcheck output and exit code in the message; a bell on each Containers card adds or removes that container from a managed *Container health* rule · authenticated SMTP (STARTTLS/465) · **Telegram** push notifications · credentials encrypted at rest (AES-256-GCM) and write-only via API · test-send buttons |
 | **Sessions** | Live SSH (via systemd-logind, utmp fallback), RealVNC and Tailscale sessions · login history and durations recorded server-side · disconnect active sessions |
 | **Settings page** | Manage NAS mounts (mount/remount/unmount, persisted as systemd units), relocate the metrics database, and review retention, mode, SMTP and agent status, all from the web UI |
 | **Network analytics** | Live per-interface throughput (streaming chart), vnStat bandwidth history (14-day bars), protocol distribution, top processes (socket activity, or opt-in per-process bandwidth via nethogs), and a rich **DNS Analysis** card (daemon-light, built on /proc, ss and vnStat) |
@@ -226,7 +226,7 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 | `GET /api/hardware` · `POST /api/hardware/fan` | Pi 5 snapshot, fan control 🔒 |
 | `/api/setup/*` | wizard: status, mode, NAS mount, storage, retention, SMTP, complete |
 | `/api/auth/*` | register + MFA enrolment (wizard-only), login, logout, whoami |
-| `/api/alerts/*` · `/api/sessions/*` | alert rules/active/history · live sessions + login history |
+| `/api/alerts/*` · `/api/sessions/*` | alert rules/active/history; `GET /api/alerts/containers` (live containers, health, which rules watch them) and `POST /api/alerts/containers/:slug/watch` `{watch}` (Containers card bell) · live sessions + login history |
 | `/api/network` · `/api/network/dns/*` | network snapshot · Pi-hole config/test/detect/install/blocking/update/system-resolver/backup 🔒 |
 | `/api/reports/*` · `/api/inventory/*` · `/api/updates/*` | report aggregation/export · package/service/container inventory · update detection & execution, `about/:pkg` (package facts), `reboot-status` and `reboot` 🔒 |
 | `/api/layouts/*` | dashboards registry, per-dashboard layouts, reorder 🔒 |
