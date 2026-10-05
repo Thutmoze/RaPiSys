@@ -6632,25 +6632,32 @@ pageRenderers.updates = (() => {
 
   // "About" panel: what a package is, why it is installed, and where to read
   // more. Facts come straight from apt via the agent (GET /updates/about/:pkg).
-  async function showAbout(host, pkg) {
+  // From the confirm card, `opts` carries the plan's versions and hides the
+  // footer actions (the card itself already offers changelog and install).
+  async function showAbout(host, pkg, opts = {}) {
     const u = updates.find((x) => x.package === pkg) || {};
+    const actions = opts.actions !== false;
+    const from = opts.from !== undefined ? opts.from : u.installed;
+    const to = opts.to !== undefined ? opts.to : u.candidate;
+    const verText = to ? `${from ? `${esc(from)} → ` : 'new · '}${esc(to)}` : from ? `${esc(from)} · removed` : '';
     const ov = el('div', 'wizard-overlay');
     const close = () => ov.remove();
     ov.innerHTML = `<div class="wizard card up-ab-modal" role="dialog" aria-label="About ${esc(pkg)}" tabindex="-1">
         <div class="up-cl-head">
-          <div class="up-ab-title"><b>${esc(pkg)}</b><span class="inv-dim">about</span>${u.candidate ? `<span class="up-cl-ver">${esc(u.installed || '')} → ${esc(u.candidate)}</span>` : ''}</div>
+          <div class="up-ab-title"><b>${esc(pkg)}</b><span class="inv-dim">about</span>${verText ? `<span class="up-cl-ver">${verText}</span>` : ''}</div>
           <div class="up-cl-head-actions"><button class="up-link" data-ab="x">close ✕</button></div>
         </div>
         <div class="up-ab-body" data-ab="body"><div class="up-log-loading"><span class="up-spinner-sm"></span>Reading package info…</div></div>
         <div class="up-ab-foot">
           <button class="action-btn set-btn-cancel" data-ab="x">Close</button>
-          <button class="action-btn set-btn-edit" data-ab="cl">${ICN.book}<span>View changelog</span></button>
-          ${u.candidate ? `<button class="action-btn set-btn-edit" data-ab="upd">${ICN.download}<span>Update</span></button>` : ''}
+          ${actions ? `<button class="action-btn set-btn-edit" data-ab="cl">${ICN.book}<span>View changelog</span></button>` : ''}
+          ${actions && u.candidate ? `<button class="action-btn set-btn-edit" data-ab="upd">${ICN.download}<span>Update</span></button>` : ''}
         </div>
       </div>`;
     document.body.appendChild(ov);
     ov.querySelectorAll('[data-ab=x]').forEach((b) => b.onclick = close);
-    ov.querySelector('[data-ab=cl]').onclick = () => { close(); showChangelog(host, pkg); };
+    const cl = ov.querySelector('[data-ab=cl]');
+    if (cl) cl.onclick = () => { close(); showChangelog(host, pkg); };
     const upd = ov.querySelector('[data-ab=upd]');
     if (upd) upd.onclick = () => { close(); confirmUpgrade(host, { packages: [pkg], label: pkg }); };
     ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
@@ -6890,10 +6897,10 @@ pageRenderers.updates = (() => {
           </div>`;
       }
       return `<div class="up-plan-row${open ? ' open' : ''}">
-          <button type="button" class="up-plan-head" ${openable ? `data-plan-toggle="${esc(d.name)}" aria-expanded="${!!open}"` : 'disabled'}>
+          <div class="up-plan-headrow"><button type="button" class="up-plan-head" ${openable ? `data-plan-toggle="${esc(d.name)}" aria-expanded="${!!open}"` : 'disabled'}>
             ${openable ? PLAN_CARET : '<span class="up-plan-caret"></span>'}<span class="up-plan-name">${esc(d.name)}</span>
             <span class="up-plan-ver">${verHtml(d)}</span><span class="up-plan-tags">${tags(d)}</span>
-          </button>${body}
+          </button><button type="button" class="up-about-btn up-plan-about" data-plan-about="${esc(d.name)}" title="What is ${esc(d.name)}?" aria-label="About ${esc(d.name)}">${ICN.info}</button></div>${body}
         </div>`;
     };
 
@@ -6938,7 +6945,7 @@ pageRenderers.updates = (() => {
     };
 
     root.addEventListener('click', (e) => {
-      const t = e.target.closest('[data-plan-toggle],[data-plan-older],[data-plan-retry],[data-plan-full],[data-plan-all]');
+      const t = e.target.closest('[data-plan-toggle],[data-plan-older],[data-plan-retry],[data-plan-full],[data-plan-all],[data-plan-about]');
       if (!t) return;
       e.preventDefault();
       if (t.dataset.planToggle) {
@@ -6948,6 +6955,9 @@ pageRenderers.updates = (() => {
         const s = get(t.dataset.planOlder); s.showOlder = !s.showOlder; render();
       } else if (t.dataset.planRetry) {
         load(t.dataset.planRetry);
+      } else if (t.dataset.planAbout) {
+        const d = [...selItems, ...extras, ...removed].find((x) => x.name === t.dataset.planAbout) || {};
+        showAbout(host, t.dataset.planAbout, { from: d.from || upd(d.name)?.installed || null, to: d.to || upd(d.name)?.candidate || null, actions: false });
       } else if (t.dataset.planFull) {
         showChangelog(host, t.dataset.planFull);
       } else if (t.hasAttribute('data-plan-all')) {

@@ -6865,6 +6865,12 @@ body.ultra .ns-sub { display: none; }
 tr:hover .up-about-btn, .up-about-btn:focus-visible { opacity: 1; }
 .up-about-btn:hover { filter: drop-shadow(0 0 6px rgba(168,85,247,0.6)); }
 .up-about-btn:focus-visible { outline: 1px solid var(--accent-purple); outline-offset: 2px; border-radius: 50%; }
+.up-plan-headrow { display: flex; align-items: center; }
+.up-plan-headrow .up-plan-head { flex: 1; min-width: 0; }
+.up-plan-about { margin: 0 8px 0 2px; }
+.up-plan-row:hover .up-plan-about { opacity: 1; }
+body.compact .up-plan-about { margin-right: 6px; }
+body.ultra .up-plan-about { margin: 0 5px 0 0; }
 
 .up-ab-modal { max-width: 680px; width: 92vw; max-height: 86vh; display: flex; flex-direction: column; padding: 0; overflow: hidden; outline: none; }
 .up-ab-modal .up-cl-head { gap: 12px; }
