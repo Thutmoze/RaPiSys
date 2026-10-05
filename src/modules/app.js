@@ -390,6 +390,89 @@ function setStatus(el, ok, msg) {
   el.classList.add(ok ? 'wz-status-ok' : 'wz-status-err');
 }
 
+// ---------------------------------------------------------------------------
+// Database location check (setup wizard + Settings → Storage)
+// ---------------------------------------------------------------------------
+// Checks the directory as it is typed and warns before two mistakes: putting
+// the database on a network share (it freezes RaPiSys), and pointing at a
+// folder that already holds a database (the relocate would otherwise have to
+// guess between overwriting it and switching to its older history). The
+// relocate endpoint refuses (409) unless these answers are sent.
+function wireStorageCheck({ input, box, goBtn }) {
+  const escH = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const mb = (b) => (b == null ? '—' : b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1048576).toFixed(1)} MB`);
+  const day = (ts) => (ts ? rapisysFmtTime(ts, { dateOnly: true }) : null);
+  const span = (f) => (f.from && f.to ? `${day(f.from)} to ${day(f.to)}` : 'unknown');
+  const OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  let check = null, checkedFor = null, ack = false, choice = 'replace', seq = 0, timer = null;
+  const grp = `stc-${Math.random().toString(36).slice(2, 8)}`;
+
+  const blocked = () => !!(check && check.network && !ack);
+  function render() {
+    if (!check || !input.value.trim()) { box.innerHTML = ''; if (goBtn) goBtn.disabled = false; return; }
+    const parts = [];
+    if (check.sameAsCurrent) {
+      parts.push(`<div class="st-check-ok">${OK}<span>This is where the database already is.</span></div>`);
+    }
+    if (check.network) {
+      parts.push(`<div class="st-warn"><div class="st-warn-h">${WARN_ICON}This is a network share (${escH(check.fsType)})</div>
+        RaPiSys reads its database synchronously. On a share, every slow read freezes the whole dashboard, sometimes for minutes, and a large history makes it worse.
+        Keep the database on this Pi and back it up to the share instead (Settings → Storage → Back up database to NAS).
+        <label class="st-ack"><input type="checkbox" data-stc="ack" ${ack ? 'checked' : ''}> Use the share anyway. I understand RaPiSys may stop responding while the share is slow.</label></div>`);
+    }
+    if (check.existing) {
+      const e = check.existing, c = check.current || {};
+      const written = rapisysFmtTime(e.mtime);
+      parts.push(`<div class="st-warn"><div class="st-warn-h">${WARN_ICON}A database already exists in ${escH(check.dir)}</div>
+        <div class="st-facts"><span>Size</span><span>${mb(e.size)}</span><span>Last written</span><span>${escH(written)}</span>
+          <span>History</span><span>${escH(span(e))}</span><span>Current database</span><span>${mb(c.size)}, history ${escH(span(c))}</span></div>
+        <label class="st-choice ${choice === 'replace' ? 'on' : ''}"><input type="radio" name="${grp}" data-stc="replace" ${choice === 'replace' ? 'checked' : ''}>
+          <span><b>Copy the current database here<span class="st-rec">Recommended</span></b>The existing file is kept, renamed to <code>rapisys.db.replaced-&lt;date&gt;</code>.</span></label>
+        <label class="st-choice ${choice === 'adopt' ? 'on' : ''}"><input type="radio" name="${grp}" data-stc="adopt" ${choice === 'adopt' ? 'checked' : ''}>
+          <span><b>Switch to the existing database</b>RaPiSys continues from that file's history. Everything recorded since ${escH(written)} stays behind in the current file and is not carried over.</span></label></div>`);
+    }
+    if (!parts.length) {
+      parts.push(`<div class="st-check-ok">${OK}<span>${escH(check.fsType)} storage. No database here yet; the current one will be copied over.</span></div>`);
+    }
+    box.innerHTML = parts.join('');
+    const a = box.querySelector('[data-stc=ack]');
+    if (a) a.onchange = () => { ack = a.checked; render(); };
+    box.querySelectorAll('[data-stc=replace], [data-stc=adopt]').forEach((r) => r.onchange = () => { choice = r.dataset.stc; render(); });
+    if (goBtn) goBtn.disabled = blocked();
+  }
+  async function run() {
+    const dir = input.value.trim();
+    if (!dir || !dir.startsWith('/')) { check = null; checkedFor = dir; render(); return; }
+    if (dir === checkedFor && check) return;
+    const my = ++seq;
+    box.innerHTML = '<div class="st-check-busy">Checking…</div>';
+    try {
+      const r = await api('/setup/storage/check', { method: 'POST', body: { dbDir: dir } });
+      if (my !== seq) return;
+      if (r.dir !== check?.dir) { ack = false; choice = 'replace'; }
+      check = r; checkedFor = dir;
+    } catch (err) {
+      if (my !== seq) return;
+      check = null; checkedFor = null;
+      box.innerHTML = `<div class="st-check-busy">${escH(err.message)}</div>`;
+      return;
+    }
+    render();
+  }
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 400); });
+  if (input.value.trim()) run();
+
+  return {
+    /** Up-to-date answers for POST /setup/storage, or null while a warning is unanswered. */
+    async answers() {
+      clearTimeout(timer);
+      await run();
+      if (blocked()) return null;
+      return { allowNetwork: !!check?.network, ...(check?.existing ? { existing: choice } : {}) };
+    },
+  };
+}
+
 function toast(type, title, message) {
   // Reuse the legacy toast system if present.
   if (window.showToast) return window.showToast(type, title, message);
@@ -1965,7 +2048,8 @@ pageRenderers.settings = (() => {
 
     // ---- storage card ----
     const s = st.storage || {};
-    const dbDirVal = nas?.mountpoint || (s.path && s.path.startsWith('/mnt/rapisys/') ? s.path.replace(/\/rapisys\.db$/, '') : '');
+    // Pre-fill with the database's current folder; never suggest the NAS.
+    const dbDirVal = s.path ? s.path.replace(/\/rapisys\.db$/, '') : '';
     const fmtBytes = (b) => {
       if (b == null) return '—';
       if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
@@ -1989,7 +2073,8 @@ pageRenderers.settings = (() => {
       ${!editDb ? `
         <div class="set-actions"><button class="set-btn set-btn-edit" data-set="dbedit">${EDIT_ICON}<span>Edit</span></button></div>` : `
         <div class="wz-form">
-          <label>Database directory <input data-set="dbdir" value="${esc(dbDirVal)}" placeholder="/mnt/rapisys/mybook"></label>
+          <label>Database directory <input data-set="dbdir" value="${esc(dbDirVal)}" placeholder="/app/data"></label>
+          <div class="st-check" data-set="stcheck"></div>
           <div class="set-actions"><button class="set-btn set-btn-primary" data-set="relocate">${SAVE_ICON}<span>Relocate database</span></button><button class="set-btn set-btn-cancel" data-set="dbcancel">${CANCEL_ICON}<span>Cancel</span></button><span data-set="stmsg"></span></div>
         </div>`}`;
 
@@ -2317,12 +2402,18 @@ pageRenderers.settings = (() => {
     if (dbCancel) dbCancel.onclick = () => { editDb = false; load(host); };
 
     const relocate = $('[data-set=relocate]', host);
+    const stCheck = relocate ? wireStorageCheck({ input: $('[data-set=dbdir]', host), box: $('[data-set=stcheck]', host), goBtn: relocate }) : null;
     if (relocate) relocate.onclick = async () => {
       const msg = $('[data-set=stmsg]', host);
       const dir = $('[data-set=dbdir]', host).value.trim();
+      const answers = await stCheck.answers();
+      if (!answers) { setStatus(msg, false, 'Answer the warning above first'); return; }
       relocate.disabled = true; setStatus(msg, true, 'Relocating database…');
-      try { const r = await api('/setup/storage', { method: 'POST', body: { dbDir: dir } });
-        editDb = false; setStatus(msg, true, `✓ now on ${r.fsType || 'disk'} (${r.journalMode} journal)`); load(host);
+      try { const r = await api('/setup/storage', { method: 'POST', body: { dbDir: dir, ...answers } });
+        editDb = false;
+        setStatus(msg, true, `✓ now on ${r.fsType || 'disk'} (${r.journalMode} journal)`);
+        if (r.replaced) toast('info', 'Storage', `The database that was there is kept as ${r.replaced}`);
+        load(host);
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
       finally { relocate.disabled = false; }
     };
@@ -7844,6 +7935,7 @@ async function maybeShowWizard() {
   let step = 0;
   const state = { nas: null, dbDir: '', retention: status.retentionDays || 90,
     mode: 'monitor', adminReady: false };
+  let stCheck = null;   // database location check on the Storage step
 
   const steps = [
     // 0 — Welcome / environment
@@ -7996,10 +8088,10 @@ async function maybeShowWizard() {
     {
       render() {
         body.innerHTML = `
-          <p class="wz-lead">Where should the metrics database live? Storing it on your NAS protects your SD card from write wear.</p>
+          <p class="wz-lead">The metrics database stays on this Pi's own storage, where it is fast and safe. If you have a NAS, RaPiSys can keep compressed backups of it there.</p>
           ${status.agent ? `
           <details class="wz-nas" open>
-            <summary>Mount a NAS share first (optional)</summary>
+            <summary>Mount a NAS share for backups (optional)</summary>
             <div class="wz-form">
               <label>Label <input data-nas="label" placeholder="mybook" maxlength="32"></label>
               <label>Protocol <select data-nas="proto"><option value="cifs">SMB/CIFS</option><option value="nfs">NFS</option></select></label>
@@ -8022,14 +8114,22 @@ async function maybeShowWizard() {
               <p class="wz-warn" data-smb1 hidden>⚠ SMB1 is insecure; only use it on a trusted LAN/VLAN. Required by the WD My Book World Edition II.</p>
               <button class="action-btn" data-nas="mount">Mount share</button>
               <span class="wz-mount-status" data-nas="status"></span>
+              <div class="wz-backup" data-nas="backupbox" hidden>
+                <label class="wz-inline"><input type="checkbox" data-nas="backup" checked> Back up the database to this share daily (keep 14)</label>
+                <p class="wz-hint">Change the schedule later in Settings → Storage.</p>
+              </div>
             </div>
-          </details>` : `<p class="wz-warn">⚠ Host agent not detected. NAS mounting from here is unavailable. You can still point RaPiSys at any directory already mounted on the Pi (bind-mounted into the container), or keep the local default and relocate later in Settings.</p>`}
-          <div class="wz-form">
-            <label>Database directory
-              <input data-st="dir" placeholder="/mnt/rapisys/mybook  (leave empty for local)" value="">
-            </label>
-            <p class="wz-hint">On a network share RaPiSys automatically uses a NAS-safe journal mode, and falls back to local storage with a warning if the NAS is offline.</p>
-          </div>`;
+          </details>` : `<p class="wz-warn">⚠ Host agent not detected. NAS mounting from here is unavailable. Keep the database on this Pi; you can mount a NAS for backups later in Settings → Storage.</p>`}
+          <details class="wz-adv">
+            <summary>Advanced: keep the database somewhere else</summary>
+            <div class="wz-form">
+              <label>Database directory
+                <input data-st="dir" placeholder="leave empty for this Pi's storage (recommended)" value="">
+              </label>
+              <div class="st-check" data-st="check"></div>
+            </div>
+          </details>`;
+        stCheck = wireStorageCheck({ input: $('[data-st=dir]', body), box: $('[data-st=check]', body), goBtn: nextBtn });
         const versSel = $('[data-nas=vers]', body);
         versSel?.addEventListener('change', () => {
           $('[data-smb1]', body).hidden = versSel.value !== '1.0';
@@ -8055,7 +8155,8 @@ async function maybeShowWizard() {
               password: $('[data-nas=pass]', body)?.value,
             }});
             setStatus(stat, true, `✓ mounted at ${r.mountpoint}`);
-            $('[data-st=dir]', body).value = r.mountpoint;
+            // The share is for backups; the database directory is left alone.
+            $('[data-nas=backupbox]', body).hidden = false;
             state.nas = r.mountpoint;
           } catch (err) { setStatus(stat, false, `✗ ${err.message}`); }
         });
@@ -8063,9 +8164,16 @@ async function maybeShowWizard() {
       },
       busyLabel: 'Relocating database…',
       async next() {
+        if (state.nas && $('[data-nas=backup]', body)?.checked) {
+          // Never block setup on this; it can be switched on later in Settings.
+          try { await api('/storage/backup/config', { method: 'POST', body: { enabled: true, frequency: 'daily', retain: 14 } }); }
+          catch (e) { toast('warning', 'Storage', `Backups not switched on: ${e.message}. Set them up in Settings → Storage.`); }
+        }
         const dir = $('[data-st=dir]', body).value.trim();
         if (!dir) return true; // keep local default
-        const r = await api('/setup/storage', { method: 'POST', body: { dbDir: dir } });
+        const answers = await stCheck.answers();
+        if (!answers) throw new Error('Answer the warning under Advanced first, or clear the directory');
+        const r = await api('/setup/storage', { method: 'POST', body: { dbDir: dir, ...answers } });
         toast('success', 'Storage', `Database now at ${r.path} (${r.journalMode}${r.degraded ? ', DEGRADED' : ''})`);
         return true;
       },
@@ -8164,6 +8272,7 @@ async function maybeShowWizard() {
   ];
 
   async function show(i) {
+    nextBtn.disabled = false;   // the Storage step's location check may have disabled it
     step = i;
     wiz.querySelectorAll('.wz-step').forEach((s, idx) => s.classList.toggle('active', idx === step));
     backBtn.style.visibility = step === 0 ? 'hidden' : 'visible';

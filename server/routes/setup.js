@@ -20,7 +20,8 @@ import fs from 'fs';
 import path from 'path';
 import { agentCall, agentAvailable } from '../core/agent-client.js';
 import { hasSecretKey } from '../core/crypto.js';
-import { fsTypeOf } from '../core/db.js';
+import { fsTypeOf, NETWORK_FS } from '../core/db.js';
+import { describeDbFile } from '../services/db-file-info.js';
 
 const RETENTION_PRESETS = [7, 30, 90, 180, 365];
 
@@ -253,13 +254,21 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
     const options = buildMountOptions(j);
     const originalDbPath = dbMeta().path;
     const settingsBefore = (await loadSettings()).rapisys?.nas || null;
-    send('start', { mountpoint });
+    // The database only follows the share if it lived on it. A local database
+    // stays local: swapping a backup share must never move it onto the NAS.
+    const dbOnShare = path.resolve(originalDbPath || '').startsWith(path.resolve(mountpoint) + path.sep);
+    send('start', { mountpoint, dbOnShare });
 
     // -- 1. move the database to local storage -----------------------------
     step(0, 'run');
     try {
-      reopenDb(fallbackDbPath);
-      step(0, 'done', `now at ${fallbackDbPath}`);
+      if (dbOnShare) {
+        // 'replace': a stale local file is set aside, never switched to.
+        reopenDb(fallbackDbPath, { existing: 'replace' });
+        step(0, 'done', `now at ${fallbackDbPath}`);
+      } else {
+        step(0, 'skip', 'already on local storage');
+      }
     } catch (err) {
       step(0, 'fail', err.message);
       send('failed', { message: `could not move the database to local storage: ${err.message}` });
@@ -275,8 +284,8 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
     } catch (err) {
       step(1, 'fail', err.message);
       // The old share is back (or was never released) — put the DB with it.
-      let restored = false;
-      try { reopenDb(originalDbPath); restored = true; } catch { /* stays local */ }
+      let restored = !dbOnShare;
+      if (dbOnShare) { try { reopenDb(originalDbPath, { existing: 'replace' }); restored = true; } catch { /* stays local */ } }
       step(2, 'skip', 'not attempted');
       send('failed', {
         message: err.message,
@@ -289,10 +298,14 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
 
     // -- 4. move the database onto the new share ----------------------------
     step(2, 'run');
-    const newDbPath = path.join(mountpoint, 'rapisys.db');
+    const newDbPath = dbOnShare ? path.join(mountpoint, 'rapisys.db') : originalDbPath;
     try {
-      reopenDb(newDbPath);
-      step(2, 'done', `now at ${newDbPath}`);
+      if (dbOnShare) {
+        reopenDb(newDbPath, { existing: 'replace' });
+        step(2, 'done', `now at ${newDbPath}`);
+      } else {
+        step(2, 'skip', 'database stays on local storage');
+      }
     } catch (err) {
       // The share is good but the DB could not follow it. Leave the DB local
       // rather than half-moved and say so plainly.
@@ -321,9 +334,48 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
   });
 
   // -- step 2b: relocate the database ------------------------------------------
+
+  /** What relocating to dbDir would mean: filesystem, and any database there. */
+  function storageCheck(dbDir) {
+    const dir = path.resolve(dbDir);
+    const dbPath = path.join(dir, 'rapisys.db');
+    const fsType = fsTypeOf(dir);
+    const cur = dbMeta();
+    const sameAsCurrent = path.resolve(cur.path || '') === dbPath;
+    return {
+      dir, dbPath, fsType,
+      network: NETWORK_FS.has(fsType),
+      sameAsCurrent,
+      existing: sameAsCurrent ? null : describeDbFile(dbPath),
+      current: { path: cur.path, fsType: cur.fsType, ...(describeDbFile(cur.path) || {}) },
+    };
+  }
+
+  // POST (not GET) so it sits behind the setup gate: it probes arbitrary paths.
+  r.post('/storage/check', (req, res) => {
+    const dbDir = String(req.body?.dbDir || '');
+    if (!path.isAbsolute(dbDir)) return res.status(400).json({ error: 'dbDir must be an absolute path' });
+    try { res.json(storageCheck(dbDir)); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  /**
+   * Relocate. Two answers are required up front, never assumed:
+   *  - allowNetwork: true to put the database on a network share
+   *  - existing: 'replace' | 'adopt' when a database already exists there
+   * Otherwise 409 with the check result, so the UI can ask.
+   */
   r.post('/storage', async (req, res) => {
     const dbDir = String(req.body?.dbDir || '');
     if (!path.isAbsolute(dbDir)) return res.status(400).json({ error: 'dbDir must be an absolute path' });
+    const check = storageCheck(dbDir);
+    if (check.network && req.body?.allowNetwork !== true) {
+      return res.status(409).json({ code: 'network', error: `${check.dir} is a network share (${check.fsType}); confirm to use it anyway`, check });
+    }
+    const existing = ['replace', 'adopt'].includes(req.body?.existing) ? req.body.existing : null;
+    if (check.existing && !existing) {
+      return res.status(409).json({ code: 'exists', error: `a database already exists in ${check.dir}; choose to replace it or switch to it`, check });
+    }
     // The container sees host NAS mounts under /mnt/rapisys (bind-mounted by
     // compose). Verify it is writable before committing to it.
     try {
@@ -334,17 +386,18 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
     } catch (err) {
       return res.status(400).json({ error: `directory not writable: ${err.message}` });
     }
-    const dbPath = path.join(dbDir, 'rapisys.db');
-    const fsType = fsTypeOf(dbDir);
+    const dbPath = check.dbPath;
+    const fsType = check.fsType;
     try {
-      const meta = reopenDb(dbPath); // migrate + journal-mode selection happens inside
+      // migrate + journal-mode selection happens inside
+      const meta = reopenDb(dbPath, { existing: existing || 'replace' });
       await withFileLock(async () => {
         const settings = await loadSettings();
         settings.rapisys = settings.rapisys || {};
         settings.rapisys.storage = { dbPath };
         await saveSettings(settings);
       });
-      events.add('storage.relocated', 'info', { dbPath, fsType });
+      events.add('storage.relocated', 'info', { dbPath, fsType, existing: check.existing ? existing : null, replaced: meta.replaced || null });
       res.json({ ok: true, ...meta });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });

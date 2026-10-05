@@ -5141,9 +5141,12 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .set-card > [data-set] > .set-actions { margin-top: auto; }
 /* Hide empty trailing wrappers (data-set, data-acc, nasform, etc.) that would
    otherwise take layout space below the content. */
-.set-card [data-set]:empty,
-.set-card [data-acc]:empty,
-.set-card [data-pi]:empty { display: none; }
+/* Hide empty placeholder containers. Form controls are always :empty (no
+   children), so they are excluded: this rule used to hide the Database
+   directory input in Settings → Storage → Edit. */
+.set-card [data-set]:empty:not(input, select, textarea),
+.set-card [data-acc]:empty:not(input, select, textarea),
+.set-card [data-pi]:empty:not(input, select, textarea) { display: none; }
 /* Section cards are flex columns; the grid stretches them to equal height. */
 .set-card { display: flex; flex-direction: column; }
 /* Wide section cards hug their content instead of stretching across the grid. */
@@ -7017,3 +7020,38 @@ body.compact .set-bk-err { padding: 6px 10px; font-size: 11.5px; }
 body.ultra .set-sub { margin-top: 8px; padding-top: 8px; }
 body.ultra .set-sub .net-dns-note, body.ultra .set-bk-restore { display: none; }
 body.ultra .set-bk-err { padding: 5px 8px; font-size: 11px; }
+
+/* ---- Database location check (wizard Storage step + Settings → Storage) ---- */
+.st-check { display: flex; flex-direction: column; gap: 8px; }
+.st-check:empty { display: none; }
+.st-check-ok { font-size: 12px; color: #10b981; display: flex; gap: 6px; align-items: flex-start; line-height: 1.5; }
+.st-check-ok svg, .st-warn-h svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
+.st-check-busy { font-size: 12px; color: var(--text-muted); }
+.st-warn { border: 1px solid rgba(245,158,11,0.35); background: rgba(245,158,11,0.06); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.st-warn-h { display: flex; gap: 6px; align-items: flex-start; color: #f59e0b; font-weight: 700; font-size: 12.5px; margin-bottom: 4px; }
+.st-warn b { color: var(--text-primary); font-weight: 600; }
+.st-warn code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-secondary); }
+.st-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 6px 0 8px; font-size: 11.5px; }
+.st-facts span:nth-child(odd) { color: var(--text-muted); }
+.st-facts span:nth-child(even) { color: var(--text-primary); }
+.wz-form label.st-choice, label.st-choice { display: flex; flex-direction: row; gap: 10px; align-items: flex-start; padding: 8px 10px;
+  border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary); cursor: pointer;
+  margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+.st-choice input { accent-color: var(--accent-cyan); margin-top: 2px; }
+.st-choice b { color: var(--text-primary); display: block; font-size: 12.5px; }
+.wz-form label.st-choice.on, label.st-choice.on { border-color: rgba(0,212,255,0.4); background: rgba(0,212,255,0.05); }
+.wz-form label.st-ack, label.st-ack { display: flex; flex-direction: row; gap: 8px; align-items: flex-start; margin-top: 8px;
+  font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.st-ack input { accent-color: #f59e0b; margin-top: 2px; }
+.st-rec { font-size: 9.5px; font-weight: 700; color: #10b981; border: 1px solid rgba(16,185,129,0.4); border-radius: 999px;
+  padding: 1px 7px; margin-left: 6px; text-transform: uppercase; vertical-align: 1px; }
+.wz-backup { margin-top: 4px; padding: 10px 12px; border: 1px solid rgba(16,185,129,0.3); background: rgba(16,185,129,0.05); border-radius: var(--radius-sm); }
+.wz-backup .wz-inline { font-size: 13px; color: var(--text-primary); }
+.wz-backup .wz-hint { margin-top: 4px; }
+.wz-adv summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); margin: 14px 0 6px; }
+body.compact .st-warn { padding: 8px 10px; font-size: 11.5px; }
+body.compact .wz-form label.st-choice { padding: 6px 9px; }
+body.ultra .st-warn { padding: 6px 8px; font-size: 11px; }
+body.ultra .st-facts { font-size: 10.5px; }
+body.ultra .wz-form label.st-choice { padding: 5px 8px; }

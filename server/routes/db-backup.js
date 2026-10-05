@@ -2,7 +2,9 @@
 
 import express from 'express';
 
-export function dbBackupRouter({ dbBackup, requireControl }) {
+// Gated like other settings (requireConfig), not like Pi control: backups run
+// inside the container, so they work in monitor-only mode too.
+export function dbBackupRouter({ dbBackup, requireAuth }) {
   const r = express.Router();
 
   r.get('/', async (req, res) => {
@@ -11,13 +13,13 @@ export function dbBackupRouter({ dbBackup, requireControl }) {
   });
 
   // Save schedule (enabled, frequency, retain).
-  r.post('/config', requireControl, async (req, res) => {
+  r.post('/config', requireAuth, async (req, res) => {
     try { res.json({ ok: true, config: await dbBackup.saveConfig(req.body || {}) }); }
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // Run a backup now, streamed (SSE), same event names as the Pi-hole backup.
-  r.get('/run/stream', requireControl, async (req, res) => {
+  r.get('/run/stream', requireAuth, async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.flushHeaders?.();
