@@ -235,3 +235,20 @@ describe('alerts routes: container health', () => {
     expect(keys).not.toContain('docker.pihole.restarts');
   });
 });
+
+describe('metrics repo: listMetrics', () => {
+  it('lists each metric once, sorted, via index seeks rather than a table scan', () => {
+    const f = fixture();
+    const t0 = Date.now();
+    for (let i = 0; i < 50; i++) {
+      f.metricsRepo.writeBatch(t0 - i * 10000, [{ metric: 'temp.cpu', value: 50 }, { metric: 'a.first', value: 1 }, { metric: 'docker.x.up', value: 1 }]);
+    }
+    expect(f.metricsRepo.listMetrics()).toEqual(['a.first', 'docker.x.up', 'temp.cpu']);
+    const plan = f.db.prepare(`EXPLAIN QUERY PLAN SELECT (SELECT MIN(metric) FROM metrics WHERE metric > 'a')`).all().map((r) => r.detail).join(' ');
+    expect(plan).toMatch(/SEARCH metrics/);
+  });
+
+  it('returns an empty list for an empty table', () => {
+    expect(fixture().metricsRepo.listMetrics()).toEqual([]);
+  });
+});

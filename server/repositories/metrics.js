@@ -40,8 +40,22 @@ export function createMetricsRepo(db) {
     return { res: useRes, points: rows };
   }
 
+  /**
+   * Distinct metric names. A plain SELECT DISTINCT scans every row (millions,
+   * hundreds of MB): with the database on a network share that blocked the
+   * event loop for minutes, and the Alerts page asks for this every 15 s.
+   * This walks the (metric, res, ts) primary key instead, one seek per
+   * distinct metric.
+   */
   function listMetrics() {
-    return db.prepare(`SELECT DISTINCT metric FROM metrics ORDER BY metric`).all().map((r) => r.metric);
+    return db.prepare(
+      `WITH RECURSIVE m(metric) AS (
+         SELECT MIN(metric) FROM metrics
+         UNION ALL
+         SELECT (SELECT MIN(metric) FROM metrics WHERE metric > m.metric) FROM m WHERE m.metric IS NOT NULL
+       )
+       SELECT metric FROM m WHERE metric IS NOT NULL`
+    ).all().map((r) => r.metric);
   }
 
   /**
