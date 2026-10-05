@@ -20,6 +20,7 @@ const STATIC = {
   'power.5v': { label: '5V rail (V)', group: 'Thermal & power' },
   'power.watts': { label: 'Board power (W)', group: 'Thermal & power' },
   'updates.reboot_required': { label: 'Reboot required to finish updates (1 = yes)', group: 'System' },
+  'storage.backup_failed': { label: 'Database backup to NAS failed (1 = yes)', group: 'System' },
 };
 
 // 1/0 flags that read better as a sentence than as "is 1 (threshold >= 1)".
@@ -27,6 +28,10 @@ const FLAGS = {
   'updates.reboot_required': {
     on: 'A reboot is required to finish installing updates. Open Updates in RaPiSys to see what is waiting.',
     off: 'No reboot is pending any more.',
+  },
+  'storage.backup_failed': {
+    on: 'The last database backup to the NAS failed. Open Settings → Storage in RaPiSys to see why.',
+    off: 'Database backups to the NAS are working again.',
   },
 };
 

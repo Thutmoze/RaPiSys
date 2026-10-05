@@ -105,7 +105,7 @@ Then open **`http://<your-pi>:3001`**. The **setup wizard** appears on first vis
 2. **Mode**: choose what this dashboard may do:
    - **Monitor only**: read-only, exactly like the original Pi-Dashboard. No account needed; Pi-control endpoints are disabled server-side.
    - **Full control**: enables fan control, NAS management, updates and reboot. You register a **local administrator** (username + password) and (recommended, on by default but your choice) enrol **two-factor authentication** by scanning a QR code with any TOTP app. Verification happens on the spot, and the wizard browser is signed in automatically.
-3. **Storage**: optionally mount your NAS (WD My Cloud EX2 Ultra → SMB 3.0; WD My Book World Edition II → SMB 1.0, with a security warning) and point the database at it. On a network share RaPiSys automatically switches to a NAS-safe journal mode; if the NAS is offline at boot it falls back to local storage and shows a warning instead of crashing.
+3. **Storage**: optionally mount your NAS (WD My Cloud EX2 Ultra → SMB 3.0; WD My Book World Edition II → SMB 1.0, with a security warning). Keep the database on the Pi's local storage and let the NAS hold **compressed backups** of it (Settings → Storage → *Back up database to NAS*). Running the database directly from a share is possible but not recommended: SQLite reads are synchronous, and a slow share freezes the whole dashboard.
 4. **Retention**: 7 / 30 / 90 / 180 / 365 days or custom
 5. **Email**: SMTP for alerts, with a *Send test email* button
 6. **Done**: history is already recording in the background
@@ -131,6 +131,19 @@ sudo ./deploy.sh status      # app + agent + deep health
 sudo ./deploy.sh upgrade     # snapshot → rebuild → health-gate → auto-rollback on failure
 sudo ./deploy.sh rollback    # restore the newest snapshot
 sudo ./deploy.sh uninstall   # remove (add --purge to delete data)
+```
+
+### Database backups and restore
+
+Settings → Storage → **Back up database to NAS** schedules daily or weekly backups (default: daily, keep 14). Each run takes a SQLite online backup of `rapisys.db` on local disk, checks it with `PRAGMA quick_check`, then streams it gzip-compressed to `<nas>/rapisys-backups/rapisys-YYYY-MM-DD-HHMM.db.gz` and prunes the oldest. *Backup Now* runs one immediately with a live log. Every run is logged as a `rapisys.backup.ok` / `rapisys.backup.failed` event, and the alert metric **Database backup to NAS failed** (`storage.backup_failed`, `>= 1`) notifies you when scheduled backups stop working. Backups refuse to run while the database itself is on a network share.
+
+Restore:
+
+```bash
+cd ~/RaPiSys && sudo docker compose stop rapisys
+gunzip -c /mnt/rapisys/<label>/rapisys-backups/<file>.db.gz | sudo tee data/rapisys.db >/dev/null
+sudo rm -f data/rapisys.db-wal data/rapisys.db-shm
+sudo docker compose start rapisys
 ```
 
 ### Adding a second node
@@ -192,7 +205,7 @@ Unauthenticated relays are not supported by design.
 Key decisions:
 
 - **SQLite, not a TSDB.** At ~25 metrics × 10 s cadence, SQLite with tiered downsampling stays in the hundreds of MB over 90 days and costs no extra daemon RAM. The storage layer prefers `better-sqlite3` and transparently falls back to Node's built-in `node:sqlite`, so a failed native build can never brick the app.
-- **DB on the NAS, safely.** WAL mode requires shared memory that CIFS/NFS can't provide; RaPiSys detects the filesystem of the DB directory and selects the journal mode accordingly, and survives an offline NAS by falling back to local storage with a visible degraded flag (`/api/health/deep`).
+- **DB on local storage, backups on the NAS.** A database on a CIFS share works, but every synchronous read can block the event loop for as long as the share takes (minutes on an SMB1 box with a large metrics table), so the recommended setup keeps `rapisys.db` local and snapshots it to the NAS. If it is on a share anyway: WAL mode requires shared memory that CIFS/NFS can't provide; RaPiSys detects the filesystem of the DB directory and selects the journal mode accordingly, and survives an offline NAS by falling back to local storage with a visible degraded flag (`/api/health/deep`).
 - **Federated nodes, not a primary/secondary pair.** A dormant standby cannot report the primary's death — the thing that would alert you is the thing that failed. Instead every node is identical and independent: cross-node traffic is read-only HTTP between the *unprivileged* Express servers, never between agents, so the root agent stays on its local Unix socket and is unreachable from the network. Nothing is added to `metrics`, `events` or `session_log`; a database only ever holds its own node's data.
 - **Privilege split.** Everything root-y lives in the ~500-line, zero-dependency agent with a closed operation set. The web container itself can't run `apt`, write to sysfs, or mount anything, even if compromised.
 
@@ -226,6 +239,7 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 | `GET /api/hardware` · `POST /api/hardware/fan` | Pi 5 snapshot, fan control 🔒 |
 | `/api/setup/*` | wizard: status, mode, NAS mount, storage, retention, SMTP, complete |
 | `/api/auth/*` | register + MFA enrolment (wizard-only), login, logout, whoami |
+| `/api/storage/backup` | database backups to the NAS: `GET` status/schedule/files, `POST /config` `{enabled, frequency, retain}`, `GET /run/stream` (SSE, run now) |
 | `/api/alerts/*` · `/api/sessions/*` | alert rules/active/history; `GET /api/alerts/containers` (live containers, health, which rules watch them) and `POST /api/alerts/containers/:slug/watch` `{watch}` (Containers card bell) · live sessions + login history |
 | `/api/network` · `/api/network/dns/*` | network snapshot · Pi-hole config/test/detect/install/blocking/update/system-resolver/backup 🔒 |
 | `/api/reports/*` · `/api/inventory/*` · `/api/updates/*` | report aggregation/export · package/service/container inventory · update detection & execution, `about/:pkg` (package facts), `reboot-status` and `reboot` 🔒 |

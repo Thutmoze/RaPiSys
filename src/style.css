@@ -7000,3 +7000,20 @@ body.ultra .ch-cond b { font-size: 11.5px; }
 body.ultra .ch-seg button { padding: 5px 10px; font-size: 11px; }
 body.ultra .ch-pill { font-size: 9px; padding: 1px 7px; }
 body.ultra .ch-bell { width: 22px; height: 22px; }
+
+/* ---- Database backups to NAS (Settings → Storage) ---- */
+.set-sub { border-top: 1px solid var(--border-color); margin-top: 16px; padding-top: 14px; }
+.set-bk-fail { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-red); font-weight: 600; }
+.set-bk-fail svg { width: 14px; height: 14px; }
+.set-bk-err { font-size: 12px; color: #fca5a5; background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.3);
+  border-radius: var(--radius-sm); padding: 8px 12px; margin-top: 10px; line-height: 1.5; }
+.set-bk-err b { color: #fecaca; font-weight: 600; }
+.set-bk-restore { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+.set-bk-restore summary { cursor: pointer; color: var(--accent-cyan); }
+.set-bk-restore ol { margin: 8px 0 0 18px; line-height: 1.7; }
+.set-bk-restore code { font-family: ui-monospace, monospace; font-size: 11px; color: var(--text-secondary); word-break: break-all; }
+body.compact .set-sub { margin-top: 12px; padding-top: 10px; }
+body.compact .set-bk-err { padding: 6px 10px; font-size: 11.5px; }
+body.ultra .set-sub { margin-top: 8px; padding-top: 8px; }
+body.ultra .set-sub .net-dns-note, body.ultra .set-bk-restore { display: none; }
+body.ultra .set-bk-err { padding: 5px 8px; font-size: 11px; }

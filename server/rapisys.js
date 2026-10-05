@@ -44,6 +44,8 @@ import { historyRouter } from './routes/history.js';
 import { deepHealthRouter } from './routes/health.js';
 import { nodesRouter } from './routes/nodes.js';
 import { setupRouter } from './routes/setup.js';
+import { createDbBackup } from './services/db-backup.js';
+import { dbBackupRouter } from './routes/db-backup.js';
 import { hardwareRouter } from './routes/hardware.js';
 import { alertsRouter } from './routes/alerts.js';
 import { sessionsRouter } from './routes/sessions.js';
@@ -169,7 +171,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   const servicesApi = (loadServices && checkService) ? { loadServices, checkService } : null;
   // Late-bound like the other facades: updatesRepo is (re)assigned when the DB opens.
   const rebootStatus = createRebootStatus({ updatesRepo: new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) }) });
-  const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware, servicesApi, rebootStatus });
+  const dbBackup = createDbBackup({ getDb, dbMeta, loadSettings, saveSettings, withFileLock, events: eventsFacade });
+  const sampler = createSampler({ metricsRepo: metricsFacade, eventsRepo: eventsFacade, hardware, servicesApi, rebootStatus, dbBackup });
   const peerPoller = createPeerPoller({
     peersRepo: peersFacade, metricsRepo: metricsFacade, eventsRepo: eventsFacade,
   });
@@ -347,6 +350,10 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       eventsFacade.add('pihole.backup.failed', 'warning', { error: e.message });
     }
   }, { runNow: false });
+  // Scheduled rapisys.db backup to the NAS (online snapshot on local disk,
+  // then gzip streamed to <nas>/rapisys-backups). Checked at startup and
+  // hourly; runs only when due, so restarts do not add extra backups.
+  scheduler.register('rapisys-db-backup', 3600e3, async () => { await dbBackup.tick(); }, { runNow: true });
   scheduler.register('inventory-sync', 30 * 60e3, async () => {
     try {
       const { items, kinds, failures } = await inventory.collectAll();
@@ -426,6 +433,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // (inventory, network, reports, …) were unguarded and readable without login in
   // full mode. Mutating routes keep their stricter requireControl on top.
   app.use('/api/hardware', rc, hardwareRouter({ hardware, eventsRepo: eventsFacade, requireAuth: auth.requireControl }));
+  app.use('/api/storage/backup', rc, dbBackupRouter({ dbBackup, requireControl: auth.requireControl }));
   app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig, sampler, getSettings: loadSettings }));
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,

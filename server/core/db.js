@@ -25,7 +25,7 @@ import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
 /** Filesystem types where SQLite locking/WAL is unsafe. */
-const NETWORK_FS = new Set(['cifs', 'smb3', 'smbfs', 'nfs', 'nfs4', 'fuse.sshfs']);
+export const NETWORK_FS = new Set(['cifs', 'smb3', 'smbfs', 'nfs', 'nfs4', 'fuse.sshfs']);
 
 /** Resolve the filesystem type of the mount that contains `dir`. */
 export function fsTypeOf(dir) {

@@ -53,6 +53,7 @@ const INSTALL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none
 const CANCEL_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const INSTALL_UP_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 9l5-5 5 5"/><path d="M12 4v12"/></svg>';
 const RESTART_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+const WARN_CIRCLE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>';
 const CHECK_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const WARN_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>';
 const SPIN_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>';
@@ -1806,11 +1807,115 @@ pageRenderers.settings = (() => {
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
   let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false, editTls = false;
+  let editDbBackup = false;   // database backup schedule form open
   // Guided-swap state: null when idle, otherwise { kind, title, body, holders,
   // steps[], acts } rendered into [data-set=nasguide]. Survives re-renders of
   // the card so a running swap is not wiped by a routine load().
   let nasGuide = null;
   // shared glyphs hoisted to module scope (EDIT_ICON, TRASH_ICON, …)
+
+  // ---- rapisys.db backups to the NAS (same controls as the Pi-hole log backup) ----
+  async function renderDbBackup(host) {
+    const box = $('[data-set=dbbackup]', host);
+    if (!box) return;
+    let bk;
+    try { bk = await api('/storage/backup'); } catch (e) { box.innerHTML = `<p class="net-dns-note">${esc(e.message)}</p>`; return; }
+    const fmtMB = (n) => (n == null ? '—' : (n / 1048576).toFixed(1) + ' MB');
+    if (!bk.nasConfigured) {
+      box.innerHTML = '<p class="net-dns-note">No NAS is configured yet. Set one up in Network Storage (NAS), then come back to schedule database backups here.</p>';
+      return;
+    }
+    const c = bk.config || {};
+    const showParams = editDbBackup || !c.enabled;
+    const last = (bk.backups || [])[0];
+    const histLink = bk.backups?.length ? `<button class="set-bk-historylink" data-db="bkhistory" style="color:var(--accent-cyan)">History (${bk.backups.length})</button>` : '';
+    const fail = bk.failure;
+    const lastLine = fail
+      ? `<span class="set-bk-fail">${WARN_CIRCLE_ICON}Failed ${esc(new Date(fail.at).toLocaleString())}</span>${histLink}`
+      : last
+        ? `<span class="set-ok set-ok-check">${CHECK_ICON}${esc(new Date(last.mtime).toLocaleString())} · ${fmtMB(last.size)}</span>${histLink}`
+        : 'None yet';
+    const failNote = fail
+      ? `<div class="set-bk-err">${esc(fail.error)}.${last ? ` The previous backup (${esc(new Date(last.mtime).toLocaleString())}, ${fmtMB(last.size)}) is still on the share.` : ''} Add an alert rule on <b>Database backup to NAS failed</b> to be notified.</div>`
+      : '';
+    const paramsHtml = `
+      <div class="set-kv"><span>Frequency</span><select data-db="bkfreq"><option value="daily"${c.frequency !== 'weekly' ? ' selected' : ''}>Daily</option><option value="weekly"${c.frequency === 'weekly' ? ' selected' : ''}>Weekly</option></select></div>
+      <div class="set-kv"><span>Keep last</span><span><input type="number" data-db="bkretain" value="${c.retain || 14}" min="1" max="365" style="max-width:90px"> <span class="net-dns-note" style="display:inline">backups</span></span></div>
+      <div class="set-actions">
+        <button class="set-btn set-btn-primary" data-db="bksave">${SAVE_ICON}<span>Save</span></button>
+        <button class="set-btn set-btn-test" data-db="bknow">${RESTART_ICON}<span>Backup Now</span></button>
+        ${(c.enabled && editDbBackup) ? `<button class="set-btn set-btn-cancel" data-db="bkcancel">${CANCEL_ICON}<span>Cancel</span></button>` : ''}
+      </div>`;
+    const summaryHtml = `
+      <div class="set-summary">
+        <div class="set-kv"><span>Frequency</span><b>${c.frequency === 'weekly' ? 'Weekly' : 'Daily'}</b></div>
+        <div class="set-kv"><span>Keep last</span><b>${c.retain || 14} backups</b></div>
+        <div class="set-kv"><span>Last backup</span><b>${lastLine}</b></div>
+        ${failNote}
+      </div>
+      <div class="set-actions">
+        <button class="set-btn set-btn-edit" data-db="bkedit">${EDIT_ICON}<span>Edit</span></button>
+        <button class="set-btn set-btn-test" data-db="bknow">${RESTART_ICON}<span>Backup Now</span></button>
+      </div>`;
+    const restore = `<details class="set-bk-restore"><summary>How to restore a backup</summary><ol>
+      <li>Stop RaPiSys: <code>sudo docker compose stop rapisys</code></li>
+      <li>Unpack the backup over the database: <code>gunzip -c ${esc(bk.dir)}/&lt;file&gt;.db.gz | sudo tee ~/RaPiSys/data/rapisys.db &gt;/dev/null</code> and delete <code>rapisys.db-wal</code> / <code>-shm</code></li>
+      <li>Start it again: <code>sudo docker compose start rapisys</code></li></ol></details>`;
+    box.innerHTML = `
+      <p class="net-dns-note">The live database stays on this Pi (running it from a NAS freezes RaPiSys). On a schedule, RaPiSys takes a consistent snapshot, compresses it and copies it to <b>${esc(bk.dir)}</b>.</p>
+      <div class="set-kv set-kv-toggle"><span>Scheduled backups to ${esc(bk.nas?.label || 'NAS')}</span>
+        <label class="set-switch"><input type="checkbox" data-db="bkenabled" ${c.enabled ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+      <div data-db="bkparams">${showParams ? paramsHtml : (c.enabled ? summaryHtml + restore : '')}</div>
+      <pre class="set-pi-log" data-db="bklog" style="display:none"></pre>`;
+    enhanceSelects(box);
+    const val = (k) => { const e = $(`[data-db=${k}]`, box); return e ? (e.type === 'checkbox' ? e.checked : e.value) : undefined; };
+
+    const wire = () => {
+      const save = $('[data-db=bksave]', box);
+      if (save) save.onclick = async () => {
+        try {
+          await api('/storage/backup/config', { method: 'POST', body: { enabled: val('bkenabled'), frequency: val('bkfreq'), retain: Number(val('bkretain')) } });
+          editDbBackup = false; toast('success', 'Database backup', 'Backup schedule saved'); renderDbBackup(host);
+        } catch (e) { toast('error', 'Database backup', e.message); }
+      };
+      const edit = $('[data-db=bkedit]', box);
+      if (edit) edit.onclick = () => { editDbBackup = true; renderDbBackup(host); };
+      const cancel = $('[data-db=bkcancel]', box);
+      if (cancel) cancel.onclick = () => { editDbBackup = false; renderDbBackup(host); };
+      box.querySelectorAll('[data-db=bknow]').forEach((btn) => btn.onclick = () => {
+        const logEl = $('[data-db=bklog]', box);
+        const label = btn.querySelector('span');
+        logEl.style.display = ''; logEl.textContent = '';
+        btn.disabled = true; label.textContent = 'Backing up…';
+        const append = (line) => { logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+        let finished = false;
+        const done = () => { btn.disabled = false; label.textContent = 'Backup Now'; };
+        const es = new EventSource(`${API}/storage/backup/run/stream`);
+        es.addEventListener('line', (ev) => { try { append(JSON.parse(ev.data).line); } catch { /* */ } });
+        es.addEventListener('done', () => { finished = true; es.close(); done(); toast('success', 'Database backup', 'Backed up to NAS'); setTimeout(() => renderDbBackup(host), 1500); });
+        es.addEventListener('failed', (ev) => { finished = true; es.close(); let m = 'Backup failed'; try { m = JSON.parse(ev.data).message || m; } catch { /* */ }
+          append('✗ ' + m); toast('error', 'Database backup', m); done(); });
+        es.onerror = () => { if (finished) return; finished = true; es.close(); append('✗ Connection lost'); done(); };
+      });
+      const hist = $('[data-db=bkhistory]', box);
+      if (hist) hist.onclick = () => {
+        const rows = (bk.backups || []).map((f) => `<div class="net-bk-row"><span class="net-bk-name">${esc(f.name)}</span><span class="net-bk-size">${fmtMB(f.size)}</span><span class="net-bk-date">${esc(new Date(f.mtime).toLocaleString())}</span></div>`).join('');
+        rapisysConfirm(`<div class="net-ph-h" style="margin-bottom:8px">Backup history on NAS (${bk.backups.length})</div><div class="net-bk-list net-bk-list-modal">${rows}</div>`, { html: true, confirmLabel: 'Close' });
+      };
+    };
+    const en = $('[data-db=bkenabled]', box);
+    en.onchange = () => {
+      const params = $('[data-db=bkparams]', box);
+      if (en.checked) { editDbBackup = true; params.innerHTML = paramsHtml; enhanceSelects(params); wire(); }
+      else {
+        // Turning it off saves immediately and collapses, like the Pi-hole backup.
+        editDbBackup = false; params.innerHTML = '';
+        api('/storage/backup/config', { method: 'POST', body: { enabled: false, frequency: c.frequency || 'daily', retain: c.retain || 14 } })
+          .then(() => toast('info', 'Database backup', 'Scheduled backups disabled')).catch((e) => toast('error', 'Database backup', e.message));
+      }
+    };
+    wire();
+  }
 
   async function load(host) {
     let st;
@@ -2221,6 +2326,8 @@ pageRenderers.settings = (() => {
       } catch (err) { setStatus(msg, false, `✗ ${err.message}`); }
       finally { relocate.disabled = false; }
     };
+
+    renderDbBackup(host);
 
     // SMTP edit / cancel toggles
     const smInfoBtn = $('[data-sm=infobtn]', host);
@@ -4408,7 +4515,8 @@ pageRenderers.settings = (() => {
           <div class="card-body" data-pane="storage" style="display:none">
             <div class="set-grid">
               <div class="set-card"><h4 class="sess-h">Network Storage (NAS)</h4><div data-set="nas"></div><div data-set="nasform"></div><div data-set="nasguide"></div></div>
-              <div class="set-card"><h4 class="sess-h">Database Storage</h4><div data-set="storage"></div></div>
+              <div class="set-card"><h4 class="sess-h">Database Storage</h4><div data-set="storage"></div>
+                <div class="set-sub"><h4 class="sess-h">Back up database to NAS</h4><div data-set="dbbackup"><p class="net-dns-note">Loading…</p></div></div></div>
             </div>
           </div>
           <div class="card-body" data-pane="dns" style="display:none">

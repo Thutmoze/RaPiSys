@@ -17,7 +17,7 @@ import { slugify } from '../core/metric-catalog.js';
 // the window, if it's still gone, we stop emitting it entirely.
 const CONTAINER_GRACE_MS = 30 * 60 * 1000;
 
-export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, rebootStatus,
+export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, rebootStatus, dbBackup,
   containerHealth = getContainerHealth }) {
   // slug -> { label, lastSeenTs, image, state, ...health } — used for the
   // grace window, to resolve friendly names in the Alerts metric picker, and
@@ -122,6 +122,8 @@ export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, 
     // 1 while a reboot is needed to finish installing updates. Cached on the
     // service side, so this never waits on the host scan.
     if (rebootStatus) samples.push({ metric: 'updates.reboot_required', value: rebootStatus.metricValue() });
+    // 1 while scheduled NAS backups are on and the last one failed.
+    if (dbBackup) samples.push({ metric: 'storage.backup_failed', value: dbBackup.failedMetric() });
 
     metricsRepo.writeBatch(ts, samples.filter((s) => s.value !== null && s.value !== undefined));
   }
