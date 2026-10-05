@@ -4798,16 +4798,28 @@ body.ultra .sess-row.sess-hist-row { grid-template-columns: 1.4fr 1fr 1.4fr 1.4f
 .al-actions { display: flex; gap: 6px; }
 .al-btn { font-size: 11px; padding: 5px 10px; }
 .al-del { color: var(--accent-red, #ef4444); }
-.al-form-row { display: grid; grid-template-columns: 2fr 60px 1fr; gap: 10px; }
-.al-form-row:nth-of-type(2) { grid-template-columns: 1fr 1fr 1fr; }
+/* Form rows: one equal column per field by default; modifiers set special widths. */
+.al-form-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; }
+.al-form-row > label { min-width: 0; }
+.al-form-row input, .al-form-row select { width: 100%; min-width: 0; }
+.al-form-row-cond { grid-template-columns: 76px minmax(0, 1fr); }
+.al-form-row-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.al-form-row-hostport { grid-template-columns: minmax(0, 1fr) 90px; }
+@media (max-width: 480px) {
+  .al-form-row-3 { grid-template-columns: 1fr; grid-auto-flow: row; }
+}
 
 /* Compact mode */
 body.compact .sess-row { padding: 6px 0; font-size: 12px; }
 body.compact .al-rule { padding: 8px 0; }
+body.compact .al-form-row { gap: 8px; }
+body.compact .al-form-row-cond { grid-template-columns: 72px minmax(0, 1fr); }
 
 /* Ultra compact mode */
 body.ultra .sess-row { padding: 4px 0; font-size: 11px; grid-template-columns: 2fr 1fr 1fr 1fr; }
 body.ultra .al-rule { padding: 6px 0; }
+body.ultra .al-form-row { gap: 6px; }
+body.ultra .al-form-row-cond { grid-template-columns: 66px minmax(0, 1fr); }
 body.ultra .sess-h { margin: 10px 0 4px; }
 
 /* Wizard: operating mode cards + MFA enrolment */

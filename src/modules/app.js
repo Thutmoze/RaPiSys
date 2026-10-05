@@ -1892,7 +1892,7 @@ pageRenderers.alerts = (() => {
                 <label>What to watch <select data-new="metric"><option value="">Choose a metric…</option></select></label>
               </div>
               <p class="hw-hint" data-new="unithint" style="display:none"></p>
-              <div class="al-form-row" data-new="condnum">
+              <div class="al-form-row al-form-row-cond" data-new="condnum">
                 <label>Op <select data-new="op"><option>&gt;</option><option>&lt;</option><option>&gt;=</option><option>&lt;=</option></select></label>
                 <label>Threshold <input data-new="threshold" type="number" step="any" placeholder="80"></label>
               </div>
@@ -1928,7 +1928,7 @@ pageRenderers.alerts = (() => {
                 </div>
                 <div class="warn-note ch-warn" data-ch="warn" style="display:none"></div>
               </div>
-              <div class="al-form-row">
+              <div class="al-form-row al-form-row-3">
                 <label>Sustain (s) <input data-new="sustain" type="number" value="120"></label>
                 <label>Severity <select data-new="severity"><option>warning</option><option>critical</option><option>info</option></select></label>
                 <label>Cooldown (s) <input data-new="cooldown" type="number" value="900"></label>
@@ -2290,7 +2290,7 @@ pageRenderers.settings = (() => {
           </div>
         </div>` : `
         <div class="wz-form">
-          <div class="al-form-row">
+          <div class="al-form-row al-form-row-hostport">
             <label>SMTP host <input data-sm="host" value="${esc(smtp.host || '')}" placeholder="smtp-relay.brevo.com"></label>
             <label>Port <input data-sm="port" type="number" value="${esc(smtp.port || 587)}" placeholder="587"></label>
           </div>
