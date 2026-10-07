@@ -48,21 +48,39 @@ if (SECRET.length < 32) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// dpkg asks interactively when a package ships a new version of a config file
+// the admin modified, and DEBIAN_FRONTEND=noninteractive does not cover that
+// prompt. With nobody to answer it, an upgrade hung forever. Every apt-get call
+// keeps the admin's file (dpkg's own default, new one saved as .dpkg-dist) and
+// never reads stdin. The options are inert for simulate/update/download.
+const APT_CONFFILE_OPTS = ['-o', 'Dpkg::Options::=--force-confdef', '-o', 'Dpkg::Options::=--force-confold'];
+function withAptDefaults(cmd, args) {
+  return cmd === 'apt-get' ? [...APT_CONFFILE_OPTS, ...args] : args;
+}
+
 function run(cmd, args, timeoutMs = 30000, opts = {}) {
+  args = withAptDefaults(cmd, args);
+  const env = cmd === 'apt-get' ? { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } : undefined;
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, cwd: opts.cwd }, (err, stdout, stderr) => {
+    const child = execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, cwd: opts.cwd, env }, (err, stdout, stderr) => {
       if (err && err.killed) return reject(new Error(`${cmd} timed out`));
       // Many tools (apt, rpi-eeprom-update) use nonzero codes informatively;
       // callers inspect output, so resolve with everything.
       resolve({ code: err ? err.code ?? 1 : 0, stdout: stdout || '', stderr: stderr || '' });
     });
+    // No caller feeds stdin; close it so any prompt gets EOF instead of waiting.
+    child.stdin?.end();
   });
 }
 
 /** Stream a long-running command line by line to the client. */
 function runStreaming(cmd, args, env, send) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { env: { ...process.env, ...env } });
+    const child = spawn(cmd, withAptDefaults(cmd, args), {
+      env: { ...process.env, ...env },
+      // Nothing answers prompts here: stdin at EOF makes them fail fast.
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     // Strip ANSI/terminal control sequences (cursor hide/show, moves, colour)
     // so streamed installer output is readable; drop lone spinner frames.
     const clean = (l) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\r\b]/g, '');
