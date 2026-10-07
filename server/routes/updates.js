@@ -209,15 +209,17 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
       // post-upgrade state. Anything that was upgradable before and is now gone
       // (or moved to a newer installed version) actually got upgraded — this
       // captures dependencies, not just the explicitly requested packages.
+      // Re-listed on failure too: a failed or interrupted run can still have
+      // installed some packages, and the cached list would keep showing them.
       let afterMap = {};
-      if (ok) {
-        try {
-          const after = await updates.list();
+      try {
+        const after = await updates.list();
+        if (after.available) {
           for (const u of (after.updates || [])) afterMap[u.package] = u;
           // persist the fresh list as the cache so the UI drops upgraded packages
           updatesRepo.saveCache(after.updates || []);
-        } catch { /* if re-list fails, fall back to requested-package history */ }
-      }
+        }
+      } catch { /* if re-list fails, fall back to requested-package history */ }
 
       // Build history entries from the real diff when we have it, else fall back
       // to the requested package list.
@@ -256,6 +258,12 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
       send('done', { ok, code: result.code, reboot });
     } catch (err) {
       updatesRepo.record({ ts: Date.now(), packageName: full ? 'dist-upgrade' : (packages || []).join(','), result: 'error', log: logBuf + '\n' + err.message });
+      // The run may have died part-way (agent restart, killed dpkg) after
+      // installing something; resync the cached list with the host.
+      try {
+        const after = await updates.list();
+        if (after.available) updatesRepo.saveCache(after.updates || []);
+      } catch { /* best-effort */ }
       send('failed', { message: err.message });
     }
     res.end();
