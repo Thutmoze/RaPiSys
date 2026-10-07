@@ -13,6 +13,7 @@ import { initOverviewLayout, reloadOverviewLayout, setToast as setLayoutToast, s
 import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
 import { currentNode, isRemoteNode } from './node-context.js';
+import { createTermLog } from './term-log.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -6659,7 +6660,10 @@ pageRenderers.updates = (() => {
     reboot = st; setNavRebootDot(st);
     if (st.level === 'reboot' && logEl) {
       const parts = (st.reasons || []).map((r) => r.kind === 'kernel' ? `kernel ${shortKernel(r.latest)}` : r.kind === 'bootloader' ? 'the bootloader' : r.kind === 'firmware' ? 'raspi-firmware' : r.kind === 'system' ? 'system libraries' : 'flagged packages');
-      logEl.textContent += `\n↻ Reboot required: ${parts.join(', ')} take effect after a reboot.\n`;
+      const msg = `↻ Reboot required: ${parts.join(', ')} take effect after a reboot.`;
+      // The install card passes its terminal; the firmware panel a plain <pre>.
+      if (typeof logEl.note === 'function') logEl.note(msg, 'warn');
+      else logEl.textContent += `\n${msg}\n`;
     }
     if (host.isConnected) renderBanner(host);
   }
@@ -7452,12 +7456,21 @@ pageRenderers.updates = (() => {
         <div class="up-install-bar"><div class="up-install-bar-fill" data-up="bar"></div></div>
         <div class="up-install-status" data-up="status">Starting…</div>
         <button class="up-install-toggle" data-up="toggle">▸ Show details</button>
-        <pre class="up-log up-install-log" data-up="log" hidden></pre>
+        <div class="up-install-log" data-up="log" hidden></div>
         <div class="up-install-result" data-up="result" hidden></div>
       </div>`;
     document.body.appendChild(ov);
     const card = ov.querySelector('.up-install-card');
     const logEl = card.querySelector('[data-up=log]');
+    // Shell-style panel: the prompt shows the node being upgraded and the
+    // apt-get command the agent runs for this request.
+    const nodeName = document.getElementById('hostname')?.textContent || currentNode()?.name || 'pi';
+    const term = createTermLog({
+      host: nodeName,
+      cmd: full ? 'apt-get dist-upgrade -y' : `apt-get install --only-upgrade -y ${pkgList.join(' ')}`,
+    });
+    logEl.appendChild(term.el);
+    const showLog = () => { logEl.removeAttribute('hidden'); toggleEl.textContent = '▾ Hide details'; };
     const barEl = card.querySelector('[data-up=bar]');
     const statusEl = card.querySelector('[data-up=status]');
     const toggleEl = card.querySelector('[data-up=toggle]');
@@ -7485,6 +7498,7 @@ pageRenderers.updates = (() => {
     // streaming lock. Reused by the apt phase and any chained follow-up phase.
     const finalize = (ok, d = {}) => {
       card.querySelector('.up-spinner')?.remove();
+      term.exit(d.code ?? (ok ? 0 : 1));
       barEl.style.width = '100%';
       barEl.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
       statusEl.textContent = ok ? 'Done' : `Finished with errors${d.code != null ? ` (code ${d.code})` : ''}`;
@@ -7496,7 +7510,7 @@ pageRenderers.updates = (() => {
       toast(ok ? 'success' : 'error', 'Updates', ok ? 'Upgrade complete' : 'Upgrade had errors');
       streaming = false; selected.clear();
       if (d.reboot) {
-        applyRebootStatus(host, d.reboot, logEl);
+        applyRebootStatus(host, d.reboot, term);
         if (d.reboot.level === 'reboot') {
           resultEl.insertAdjacentHTML('beforeend', '<div class="up-log-reboot">↻ Reboot required to finish installing</div>');
           promptReboot(host, d.reboot);
@@ -7508,7 +7522,7 @@ pageRenderers.updates = (() => {
     const ev = new EventSource(`/api/updates/stream?${qs}`);
     ev.addEventListener('line', (e) => {
       const line = JSON.parse(e.data).line;
-      logEl.textContent += line + '\n'; logEl.scrollTop = logEl.scrollHeight;
+      term.line(line);
       if (/^(Get:|Fetched|Reading)/.test(line)) statusEl.textContent = 'Downloading packages…';
       else if (/Unpacking/.test(line)) statusEl.textContent = 'Unpacking…';
       else if (/Setting up|Preparing to/.test(line)) statusEl.textContent = 'Installing…';
@@ -7521,9 +7535,9 @@ pageRenderers.updates = (() => {
       // If a follow-up phase is queued (e.g. bootloader EEPROM flash) and the apt
       // phase succeeded, continue in the SAME card instead of finalizing.
       if (onComplete && d.ok) {
-        logEl.textContent += '\n— firmware packages updated —\n';
+        term.note('— firmware packages updated —', 'ok');
         statusEl.textContent = 'Flashing bootloader EEPROM…';
-        onComplete(host, { card, logEl, barEl, statusEl, resultEl, closeBtn, finalize });
+        onComplete(host, { card, term, barEl, statusEl, resultEl, closeBtn, finalize });
         return;
       }
       finalize(d.ok, d);
@@ -7531,7 +7545,7 @@ pageRenderers.updates = (() => {
     ev.addEventListener('failed', (e) => {
       if (finished) return;
       let m = 'upgrade failed'; try { m = JSON.parse(e.data).message || m; } catch { /* */ }
-      logEl.removeAttribute('hidden'); logEl.textContent += `\n✗ ${m}\n`;
+      showLog(); term.note(`✗ ${m}`, 'err'); term.stop();
       card.querySelector('.up-spinner')?.remove();
       statusEl.textContent = 'Error';
       resultEl.removeAttribute('hidden');
@@ -7544,7 +7558,7 @@ pageRenderers.updates = (() => {
       // upgrade already finished (done/failed), this is just that close: ignore.
       if (finished) { ev.close(); return; }
       if (ev.readyState === EventSource.CLOSED) {
-        logEl.removeAttribute('hidden'); logEl.textContent += `\n✗ connection lost\n`;
+        showLog(); term.note('✗ connection lost', 'err'); term.stop();
         card.querySelector('.up-spinner')?.remove();
         statusEl.textContent = 'Error';
         resultEl.removeAttribute('hidden');
@@ -7574,11 +7588,11 @@ pageRenderers.updates = (() => {
   // Chained bootloader flash that continues inside an existing upgrade card,
   // appending to its log and finalizing it when the flash completes.
   function flashBootloaderInCard(host, refs) {
-    const { logEl, statusEl, finalize } = refs;
+    const { term, statusEl, finalize } = refs;
     const ev = new EventSource('/api/updates/firmware/stream');
-    ev.addEventListener('line', (e) => { logEl.textContent += JSON.parse(e.data).line + '\n'; logEl.scrollTop = logEl.scrollHeight; });
-    ev.addEventListener('done', (e) => { const d = JSON.parse(e.data); logEl.textContent += `\n✓ ${d.note || 'bootloader staged'}\n`; ev.close(); statusEl.textContent = d.note || 'Bootloader staged'; finalize(true, d); });
-    ev.addEventListener('error', () => { logEl.textContent += '\n✗ bootloader flash error\n'; ev.close(); finalize(false, {}); });
+    ev.addEventListener('line', (e) => { term.line(JSON.parse(e.data).line); });
+    ev.addEventListener('done', (e) => { const d = JSON.parse(e.data); term.note(`✓ ${d.note || 'bootloader staged'}`, 'ok'); ev.close(); statusEl.textContent = d.note || 'Bootloader staged'; finalize(true, d); });
+    ev.addEventListener('error', () => { term.note('✗ bootloader flash error', 'err'); ev.close(); finalize(false, {}); });
   }
 
   // Standalone bootloader flash (no firmware packages to upgrade) using the

@@ -73,6 +73,33 @@ function run(cmd, args, timeoutMs = 30000, opts = {}) {
   });
 }
 
+/**
+ * Turns a byte stream into whole lines. Output arrives in arbitrary chunks, so
+ * a line split across two reads used to reach the client as two lines (apt's
+ * "(Reading database ... " / "75%"). \r ends a line too: dpkg and other
+ * progress meters redraw in place with it, and each redraw becomes its own
+ * line the client can collapse. A trailing partial line is held until its end
+ * arrives, or flushed after `idleMs` so a prompt without a newline still shows.
+ */
+function createLineSplitter(onLine, idleMs = 1500) {
+  let buf = '';
+  let timer = null;
+  const emit = (l) => { if (l.length) onLine(l); };
+  const flush = () => { clearTimeout(timer); timer = null; const l = buf; buf = ''; emit(l); };
+  return {
+    push(chunk) {
+      buf += chunk;
+      const parts = buf.split(/\r\n|\n|\r/);
+      buf = parts.pop();
+      // A \r\n split across chunks yields an empty line, which emit() drops.
+      for (const l of parts) emit(l);
+      clearTimeout(timer);
+      timer = buf ? setTimeout(flush, idleMs) : null;
+    },
+    end: flush,
+  };
+}
+
 /** Stream a long-running command line by line to the client. */
 function runStreaming(cmd, args, env, send) {
   return new Promise((resolve, reject) => {
@@ -83,17 +110,22 @@ function runStreaming(cmd, args, env, send) {
     });
     // Strip ANSI/terminal control sequences (cursor hide/show, moves, colour)
     // so streamed installer output is readable; drop lone spinner frames.
-    const clean = (l) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\r\b]/g, '');
-    const onData = (buf) => buf.toString('utf-8').split('\n').forEach((raw) => {
+    const clean = (l) => l.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\b]/g, '');
+    const onLine = (raw) => {
       const l = clean(raw);
       if (!l.trim()) return;
       if (/^[-\\|/]$/.test(l.trim())) return;
       send(l);
-    });
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
+    };
+    // Separate splitters: interleaved stdout/stderr chunks must not glue lines.
+    const out = createLineSplitter(onLine);
+    const err = createLineSplitter(onLine);
+    child.stdout.setEncoding('utf-8');
+    child.stderr.setEncoding('utf-8');
+    child.stdout.on('data', (c) => out.push(c));
+    child.stderr.on('data', (c) => err.push(c));
     child.on('error', reject);
-    child.on('close', (code) => resolve({ code }));
+    child.on('close', (code) => { out.end(); err.end(); resolve({ code }); });
   });
 }
 
@@ -3157,4 +3189,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
 
-module.exports = { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
