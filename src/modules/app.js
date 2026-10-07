@@ -9,7 +9,7 @@
  * Everything reuses the existing design tokens (.card, --accent-*, glass).
  */
 
-import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs, OVERVIEW_WIDGETS } from './layout.js';
+import { initOverviewLayout, reloadOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs, OVERVIEW_WIDGETS } from './layout.js';
 import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
 import { currentNode, isRemoteNode } from './node-context.js';
@@ -776,6 +776,9 @@ window.addEventListener('rapisys:nodechange', () => {
     activePage = null;
     route();
     if (tab) document.querySelector(`.rapisys-page [data-tab="${tab}"]`)?.click();
+  } else {
+    // Each node has its own dashboards and widget layout.
+    reloadOverviewLayout();
   }
   setNavRebootDot(null);
   if (_globalCheckTimer) startGlobalCheckPoll(document.querySelector('.nav-checking'));

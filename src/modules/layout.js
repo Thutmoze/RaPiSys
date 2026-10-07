@@ -831,3 +831,26 @@ function finishEdit() {
 }
 
 export function getSavedLayout() { return savedLayout; }
+
+/**
+ * The node switcher picked another node. Dashboards and layouts belong to
+ * each node (they live in its database), and /api/layouts now follows the
+ * switcher, so drop this node's grid and tabs and load that node's instead.
+ * An unsaved edit is abandoned: it was being made against the other node.
+ */
+export async function reloadOverviewLayout() {
+  if (editing) {
+    toolbarEl?.remove(); toolbarEl = null;
+    document.body.classList.remove('layout-editing');
+    editing = false;
+    document.getElementById('layout-parking')?.remove();
+  }
+  if (grid) { teardownGrid(); grid = null; }
+  removeEmptyHint();
+  removeDashTabs();
+  dashboards = [{ id: 'default', name: 'Overview' }];
+  currentDash = 'default';
+  savedLayout = null;
+  rendered = false;
+  await initOverviewLayout();
+}

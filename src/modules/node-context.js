@@ -10,17 +10,18 @@
  * Imported first by main.js so the hooks are in before the first request.
  *
  * A few paths always stay on this node: the session (/api/auth), the setup
- * wizard check, saved dashboard layouts and the legacy display preferences
- * (theme, refresh interval), the liveness probe, and federation itself
+ * wizard check, the legacy display preferences (theme, refresh interval), the liveness probe, and federation itself
  * (/api/nodes, including the relay): peers are managed from the node you
  * opened, and a peer refuses relayed changes to its own federation anyway.
  */
 
 const STORE_KEY = 'rapisys.node';
+// Dashboards and their layouts are NOT here on purpose: each node keeps its
+// own (it may have widgets another node lacks, e.g. a Pironman case), so
+// /api/layouts follows the switcher like everything else.
 
 function isLocalOnly(path) {
   return path.startsWith('/api/auth')
-    || path.startsWith('/api/layouts')
     || path === '/api/setup/status'
     || path === '/api/settings'
     || path === '/api/health'
