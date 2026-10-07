@@ -15,6 +15,9 @@
  *  - browser sessions: 32-byte random cookie value; only its SHA-256
  *    is stored server-side; 30-day expiry, sliding on use
  *  - the ADMIN_TOKEN header remains valid in full mode for scripts
+ *  - another RaPiSys node relaying a browser's request (unified node view)
+ *    authenticates with this node's API key plus X-RaPiSys-Peer. That grants
+ *    reads; writes additionally need `rapisys.peerControl` switched on here.
  */
 
 import crypto from 'crypto';
@@ -218,13 +221,84 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
   }
 
   /**
+   * What a relaying peer may do here: 'none' | 'view' | 'control'.
+   *
+   * Requires the X-RaPiSys-Peer marker AND this node's API key. The marker is
+   * only a label (anyone holding the key could set it); the key is the actual
+   * credential, and peerControl is the owner's explicit opt-in for writes. No
+   * key configured means no peer access at all, never "open".
+   */
+  async function peerAccess(req) {
+    if (!req.headers['x-rapisys-peer']) return 'none';
+    if (peerDenied(req)) return 'denied';
+    const key = req.headers['x-api-key'];
+    if (!key) return 'none';
+    const s = await loadSettings();
+    const hash = s.api?.enabled ? s.api?.keyHash : null;
+    if (!hash) return 'none';
+    const a = Buffer.from(sha256(String(key)));
+    const b = Buffer.from(String(hash));
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return 'none';
+    if (s.rapisys?.peerControl !== true) return 'view';
+    // The relaying node caps the scope to what ITS user is allowed: a browser
+    // that is not signed in over there must not gain control here.
+    return req.headers['x-rapisys-peer-scope'] === 'control' ? 'control' : 'view';
+  }
+
+  const isRead = (req) => req.method === 'GET' || req.method === 'HEAD';
+
+  /**
+   * Endpoints a peer never reaches, whatever peerControl says: sessions and
+   * setup belong to whoever sits at this node, a relayed request must not hop
+   * on to a third node, and federation itself (peer list, the peerControl
+   * switch, the API key) can only be changed by someone signed in here.
+   * NAS swap lives under /api/setup but is ordinary post-setup control.
+   */
+  function peerDenied(req) {
+    const p = String(req.originalUrl || req.url || '').split('?')[0];
+    if (p.startsWith('/api/auth')) return true;
+    if (p.startsWith('/api/setup') && !p.startsWith('/api/setup/nas/')) return true;
+    if (p.startsWith('/api/remote/ws')) return true;
+    if (/^\/api\/nodes\/[^/]+\/proxy(\/|$)/.test(p)) return true;
+    if (!isRead(req) && (p.startsWith('/api/nodes') || p.startsWith('/api/settings/api'))) return true;
+    return false;
+  }
+
+  function peerLabel(req) {
+    return String(req.headers['x-rapisys-peer'] || '').replace(/[^\w.-]/g, '').slice(0, 63) || 'peer';
+  }
+
+  function peerControlOff(res) {
+    return res.status(403).json({
+      error: 'Control from other nodes is off on this node. Turn it on in its Settings → Nodes.',
+      auth: 'peer-control-off',
+    });
+  }
+
+  function peerDeniedRes(res) {
+    return res.status(403).json({ error: 'Not available through another node. Open this node directly.', auth: 'peer-denied' });
+  }
+
+  // Writes made through a peer leave a trail on the node they changed, since
+  // the local session that authorized them lives on the other node.
+  function auditPeerWrite(req) {
+    if (isRead(req)) return;
+    try { eventsRepo.add('peer.control', 'info', { peer: peerLabel(req), method: req.method, path: req.originalUrl.split('?')[0] }); } catch { /* audit is best-effort */ }
+  }
+
+  /**
    * Config-level auth (settings, alert rules, …):
    *  - monitor mode: open, matching upstream's tokenless behavior
    *  - full mode: session cookie or admin token required
+   *  - peer: reads with the API key; writes only when peerControl is on
    */
   async function requireConfig(req, res, next) {
     if (await getMode() === 'monitor') return next();
     if (isAuthenticated(req)) return next();
+    const peer = await peerAccess(req);
+    if (peer === 'control' || (peer === 'view' && isRead(req))) { auditPeerWrite(req); return next(); }
+    if (peer === 'view') return peerControlOff(res);
+    if (peer === 'denied') return peerDeniedRes(res);
     return res.status(401).json({ error: 'Authentication required.', auth: 'login' });
   }
 
@@ -232,12 +306,17 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
    * Pi-control auth (fan, NAS changes, updates, reboot):
    *  - monitor mode: always 403 — these features are disabled by choice
    *  - full mode: session cookie or admin token required
+   *  - peer: only when peerControl is on
    */
   async function requireControl(req, res, next) {
     if (await getMode() === 'monitor') {
       return res.status(403).json({ error: 'This RaPiSys is in monitor-only mode. Control features are disabled.', auth: 'monitor' });
     }
     if (isAuthenticated(req)) return next();
+    const peer = await peerAccess(req);
+    if (peer === 'control') { auditPeerWrite(req); return next(); }
+    if (peer === 'view') return peerControlOff(res);
+    if (peer === 'denied') return peerDeniedRes(res);
     return res.status(401).json({ error: 'Authentication required.', auth: 'login' });
   }
 
@@ -249,6 +328,6 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
 
   return { getAdmin, register, confirmMfa, login, createSessionDirect, validateSession, destroySession,
     changePassword, disableMfa, beginEnableMfa,
-    purgeExpired, cookieToken, requireConfig, requireControl, getMode, isAuthenticated,
+    purgeExpired, cookieToken, requireConfig, requireControl, getMode, isAuthenticated, peerAccess,
     COOKIE_NAME };
 }

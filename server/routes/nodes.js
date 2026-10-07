@@ -12,6 +12,7 @@ import express from 'express';
 import { hostName, normalizeNodeLabel, resolveNodeName } from '../core/node-identity.js';
 import { probePeer } from '../services/peer-client.js';
 import { resolveAddress, scanLan } from '../services/peer-scan.js';
+import { proxyToPeer } from '../services/peer-proxy.js';
 
 const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/;
 
@@ -34,7 +35,7 @@ function toPublic(peer, health, hasKey) {
   };
 }
 
-export function nodesRouter({ peersRepo, requireControl, events, loadSettings, saveSettings, withFileLock }) {
+export function nodesRouter({ peersRepo, requireControl, events, loadSettings, saveSettings, withFileLock, auth }) {
   const r = express.Router();
 
   // Peer list with each one's most recent poll result, plus this node's own
@@ -56,6 +57,8 @@ export function nodesRouter({ peersRepo, requireControl, events, loadSettings, s
           name: resolveNodeName(settings),
           hostname: hostName(),
           label: normalizeNodeLabel(settings?.rapisys?.nodeLabel),
+          peerControl: settings?.rapisys?.peerControl === true,
+          apiKeySet: !!(settings?.api?.enabled && settings?.api?.keyHash),
         },
         nodes: peersRepo.list().map((p) => toPublic(p, health[p.id], peersRepo.hasApiKey(p.id))),
       });
@@ -82,6 +85,50 @@ export function nodesRouter({ peersRepo, requireControl, events, loadSettings, s
       res.json({ ok: true, self: { name: resolveNodeName(settings), hostname: hostName(), label } });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
+
+  // Let other nodes make changes here through the unified view. Reads only
+  // need the API key; this is the owner's opt-in for writes. A peer can never
+  // flip it (auth denies relayed writes under /api/nodes).
+  r.put('/peer-control', requireControl, async (req, res) => {
+    if (!loadSettings || !saveSettings || !withFileLock) {
+      return res.status(500).json({ error: 'settings storage is unavailable' });
+    }
+    const allow = req.body?.allow === true;
+    try {
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        s.rapisys.peerControl = allow;
+        await saveSettings(s);
+      });
+      events?.add?.('node.peer_control.changed', allow ? 'warning' : 'info', { allow });
+      res.json({ ok: true, peerControl: allow });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Unified node view: relay any /api/* call to a peer. Reads pass the
+  // mount-level gate; writes need control HERE as well as on the peer, so the
+  // login modal appears for this node's session, as it would for a local
+  // change. Requests that arrived from a peer are refused: no multi-hop.
+  async function relay(req, res) {
+    if (req.headers['x-rapisys-peer']) {
+      return res.status(403).json({ error: 'Not available through another node.', auth: 'peer-denied' });
+    }
+    const peer = peersRepo.get(req.params.id);
+    if (!peer) return res.status(404).json({ error: 'no such peer' });
+    if (!peer.enabled) return res.status(409).json({ error: `${peer.name} is disabled in Settings → Nodes.`, state: 'disabled', node: peer.name });
+    let settings = null;
+    try { settings = loadSettings ? await loadSettings() : null; } catch { /* name falls back to hostname */ }
+    let scope = 'view';
+    try { if (auth && await auth.getMode() === 'full' && auth.isAuthenticated(req)) scope = 'control'; } catch { /* stay view */ }
+    const rest = Array.isArray(req.params.rest) ? req.params.rest.join('/') : String(req.params.rest || '');
+    proxyToPeer({
+      peer, apiKey: peersRepo.apiKeyFor(peer.id), selfName: resolveNodeName(settings), scope,
+      req, res, subPath: rest.split('/').map(encodeURIComponent).join('/'),
+    });
+  }
+  const isRead = (req) => req.method === 'GET' || req.method === 'HEAD';
+  r.all('/:id/proxy/*rest', (req, res, next) => (isRead(req) ? next() : requireControl(req, res, next)), relay);
 
   // Try an address + key without saving anything. Used by the Add form.
   r.post('/test', requireControl, async (req, res) => {

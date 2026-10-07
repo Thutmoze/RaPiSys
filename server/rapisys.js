@@ -552,7 +552,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/tls', rc, tlsRouter({ tls, requireControl: auth.requireControl, getApp: () => app, loadSettings }));
   app.use('/api/nodes', rc, nodesRouter({
     peersRepo: peersFacade, requireControl: auth.requireControl, events: eventsFacade,
-    loadSettings, saveSettings, withFileLock,
+    loadSettings, saveSettings, withFileLock, auth,
   }));
 
   // Peer-facing read-only snapshot (§14.3). This is the ONLY endpoint another

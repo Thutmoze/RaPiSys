@@ -12,6 +12,7 @@
 import { initOverviewLayout, setToast as setLayoutToast, setGlyphs as setLayoutGlyphs, OVERVIEW_WIDGETS } from './layout.js';
 import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
+import { currentNode, isRemoteNode } from './node-context.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -127,6 +128,8 @@ async function api(path, opts = {}, retried = false) {
 // App-native confirm dialog (replaces window.confirm's browser chrome)
 // ---------------------------------------------------------------------------
 
+const escNodeName = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
 function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', cancelLabel = 'Cancel', html = false, confirmIcon = null, cls = '', onMount = null } = {}) {
   return new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay rconfirm-overlay');
@@ -142,6 +145,12 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', can
     // through esc()); never raw user input.
     if (html) ov.querySelector('.rconfirm-msg').innerHTML = message;
     else ov.querySelector('.rconfirm-msg').textContent = message;
+    // Viewing a peer: say plainly which machine this acts on.
+    const viewing = currentNode();
+    if (viewing) {
+      ov.querySelector('.rconfirm-msg').insertAdjacentHTML('afterend',
+        `<p class="rconfirm-node">Runs on <span class="node-chip"><span class="ns-dot"></span>${escNodeName(viewing.name)}</span>, not on the node serving this page.</p>`);
+    }
     ov.querySelector('[data-rc=ok]').innerHTML = (confirmIcon || (danger ? TRASH_ICON : CHECK_ICON)) + '<span>' + confirmLabel + '</span>';
     document.body.appendChild(ov);
     // Interactive content (e.g. expandable rows) wires itself up here.
@@ -754,7 +763,24 @@ function route() {
     activeRenderer = renderer;
   }
   activePage = page;
+  nodeSwitcher?.place();
 }
+
+// The node switcher picked another node. Requests already follow it
+// (node-context.js); remount the current page so it reloads from that node,
+// staying on the same page and, where possible, the same inner tab.
+let nodeSwitcher = null;
+window.addEventListener('rapisys:nodechange', () => {
+  const tab = document.querySelector('.rapisys-page .page-tab-active')?.dataset.tab;
+  if (activePage !== 'overview') {
+    activePage = null;
+    route();
+    if (tab) document.querySelector(`.rapisys-page [data-tab="${tab}"]`)?.click();
+  }
+  setNavRebootDot(null);
+  if (_globalCheckTimer) startGlobalCheckPoll(document.querySelector('.nav-checking'));
+  containerBells.load();
+});
 
 function comingSoonPage(id) {
   return {
@@ -1013,6 +1039,12 @@ pageRenderers.sessions = (() => {
   async function openTerminal(host) {
     const wrap = $('[data-sess=termwrap]', host);
     if (!wrap) return;
+    // The browser bridges are WebSockets on the node serving this page; they
+    // are not relayed, so they would open a session on the wrong machine.
+    if (isRemoteNode()) {
+      wrap.innerHTML = `<p class="sess-empty">In-browser SSH reaches only the node serving this page. Open ${escNodeName(currentNode().name)}'s dashboard directly to use it.</p>`;
+      return;
+    }
     let cfg;
     try { cfg = await api('/remote/config'); } catch { wrap.innerHTML = '<p class="sess-empty">Could not load remote-access config.</p>'; return; }
     if (!cfg.enabled || !cfg.ssh.enabled) {
@@ -1083,6 +1115,12 @@ pageRenderers.sessions = (() => {
   async function openDesktop(host) {
     const wrap = $('[data-sess=vncwrap]', host);
     if (!wrap) return;
+    // The browser bridges are WebSockets on the node serving this page; they
+    // are not relayed, so they would open a session on the wrong machine.
+    if (isRemoteNode()) {
+      wrap.innerHTML = `<p class="sess-empty">In-browser VNC reaches only the node serving this page. Open ${escNodeName(currentNode().name)}'s dashboard directly to use it.</p>`;
+      return;
+    }
     let cfg;
     try { cfg = await api('/remote/config'); } catch { wrap.innerHTML = '<p class="sess-empty">Could not load remote-access config.</p>'; return; }
     if (!cfg.enabled || !cfg.vnc.enabled) {
@@ -2721,12 +2759,26 @@ pageRenderers.settings = (() => {
         </div>
         <p class="net-dns-note">This name identifies the node in every notification it sends, so an alert from one Pi can't be mistaken for one from another.</p>`;
 
+    // Unified view: whether OTHER nodes may make changes here when someone
+    // signed in over there picks this node in their switcher.
+    const peerCtlMarkup = `
+        <div class="set-summary">
+          <div class="set-kv set-kv-toggle"><span>Allow control from other nodes</span>
+            <label class="set-switch"><input type="checkbox" data-nd="peerctl" ${self.peerControl ? 'checked' : ''}><span class="set-switch-track"><span class="set-switch-thumb"></span></span></label></div>
+        </div>
+        <p class="net-dns-note">${self.apiKeySet
+          ? 'Other nodes that hold this node\'s API key can always <b>view</b> it in their node switcher. With this on, an admin signed in on one of them can also run updates, reboot, and change settings here. Every such change is logged in this node\'s events.'
+          : 'Other nodes can view this node only once its API is enabled with a key (API panel on the overview). Give that key to the node adding this one.'}</p>`;
+
+    const viewingPeer = currentNode();
     el.innerHTML = `
       <div class="set-card set-card-wide">
+        ${viewingPeer ? `<p class="net-dns-note nctx-inline">You are viewing <b>${esc(viewingPeer.name)}</b>, but nodes are always managed on the node serving this page. Everything below belongs to <b>${esc(self.name || self.hostname || 'this node')}</b>.</p>` : ''}
         <h4 class="sess-h">This node</h4>
         ${selfMarkup}
+        ${peerCtlMarkup}
         <h4 class="sess-h">Nodes</h4>
-        <p class="net-dns-note">Each node runs its own RaPiSys and keeps its own history. Peers are polled read-only over HTTPS every 60 seconds; if this node goes down, open a peer's dashboard directly. Add a <b>peer unreachable</b> alert rule to be told when one disappears.</p>
+        <p class="net-dns-note">Each node runs its own RaPiSys and keeps its own history. Pick a node in the switcher to see and manage it from this page; this node relays the requests over HTTPS. If this node goes down, open a peer's dashboard directly. Add a <b>peer unreachable</b> alert rule to be told when one disappears.</p>
         ${nodes.length ? rows : '<p class="sess-empty">No peers configured. This is a single-node install.</p>'}
         ${nodes.length && !nodesAddOpen ? `<div class="set-actions"><button class="set-btn set-btn-edit" data-nd="addopen">${EDIT_ICON}<span>Add another node</span></button></div>` : ''}
         ${showForm ? `
@@ -2753,6 +2805,22 @@ pageRenderers.settings = (() => {
 
     // ---- handlers ----
     const q = (sel) => $(sel, host);
+
+    const peerCtl = q('[data-nd=peerctl]');
+    if (peerCtl) peerCtl.onchange = async () => {
+      const allow = peerCtl.checked;
+      if (allow && !await rapisysConfirm('Let admins signed in on other nodes make changes on this node (updates, reboot, settings)?', { confirmLabel: 'Allow control' })) {
+        peerCtl.checked = false;
+        return;
+      }
+      try {
+        await api('/nodes/peer-control', { method: 'PUT', body: { allow } });
+        toast('success', 'Nodes', allow ? 'Other nodes can now control this node' : 'Other nodes can now only view this node');
+      } catch (err) {
+        peerCtl.checked = !allow;
+        toast('error', 'Nodes', err.message);
+      }
+    };
 
     const selfEdit = q('[data-nd=self-edit]');
     if (selfEdit) selfEdit.onclick = () => { nodesSelfEditing = true; loadNodes(host); };
@@ -8411,6 +8479,6 @@ window.addEventListener('DOMContentLoaded', () => {
   route();
   maybeShowWizard();
   refreshAuthBadge();
-  initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings?tab=nodes'; } });
+  nodeSwitcher = initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings?tab=nodes'; } });
   containerBells.init();
 });

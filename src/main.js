@@ -6,6 +6,8 @@ import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
+// RaPiSys: must load before any request so /api calls follow the node switcher.
+import './modules/node-context.js';
 window.SmoothieChart = SmoothieChart;
 window.TimeSeries = TimeSeries;
 
@@ -2241,3 +2243,22 @@ setInterval(() => {
 
 // RaPiSys: expose toast system for the modules layer
 window.showToast = showToast;
+
+// RaPiSys: the node switcher changed which Pi this page shows. Requests
+// already follow it (node-context.js); drop what was accumulated from the
+// previous node so charts, min/max and alert edges don't blend two machines.
+window.addEventListener('rapisys:nodechange', () => {
+  cpuHistory.length = 0;
+  memoryHistory.length = 0;
+  tempHistory.length = 0;
+  tempMinSession = null;
+  tempMaxSession = null;
+  prevValues = { cpu: 0, memory: 0, temp: 0 };
+  for (const k of Object.keys(alertStates)) alertStates[k] = 'normal';
+  processRowsMap.clear();
+  elements.processesList.innerHTML = '';
+  initSmoothieCharts();
+  updateDashboard();
+  updateServices();
+  loadWireguardSettings();
+});
