@@ -12,8 +12,12 @@
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const span = (cls, text) => `<span class="${cls}">${esc(text)}</span>`;
 
-/** dpkg's in-place database progress, e.g. "(Reading database ... 45%". */
-export const DB_PROGRESS_RE = /^\(Reading database \.\.\. ?(\d+)%$/;
+/**
+ * dpkg's in-place database progress, e.g. "(Reading database ... 45%". Off a
+ * tty dpkg may print only the bare prefix before the final count; that is
+ * progress too (no percentage) and is replaced by the next line.
+ */
+export const DB_PROGRESS_RE = /^\(Reading database \.\.\. ?(?:(\d+)%)?$/;
 
 /**
  * HTML for one finished line. `st` carries state between lines: which package
@@ -66,6 +70,9 @@ export function termLineHtml(raw, st = {}) {
   if (/^\s*==> (Installing new version of config file|Using new config file)/.test(raw)) { st.blockEnd = true; return span('t-cyan', raw); }
   if (/^\s*==> /.test(raw)) return span('t-orange', raw);
   if (/^(E:|dpkg: error|Errors were encountered|\s*Sub-process .* returned an error)/.test(raw)) return span('t-red', raw);
+  // Maintainer scripts' own failures ("Failed to open connection ...",
+  // "Error: ...", "Unable to ...", "foo: error: ..."): red, like stderr in a shell.
+  if (/^\s*(Failed|Unable|Error|ERROR|Fatal|FATAL|Could not|Cannot)\b/.test(raw) || /\b(error|failed|fatal):\s/i.test(raw)) return span('t-red', raw);
   if (/^W:/.test(raw)) return span('t-orange', raw);
   if (/^N:/.test(raw)) return span('t-cyan', raw);
   return l;
@@ -135,7 +142,9 @@ export function createTermLog({ host = 'pi', cmd = '' } = {}) {
       const p = String(raw).match(DB_PROGRESS_RE);
       if (p) {
         if (!progEl) { progEl = document.createElement('div'); progEl.className = 't-progress'; body.insertBefore(progEl, cursor); }
-        progEl.innerHTML = `<span class="t-dim">Reading database ...</span><span class="t-meter"><i style="width:${Math.min(100, +p[1])}%"></i></span><span class="t-cyan">${+p[1]}%</span>`;
+        const pct = p[1] == null ? null : Math.min(100, +p[1]);
+        progEl.innerHTML = `<span class="t-dim">Reading database ...</span>`
+          + (pct == null ? '' : `<span class="t-meter"><i style="width:${pct}%"></i></span><span class="t-cyan">${pct}%</span>`);
         stick();
         return;
       }

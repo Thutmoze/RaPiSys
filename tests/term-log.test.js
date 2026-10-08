@@ -41,6 +41,7 @@ describe('terminal line colouring', () => {
   it('recognises dpkg database progress redraws', () => {
     expect('(Reading database ... 45%'.match(DB_PROGRESS_RE)[1]).toBe('45');
     expect(DB_PROGRESS_RE.test('(Reading database ... 165558 files and directories currently installed.)')).toBe(false);
+    expect(DB_PROGRESS_RE.test('(Reading database ... ')).toBe(true);
   });
 
   it('colours unpack and setup lines with name and versions', () => {
@@ -71,6 +72,9 @@ describe('terminal line colouring', () => {
   it('flags errors and warnings, and escapes HTML', () => {
     expect(termLineHtml('E: Could not get lock /var/lib/dpkg/lock-frontend')).toContain('t-red');
     expect(termLineHtml('W: something')).toContain('t-orange');
+    expect(termLineHtml('Failed to open connection to "session" message bus: Unable to')).toContain('t-red');
+    expect(termLineHtml('rpi-connect: error: something broke')).toContain('t-red');
+    expect(termLineHtml('This allows users who are not logged in to run long-running')).not.toContain('t-red');
     expect(termLineHtml('<script>x</script>')).toBe('&lt;script&gt;x&lt;/script&gt;');
   });
 
