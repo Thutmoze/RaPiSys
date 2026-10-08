@@ -632,18 +632,26 @@ function buildNav() {
   // The logo top-aligns with the top of the wordmark. When the rail is collapsed,
   // every .nav-label hides and only the logo remains.
   const brand = el('div', 'nav-brand');
+  // The capsule names the node being viewed and managed (it follows the node
+  // switcher) next to the live status. It sits on its own row: beside the logo
+  // there is too little width for a name. The collapsed rail hides it and
+  // shows the name as a small badge under the logo instead.
   const brandLink = el('a', 'nav-brand-link', `
     <span class="nav-brand-logo">${eyeLogoImg()}</span>
+    <span class="nav-node-badge" data-node-name></span>
     <span class="nav-label nav-brand-text">
       <span class="nav-brand-name"><span class="wz-cyan">Ra</span><span class="brand-pi">Pi</span><span class="wz-cyan">Sys</span></span>
-      <span class="nav-brand-meta">
-        <span class="hostname" id="hostname">Loading...</span>
-        <span class="status-indicator"><span class="pulse"></span><span class="status-text">Live</span></span>
-      </span>
     </span>`);
   brandLink.href = '#/overview';
   brandLink.title = 'RaPiSys';
   brand.appendChild(brandLink);
+  brand.appendChild(el('div', 'nav-label nav-brand-meta', `
+    <span class="status-indicator">
+      <span class="pulse"></span>
+      <span class="status-node" id="hostname" data-node-name></span>
+      <span class="status-sep"></span>
+      <span class="status-text">Live</span>
+    </span>`));
   rail.appendChild(brand);
 
   // Collapse toggle (state persisted in localStorage; this is the Pi-served app).

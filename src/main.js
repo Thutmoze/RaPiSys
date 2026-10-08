@@ -839,8 +839,14 @@ async function updateDashboard() {
     const stats = await response.json();
 
     // Update hostname (the element lives in the nav brand, built dynamically)
+    // RaPiSys: the node switcher owns this name once it knows it (it prefers
+    // the node's label); the OS hostname only fills in until then, e.g. for a
+    // browser that is not signed in and cannot read /api/nodes.
     const hostnameEl = elements.hostname || document.getElementById('hostname');
-    if (hostnameEl) hostnameEl.textContent = stats.os.hostname;
+    if (hostnameEl && !hostnameEl.dataset.owned) {
+      document.querySelectorAll('[data-node-name]').forEach((el) => { el.textContent = stats.os.hostname; });
+      document.title = `${stats.os.hostname} · RaPiSys`;
+    }
 
     // Update CPU
     animateValue(elements.cpuValue, prevValues.cpu, stats.cpu.usage);

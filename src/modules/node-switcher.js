@@ -114,7 +114,25 @@ export function initNodeSwitcher({ onManage } = {}) {
     strip.querySelector('[data-back]').onclick = () => setNode(null);
   }
 
+  /**
+   * Name the node being viewed in the nav capsule, the collapsed-rail badge
+   * and the browser tab title, so every window says which Pi it manages.
+   */
+  function renderIdentity() {
+    if (!selfName) return;
+    const sel = selectedEntry();
+    const name = sel?.name || selfName;
+    document.querySelectorAll('[data-node-name]').forEach((el) => {
+      el.textContent = name;
+      el.dataset.owned = '1';
+    });
+    const cap = document.querySelector('.nav-brand-meta .status-indicator');
+    if (cap) cap.title = sel && !sel.self ? `Viewing ${name} through ${selfName}` : `${name} (this node)`;
+    document.title = `${name} · RaPiSys`;
+  }
+
   function render() {
+    renderIdentity();
     if (list.length < 2) { host.hidden = true; strip.hidden = true; return; }
     host.hidden = false;
     const sel = selectedEntry();
