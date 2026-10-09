@@ -3333,9 +3333,20 @@ pageRenderers.settings = (() => {
 
     // Route this Pi's own DNS through Pi-hole (so the Pi's lookups show in analytics).
     const sysResLine = (detect.installed && sysres.agent !== false) ? (() => {
-      if (sysres.tailscaleManaged) return `<div class="set-kv"><span>This Pi\u2019s DNS</span><span class="net-dns-note" style="display:inline">Managed by Tailscale (MagicDNS) — can\u2019t route through Pi-hole without disabling MagicDNS.</span></div>`;
-      return `<div class="set-kv"><span>This Pi\u2019s DNS</span><label class="set-toggle"><input type="checkbox" data-pi="sysres" ${sysres.enabled ? 'checked' : ''}> <span>Route this Pi\u2019s lookups through Pi-hole${sysres.enabled ? ' (on)' : ''}</span></label></div>
-        <div class="set-kv"><span></span><span class="net-dns-note" style="display:inline">Only affects this Pi. A fallback resolver is kept so DNS still works if Pi-hole stops. To cover all devices, set your router\u2019s DNS to this Pi\u2019s IP.</span></div>`;
+      const row = (state, stateCls, input, title) => `<div class="set-kv set-kv-toggle">
+          <span class="set-sysdns-l">Route this Pi’s DNS through Pi-hole
+            <span class="set-sysdns-state${stateCls}" data-pi="sysresstate">${state}</span></span>
+          <label class="set-switch" title="${title}">${input}<span class="set-switch-track"><span class="set-switch-thumb"></span></span></label>
+        </div>`;
+      if (sysres.tailscaleManaged) {
+        return row('Not available: Tailscale MagicDNS manages this Pi’s DNS', '', '<input type="checkbox" disabled>',
+          'Turn off MagicDNS for this Pi (Remote Access) to use Pi-hole')
+          + `<p class="net-dns-note set-sysdns-note">Turn off “MagicDNS for this Pi” under Remote Access to route this Pi through Pi-hole.</p>`;
+      }
+      return row(sysres.enabled ? 'On: this Pi resolves through Pi-hole' : 'Off: this Pi uses the router’s DNS',
+        sysres.enabled ? ' on' : '', `<input type="checkbox" data-pi="sysres" ${sysres.enabled ? 'checked' : ''}>`,
+        sysres.enabled ? 'Stop routing this Pi through Pi-hole' : 'Route this Pi through Pi-hole')
+        + `<p class="net-dns-note set-sysdns-note">Only affects this Pi. If Pi-hole stops answering, lookups fall back to 1.1.1.1. To cover every device, set your router’s DNS to this Pi’s IP.</p>`;
     })() : '';
 
     // Update status row (only when installed).
@@ -3644,14 +3655,23 @@ pageRenderers.settings = (() => {
 
     // Route this Pi's DNS through Pi-hole
     const sysresCb = $('[data-pi=sysres]', box);
+    const sysresState = $('[data-pi=sysresstate]', box);
+    const showSysres = (on, busy = null) => {
+      if (!sysresState) return;
+      sysresState.textContent = busy || (on ? 'On: this Pi resolves through Pi-hole' : 'Off: this Pi uses the router’s DNS');
+      sysresState.className = `set-sysdns-state${busy ? ' busy' : on ? ' on' : ''}`;
+      sysresCb.closest('.set-switch').title = on ? 'Stop routing this Pi through Pi-hole' : 'Route this Pi through Pi-hole';
+    };
     if (sysresCb) sysresCb.onchange = async () => {
       const enable = sysresCb.checked;
       sysresCb.disabled = true;
+      showSysres(!enable, enable ? 'Switching to Pi-hole…' : 'Switching back to the previous DNS…');
+      let on = !enable;
       try { const r = await api('/network/dns/pihole/system-resolver', { method: 'POST', body: { enable } });
-        if (r.ok) toast('success', 'Pi-hole', enable ? 'This Pi now resolves through Pi-hole' : 'Restored the Pi\u2019s previous resolver');
-        else { toast('error', 'Pi-hole', r.error || 'Failed'); sysresCb.checked = !enable; }
-      } catch (e) { toast('error', 'Pi-hole', e.message); sysresCb.checked = !enable; }
-      finally { sysresCb.disabled = false; }
+        if (r.ok) { on = enable; toast('success', 'Pi-hole', enable ? 'This Pi now resolves through Pi-hole' : 'Restored the Pi’s previous DNS'); }
+        else toast('error', 'Pi-hole', r.error || 'Failed');
+      } catch (e) { toast('error', 'Pi-hole', e.message); }
+      finally { sysresCb.checked = on; sysresCb.disabled = false; showSysres(on); }
     };
 
     // Update: check now

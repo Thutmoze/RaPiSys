@@ -6419,6 +6419,17 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .set-switch input:checked + .set-switch-track { background: rgba(0,212,255,0.25); border-color: var(--accent-cyan); }
 .set-switch input:checked + .set-switch-track .set-switch-thumb { transform: translateX(20px); background: var(--accent-cyan); }
 .set-switch input:disabled + .set-switch-track { opacity: 0.4; cursor: not-allowed; }
+/* Pi-hole "This Pi's DNS" switch: title with a one-line state under it, and
+   the explanatory note below the row. */
+.set-kv-toggle .set-sysdns-l { display: flex; flex-direction: column; gap: 2px; }
+.set-kv-toggle .set-sysdns-state { font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.set-kv-toggle .set-sysdns-state.on { color: var(--accent-green); }
+.set-kv-toggle .set-sysdns-state.busy { color: var(--accent-cyan); }
+.set-sysdns-note { padding: 6px 0 8px; border-bottom: 1px solid var(--border-color); }
+body.compact .set-kv-toggle .set-sysdns-state { font-size: 11.5px; }
+body.compact .set-sysdns-note { padding: 4px 0 6px; font-size: 11.5px; }
+body.ultra .set-sysdns-note { display: none; }
+body.ultra .set-kv-toggle .set-sysdns-l { flex-direction: row; align-items: baseline; gap: 8px; }
 
 /* Inventory filters — compact dropdown row + active-filter pills */
 .inv-fbar { margin-bottom: 10px; }
