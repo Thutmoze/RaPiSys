@@ -259,6 +259,16 @@ snapshot() {
     [[ -f "${old}image.txt" ]] && docker rmi "$(cat "${old}image.txt")" >/dev/null 2>&1 || true
     rm -rf "$old"
   done
+  # Any snap- tag no snapshot folder points at can never be rolled back to
+  # (older scripts deleted folders but not their images): remove it. Without
+  # -f, an image still used by a container is left alone.
+  local keep tag removed=0
+  keep=$(cat "${SNAP_DIR}"/*/image.txt 2>/dev/null || true)
+  for tag in $(docker images rapisys --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep ':snap-' || true); do
+    grep -qxF "$tag" <<<"$keep" && continue
+    docker rmi "$tag" >/dev/null 2>&1 && removed=$((removed+1))
+  done
+  if [[ $removed -gt 0 ]]; then ok "removed ${removed} orphaned snapshot image(s)"; fi
   ok "snapshot ${stamp} (kept: $(ls -1d "${SNAP_DIR}"/*/ | wc -l))"
 }
 
