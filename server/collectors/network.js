@@ -311,13 +311,14 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
     return agentCall('pihole.update', {}, onLine, 900000);
   }
   // Point this Pi's own resolver at Pi-hole (reversible, with fallback).
-  async function piholeSetSystemResolver(enable, fallback) {
+  // `peers` are other nodes' IPv4s; the agent uses the first that is a Pi-hole.
+  async function piholeSetSystemResolver(enable, fallback, peers = []) {
     if (!agentConfigured()) throw new Error('host agent required');
-    return agentCall('pihole.setSystemResolver', { enable, fallback }, null, 30000);
+    return agentCall('pihole.setSystemResolver', { enable, fallback, peers }, null, 30000);
   }
-  async function piholeSystemResolverStatus() {
+  async function piholeSystemResolverStatus(peers = []) {
     if (!agentConfigured()) return { enabled: false, agent: false };
-    try { return { agent: true, ...(await agentCall('pihole.systemResolverStatus', {}, null, 10000)) }; }
+    try { return { agent: true, ...(await agentCall('pihole.systemResolverStatus', { peers }, null, 10000)) }; }
     catch (e) { return { enabled: false, agent: true, error: e.message }; }
   }
   // Back up the Pi-hole DB to the NAS (streamed), and list existing backups.

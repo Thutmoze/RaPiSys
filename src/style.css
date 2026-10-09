@@ -6426,6 +6426,7 @@ body.layout-editing .gs-size-ctrl { display: flex; }
 .set-kv-toggle .set-sysdns-state.on { color: var(--accent-green); }
 .set-kv-toggle .set-sysdns-state.busy { color: var(--accent-cyan); }
 .set-sysdns-note { padding: 6px 0 8px; border-bottom: 1px solid var(--border-color); }
+.set-sysdns-note .set-sysdns-peer { color: var(--text-secondary); font-weight: 600; }
 body.compact .set-kv-toggle .set-sysdns-state { font-size: 11.5px; }
 body.compact .set-sysdns-note { padding: 4px 0 6px; font-size: 11.5px; }
 body.ultra .set-sysdns-note { display: none; }

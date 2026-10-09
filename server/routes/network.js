@@ -2,7 +2,23 @@
 
 import express from 'express';
 
-export function networkRouter({ network, metricsRepo, requireControl, loadSettings, saveSettings, withFileLock, secrets, refreshPiholeConfig }) {
+const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+/** Enabled peers reachable by a LAN IPv4 (their base URL host): DNS fallback candidates. */
+export function peerDnsCandidates(peers = []) {
+  return peers.filter((p) => p.enabled).map((p) => {
+    try { return { name: p.name, ip: new URL(p.baseUrl).hostname }; } catch { return null; }
+  }).filter((p) => p && IPV4_RE.test(p.ip));
+}
+
+/** The resolver list with a label per server: this Pi, a named node, or null (public). */
+export function labelResolvers(servers = [], candidates = []) {
+  return servers.map((ip) => ({
+    ip, name: ip === '127.0.0.1' ? 'this Pi' : (candidates.find((c) => c.ip === ip)?.name || null),
+  }));
+}
+
+export function networkRouter({ network, metricsRepo, requireControl, loadSettings, saveSettings, withFileLock, secrets, refreshPiholeConfig, listPeers = () => [] }) {
   const r = express.Router();
 
   // Live snapshot (everything in one call for the page's first paint).
@@ -245,16 +261,24 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
   });
 
   // Whether this Pi's own resolver currently points at Pi-hole.
+  // `resolvers` is the order in use when on, or what switching on would use now.
   r.get('/dns/pihole/system-resolver', async (req, res) => {
-    try { res.json(await network.piholeSystemResolverStatus()); }
-    catch (err) { res.status(500).json({ enabled: false, error: err.message }); }
+    try {
+      const candidates = peerDnsCandidates(listPeers());
+      const st = await network.piholeSystemResolverStatus(candidates.map((c) => c.ip));
+      res.json({ ...st, resolvers: labelResolvers(st.servers || [], candidates) });
+    } catch (err) { res.status(500).json({ enabled: false, error: err.message }); }
   });
 
   // Toggle routing this Pi's own DNS through Pi-hole (reversible, with fallback).
   r.post('/dns/pihole/system-resolver', requireControl, async (req, res) => {
     const enable = !!req.body?.enable;
     const fallback = typeof req.body?.fallback === 'string' ? req.body.fallback : undefined;
-    try { res.json(await network.piholeSetSystemResolver(enable, fallback)); }
+    try {
+      const candidates = peerDnsCandidates(listPeers());
+      const out = await network.piholeSetSystemResolver(enable, fallback, candidates.map((c) => c.ip));
+      res.json({ ...out, resolvers: labelResolvers(out.servers || [], candidates) });
+    }
     catch (err) { res.status(502).json({ ok: false, error: err.message }); }
   });
 

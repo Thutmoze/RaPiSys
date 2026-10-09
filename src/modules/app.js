@@ -3332,6 +3332,15 @@ pageRenderers.settings = (() => {
       `<div class="set-kv"><span>Web console</span><a class="net-toggle" href="${consoleUrl}" target="_blank" rel="noopener">Open Pi-hole admin ↗</a></div>` : '';
 
     // Route this Pi's own DNS through Pi-hole (so the Pi's lookups show in analytics).
+    // The note names the fallbacks: another node's Pi-hole when one answers, then public DNS.
+    const sysresFallback = (resolvers = []) => {
+      const peer = resolvers.find((x) => x.ip !== '127.0.0.1' && x.name);
+      const pub = resolvers.find((x) => x.ip !== '127.0.0.1' && !x.name)?.ip || '1.1.1.1';
+      return peer
+        ? `If Pi-hole stops answering, lookups go to the Pi-hole on <b class="set-sysdns-peer">${esc(peer.name)}</b> (${esc(peer.ip)}), then ${esc(pub)}.`
+        : `If Pi-hole stops answering, lookups fall back to ${esc(pub)}.`;
+    };
+    const sysresNote = (resolvers) => `Only affects this Pi. ${sysresFallback(resolvers)} To cover every device, set your router\u2019s DNS to this Pi\u2019s IP.`;
     const sysResLine = (detect.installed && sysres.agent !== false) ? (() => {
       const row = (state, stateCls, input, title) => `<div class="set-kv set-kv-toggle">
           <span class="set-sysdns-l">Route this Pi’s DNS through Pi-hole
@@ -3346,7 +3355,7 @@ pageRenderers.settings = (() => {
       return row(sysres.enabled ? 'On: this Pi resolves through Pi-hole' : 'Off: this Pi uses the router’s DNS',
         sysres.enabled ? ' on' : '', `<input type="checkbox" data-pi="sysres" ${sysres.enabled ? 'checked' : ''}>`,
         sysres.enabled ? 'Stop routing this Pi through Pi-hole' : 'Route this Pi through Pi-hole')
-        + `<p class="net-dns-note set-sysdns-note">Only affects this Pi. If Pi-hole stops answering, lookups fall back to 1.1.1.1. To cover every device, set your router’s DNS to this Pi’s IP.</p>`;
+        + `<p class="net-dns-note set-sysdns-note" data-pi="sysresnote">${sysresNote(sysres.resolvers)}</p>`;
     })() : '';
 
     // Update status row (only when installed).
@@ -3668,7 +3677,7 @@ pageRenderers.settings = (() => {
       showSysres(!enable, enable ? 'Switching to Pi-hole…' : 'Switching back to the previous DNS…');
       let on = !enable;
       try { const r = await api('/network/dns/pihole/system-resolver', { method: 'POST', body: { enable } });
-        if (r.ok) { on = enable; toast('success', 'Pi-hole', enable ? 'This Pi now resolves through Pi-hole' : 'Restored the Pi’s previous DNS'); }
+        if (r.ok) { on = enable; if (r.resolvers?.length) { const n = $('[data-pi=sysresnote]', box); if (n) n.innerHTML = sysresNote(r.resolvers); } toast('success', 'Pi-hole', enable ? 'This Pi now resolves through Pi-hole' : 'Restored the Pi’s previous DNS'); }
         else toast('error', 'Pi-hole', r.error || 'Failed');
       } catch (e) { toast('error', 'Pi-hole', e.message); }
       finally { sysresCb.checked = on; sysresCb.disabled = false; showSysres(on); }

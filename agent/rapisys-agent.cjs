@@ -703,18 +703,46 @@ function nmDnsTargets(stdout) {
     .map(([device, type, , uuid, name]) => ({ device, type, uuid, name }));
 }
 
-/** First `nameserver` in a resolv.conf, or null. */
-function firstNameserver(rc) {
-  const m = String(rc || '').match(/^\s*nameserver\s+(\S+)/m);
-  return m ? m[1] : null;
+/** Every `nameserver` in a resolv.conf, in order. */
+function nameservers(rc) {
+  return [...String(rc || '').matchAll(/^\s*nameserver\s+(\S+)/gm)].map((m) => m[1]);
 }
 
-/** Does Pi-hole answer DNS on 127.0.0.1? A NXDOMAIN/NODATA reply still counts. */
-async function piholeAnswersLocally() {
+/** First `nameserver` in a resolv.conf, or null. */
+function firstNameserver(rc) {
+  return nameservers(rc)[0] || null;
+}
+
+/**
+ * Ask `ip` for pi.hole. 'pihole' when it answers with an address (only a
+ * Pi-hole does), 'dns' for any other DNS reply (NXDOMAIN / NODATA), null when
+ * nothing usable answers (timeout, refused, SERVFAIL).
+ */
+async function dnsProbe(ip) {
   const r = new dns.promises.Resolver({ timeout: 2000, tries: 1 });
-  r.setServers(['127.0.0.1']);
-  try { await r.resolve4('pi.hole'); return true; }
-  catch (e) { return e.code === 'ENOTFOUND' || e.code === 'ENODATA'; }
+  r.setServers([ip]);
+  try { return (await r.resolve4('pi.hole')).length ? 'pihole' : 'dns'; }
+  catch (e) { return e.code === 'ENOTFOUND' || e.code === 'ENODATA' ? 'dns' : null; }
+}
+
+/** Does Pi-hole answer DNS on 127.0.0.1? */
+async function piholeAnswersLocally() {
+  return (await dnsProbe('127.0.0.1')) !== null;
+}
+
+/** The first of `peers` (other RaPiSys nodes' IPv4s) that is a working Pi-hole. */
+async function firstPeerPihole(peers) {
+  const results = await Promise.all(peers.map((ip) => dnsProbe(ip).catch(() => null)));
+  return peers[results.indexOf('pihole')] || null;
+}
+
+/**
+ * The Pi's DNS servers: its own Pi-hole, then another node's Pi-hole (still
+ * filtered), then a public resolver so the Pi resolves even with both
+ * Pi-holes down. glibc uses at most three.
+ */
+function piholeResolvers(peerPihole, fallback) {
+  return [...new Set(['127.0.0.1', peerPihole, fallback].filter(Boolean))].slice(0, 3);
 }
 
 async function nmActive() {
@@ -1672,10 +1700,11 @@ const OPS = {
   // fallback queries bypass Pi-hole). Only affects this Pi, not other devices.
   // NetworkManager hosts: set on the NM connections (survives DHCP renewals and
   // reboots). Other hosts: write /etc/resolv.conf as before.
-  async 'pihole.setSystemResolver'({ enable, fallback = '1.1.1.1' } = {}) {
+  async 'pihole.setSystemResolver'({ enable, fallback = '1.1.1.1', peers = [] } = {}) {
     const BACKUP = '/etc/rapisys/resolv.conf.pihole.orig';
     const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
     assert(!fallback || IP_RE.test(fallback), 'invalid fallback DNS IP');
+    assert(Array.isArray(peers) && peers.length <= 8 && peers.every((ip) => IP_RE.test(ip)), 'invalid peer IPs');
     // Guard: if Tailscale manages resolv.conf, refuse (it rewrites it constantly).
     try {
       const rc = fs.readFileSync('/etc/resolv.conf', 'utf-8');
@@ -1686,6 +1715,7 @@ const OPS = {
 
     // Never strand the Pi with a dead resolver.
     if (enable) assert(await piholeAnswersLocally(), 'Pi-hole is not answering DNS on 127.0.0.1:53, so this Pi was left on its current resolver.');
+    const servers = enable ? piholeResolvers(await firstPeerPihole(peers), fallback) : [];
 
     if (await nmActive()) {
       if (!enable) { await nmRestoreDns(); return { ok: true, enabled: false, via: 'networkmanager' }; }
@@ -1704,11 +1734,10 @@ const OPS = {
       }
       fs.mkdirSync('/etc/rapisys', { recursive: true });
       fs.writeFileSync(PIHOLE_NM_STATE, JSON.stringify(saved, null, 2), { mode: 0o600 });
-      const servers = ['127.0.0.1', ...(fallback ? [fallback] : [])].join(',');
       try {
         for (const t of targets) {
           await nmApply(t.uuid, t.device, ['ipv4.ignore-auto-dns', 'yes', 'ipv6.ignore-auto-dns', 'yes',
-            'ipv4.dns', servers, 'ipv4.dns-options', 'timeout:2,attempts:2']);
+            'ipv4.dns', servers.join(','), 'ipv4.dns-options', 'timeout:2,attempts:2']);
         }
         // NM regenerates resolv.conf on reapply; a systemd-resolved stub
         // (127.0.0.53) forwards to the servers above, so it counts too.
@@ -1718,7 +1747,7 @@ const OPS = {
         await nmRestoreDns().catch(() => {});
         throw new Error(`could not switch to Pi-hole (${e.message}); previous DNS restored`);
       }
-      return { ok: true, enabled: true, via: 'networkmanager', fallback: fallback || null, connections: targets.map((t) => t.name) };
+      return { ok: true, enabled: true, via: 'networkmanager', servers, connections: targets.map((t) => t.name) };
     }
 
     if (enable) {
@@ -1730,15 +1759,13 @@ const OPS = {
           fs.copyFileSync(real, BACKUP);
         } catch { try { fs.copyFileSync('/etc/resolv.conf', BACKUP); } catch { /* */ } }
       }
-      // Write a plain resolv.conf: Pi-hole first, fallback second, short timeout
-      // so failover to the fallback is quick if Pi-hole stops answering.
+      // Write a plain resolv.conf: Pi-hole first, then the fallbacks, short
+      // timeout so failover is quick if Pi-hole stops answering.
       const lines = ['# Managed by RaPiSys (point this Pi at Pi-hole)',
-        'nameserver 127.0.0.1'];
-      if (fallback) lines.push(`nameserver ${fallback}`);
-      lines.push('options timeout:2 attempts:2 edns0');
+        ...servers.map((ip) => `nameserver ${ip}`), 'options timeout:2 attempts:2 edns0'];
       try { fs.unlinkSync('/etc/resolv.conf'); } catch { /* symlink or file */ }
       fs.writeFileSync('/etc/resolv.conf', lines.join('\n') + '\n');
-      return { ok: true, enabled: true, via: 'resolv.conf', fallback: fallback || null };
+      return { ok: true, enabled: true, via: 'resolv.conf', servers };
     } else {
       // Restore the backup; if none, fall back to a sane public resolver so the
       // Pi is never left without DNS.
@@ -1755,14 +1782,22 @@ const OPS = {
   },
 
   // Report whether the Pi is currently pointed at Pi-hole: the resolver it
-  // actually uses, whichever way it was set.
-  async 'pihole.systemResolverStatus'() {
+  // actually uses, whichever way it was set. `servers` is the order in use
+  // when on, or what switching on would use now (peers probed) when off.
+  async 'pihole.systemResolverStatus'({ fallback = '1.1.1.1', peers = [] } = {}) {
+    const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
     try {
       const rc = fs.readFileSync('/etc/resolv.conf', 'utf-8');
-      const ns = firstNameserver(rc);
+      const ns = nameservers(rc);
       const tailscale = /generated by tailscale/i.test(rc);
-      const viaStub = ns === '127.0.0.53' && fs.existsSync(PIHOLE_NM_STATE);
-      return { enabled: ns === '127.0.0.1' || viaStub, tailscaleManaged: tailscale };
+      const viaStub = ns[0] === '127.0.0.53' && fs.existsSync(PIHOLE_NM_STATE);
+      const enabled = ns[0] === '127.0.0.1' || viaStub;
+      let servers = enabled && !viaStub ? ns.slice(0, 3) : null;
+      if (!servers) {
+        const okPeers = Array.isArray(peers) ? peers.filter((ip) => IP_RE.test(ip)).slice(0, 8) : [];
+        servers = piholeResolvers(await firstPeerPihole(okPeers), IP_RE.test(fallback) ? fallback : null);
+      }
+      return { enabled, tailscaleManaged: tailscale, servers };
     } catch (e) { return { enabled: false, error: e.message }; }
   },
 
@@ -3541,4 +3576,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { nmcliFields, nmDnsTargets, firstNameserver, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };

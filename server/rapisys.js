@@ -440,7 +440,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig, sampler, getSettings: loadSettings }));
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,
-    loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig }));
+    loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig, listPeers: () => peersFacade.list() }));
   // ---- Pironman 5 Mini case-controller (gated; localhost pm_dashboard by default) ----
   let pironmanConfigCache = settings.rapisys?.pironman || null;
   const refreshPironmanConfig = async () => { pironmanConfigCache = (await loadSettings()).rapisys?.pironman || null; };
