@@ -117,13 +117,30 @@ export function createUpdatesRepo(db) {
   // description fallback.
   const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
   const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
-  const isRpiPkg = (name, kernel, fw, desc) => !kernel
-    && (RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || ''))));
-  // Rows recorded under the old rule (firmware never got the Pi tag): give
-  // Raspberry Pi's own firmware its tag. Idempotent, cheap, name-only.
+  // Same kernel rule as the agent's isKernelPkg(). Raspberry Pi kernels carry
+  // the raspberry pi tag too; History has no archive origin, so they are
+  // recognised by name (linux-image-rpi-2712, ...+rpt-rpi-2712, linux-kbuild-...+rpt).
+  const KERNEL_RE = /^linux-(image|headers|kbuild|base|libc-dev)|^raspberrypi-kernel/;
+  const RPI_KERNEL_NAME_RE = /-rpi|\+rpt|^raspberrypi-kernel/;
+  const isKernelPkg = (name) => KERNEL_RE.test(String(name || ''));
+  const isRpiPkg = (name, kernel, fw, desc) => (kernel
+    ? RPI_KERNEL_NAME_RE.test(String(name || ''))
+    : (RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || '')))));
+  // Rows recorded under older rules (firmware and kernels never got the Pi
+  // tag; the kernel rule differed from the agent's): re-derive the kernel and
+  // raspberry pi flags from the current rules. Idempotent; only touches rows
+  // whose flags differ, and leaves null flags to the read-time backfill.
   try {
-    db.exec(`UPDATE update_history SET rpi = 1 WHERE rpi = 0 AND firmware = 1 AND IFNULL(kernel, 0) = 0
-      AND (package LIKE 'rpi-%' OR package LIKE 'raspberrypi-%' OR package LIKE 'raspi-%' OR package LIKE 'libraspberrypi%')`);
+    const fix = db.prepare('UPDATE update_history SET kernel = ?, rpi = ? WHERE id = ?');
+    const rows = db.prepare(`SELECT id, package, kernel, firmware, rpi, description FROM update_history
+      WHERE kernel IS NOT NULL AND rpi IS NOT NULL`).all();
+    db.transaction(() => {
+      for (const r of rows) {
+        const kernel = isKernelPkg(r.package) ? 1 : 0;
+        const rpi = isRpiPkg(r.package, kernel, r.firmware, r.description) ? 1 : 0;
+        if (kernel !== r.kernel || rpi !== r.rpi) fix.run(kernel, rpi, r.id);
+      }
+    })();
   } catch { /* table not created yet */ }
 
   function record({ ts, packageName, fromV, toV, result, log, description }) {
@@ -132,7 +149,7 @@ export function createUpdatesRepo(db) {
     try {
       const t = db.prepare(`SELECT security, cves FROM update_sectags WHERE package=?`).get(packageName);
       if (t) { sec = t.security ? 1 : 0; cves = t.cves || 0; }
-      kern = (/linux-image|^linux-headers|kernel/i.test(packageName)) ? 1 : 0;
+      kern = isKernelPkg(packageName) ? 1 : 0;
       fw = isFirmwarePkg(packageName, description) ? 1 : 0;
       rpi = isRpiPkg(packageName, kern, fw, description) ? 1 : 0;
     } catch { /* best-effort */ }
@@ -167,7 +184,7 @@ export function createUpdatesRepo(db) {
         }
         const t = tags[r.package];
         if (t) { r.security = t.security ? 1 : 0; r.cves = t.cves || 0; }
-        if (r.kernel == null) r.kernel = /linux-image|^linux-headers|kernel/i.test(r.package) ? 1 : 0;
+        if (r.kernel == null) r.kernel = isKernelPkg(r.package) ? 1 : 0;
       }
       // Firmware is derivable purely from the package name/description, so
       // backfill it for every row that lacks the flag (older history rows).

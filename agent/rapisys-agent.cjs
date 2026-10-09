@@ -522,6 +522,15 @@ async function pironmanConfigPath() {
 const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
 const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
 
+// Kernel packages: images, headers, kbuild, and the linux-base-* / linux-libc-dev
+// packages that ship from the kernel source at the kernel's own version
+// (1:6.18.50-1+rpt1). server/repositories/updates.js uses the same rule so
+// Available Updates and History agree.
+const KERNEL_RE = /^linux-(image|headers|kbuild|base|libc-dev)|^raspberrypi-kernel/;
+function isKernelPkg(name) { return KERNEL_RE.test(String(name || '')); }
+// A Raspberry Pi kernel by name, for when the archive origin is unknown.
+const RPI_KERNEL_NAME_RE = /-rpi|\+rpt|^raspberrypi-kernel/;
+
 /**
  * The "raspberry pi" tag. Origin first: served by the Raspberry Pi archive and
  * not one of its rebuilds of a Debian package. Name/summary are an OR fallback
@@ -531,10 +540,14 @@ const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
  * firmware and the raspberry pi tag. Generic firmware is kept out of the
  * summary fallback: Debian firmware rebuilt for the Pi (firmware-brcm80211,
  * +rptN) often mentions the Pi in its summary but is not Raspberry Pi's own.
- * Kernels never get it (that tagging decision is deferred).
+ *
+ * Kernels from the Raspberry Pi archive are Raspberry Pi's own (built from its
+ * kernel tree) and carry both tags. They are decided by origin alone: their
+ * `+rpt1` suffix would otherwise read as a Debian rebuild. A Debian kernel
+ * (deb.debian.org) stays kernel-only.
  */
-function rpiTag({ name, description = '', kernel = false, firmware = false, fromRpiArchive = false }) {
-  if (kernel) return false;
+function rpiTag({ name, description = '', kernel = false, firmware = false, fromRpiArchive = false, rpiArchive = null }) {
+  if (kernel) return rpiArchive === null ? RPI_KERNEL_NAME_RE.test(name) : rpiArchive;
   return fromRpiArchive || RPI_RE.test(name) || (!firmware && RPI_DESC_RE.test(description));
 }
 
@@ -2774,10 +2787,7 @@ WantedBy=multi-user.target
       updates.push({
         package: m[1], pocket: m[2], candidate: m[3], installed: m[4] || null,
         security: securityPkgs.has(m[1]),
-        // linux-base-rpi-* and linux-libc-dev ship from the kernel source
-        // package at the kernel's own version (1:6.18.39-1+rpt1) and used to
-        // land untagged; they belong with the kernel, not under Raspberry Pi.
-        kernel: /^linux-(image|headers|base|libc-dev)|^raspberrypi-kernel/.test(m[1]),
+        kernel: isKernelPkg(m[1]),
       });
     }
     // Descriptions (one dpkg-query call for all upgradable packages) and the
@@ -2826,8 +2836,10 @@ WantedBy=multi-user.target
       // rebuilds of a Debian package. The name/summary regexes stay as an OR
       // fallback so nothing that was tagged before can regress — and so the
       // tag still works if `apt-cache policy` was unavailable this pass.
-      const fromRpiArchive = isRpiArchiveHost(originMap[u.package]) && !isRptRebuild(u.candidate);
-      u.rpi = rpiTag({ name: u.package, description: u.description, kernel: u.kernel, firmware: u.firmware, fromRpiArchive });
+      const host = originMap[u.package];
+      const fromRpiArchive = isRpiArchiveHost(host) && !isRptRebuild(u.candidate);
+      u.rpi = rpiTag({ name: u.package, description: u.description, kernel: u.kernel, firmware: u.firmware,
+        fromRpiArchive, rpiArchive: host ? isRpiArchiveHost(host) : null });
       try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
       catch { u.installedAt = null; }
     }
@@ -3594,4 +3606,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { AGENT_SHA256, rpiTag, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { AGENT_SHA256, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };

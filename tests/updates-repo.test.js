@@ -45,6 +45,35 @@ describe('update history security tags', () => {
     expect(rows['firmware-brcm80211']).toMatchObject({ firmware: 1, rpi: 0 });
   });
 
+  it('tags Raspberry Pi kernels kernel + raspberry pi, and a Debian kernel kernel-only', () => {
+    const r = repo();
+    r.record({ ts: 1, packageName: 'linux-image-rpi-2712', fromV: '1:6.18.39-1+rpt1', toV: '1:6.18.50-1+rpt1', result: 'success', log: '' });
+    r.record({ ts: 2, packageName: 'linux-kbuild-6.18.50+rpt', fromV: '', toV: '1:6.18.50-1+rpt1', result: 'success', log: '' });
+    r.record({ ts: 3, packageName: 'linux-image-arm64', fromV: '6.12.1', toV: '6.12.2', result: 'success', log: '' });
+    const rows = Object.fromEntries(r.recent(10).rows.map((x) => [x.package, x]));
+    expect(rows['linux-image-rpi-2712']).toMatchObject({ kernel: 1, rpi: 1 });
+    expect(rows['linux-kbuild-6.18.50+rpt']).toMatchObject({ kernel: 1, rpi: 1 });
+    expect(rows['linux-image-arm64']).toMatchObject({ kernel: 1, rpi: 0 });
+  });
+
+  it('re-derives kernel and raspberry pi flags on rows stored under older rules', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-up-'));
+    const { db } = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });
+    const r = createUpdatesRepo(db);
+    r.record({ ts: 1, packageName: 'linux-image-rpi-2712', fromV: '1', toV: '2', result: 'success', log: '' });
+    r.record({ ts: 2, packageName: 'linux-kbuild-6.18.50+rpt', fromV: '1', toV: '2', result: 'success', log: '' });
+    r.record({ ts: 3, packageName: 'kernelshark', fromV: '1', toV: '2', result: 'success', log: '' });
+    // As the old rules stored them: kernels never tagged Pi, kbuild not a kernel, "kernel" in a name was.
+    db.prepare(`UPDATE update_history SET kernel = 1, rpi = 0 WHERE package = 'linux-image-rpi-2712'`).run();
+    db.prepare(`UPDATE update_history SET kernel = 0, rpi = 0 WHERE package = 'linux-kbuild-6.18.50+rpt'`).run();
+    db.prepare(`UPDATE update_history SET kernel = 1, rpi = 0 WHERE package = 'kernelshark'`).run();
+    createUpdatesRepo(db);                                                                // next start
+    const rows = Object.fromEntries(r.recent(10).rows.map((x) => [x.package, x]));
+    expect(rows['linux-image-rpi-2712']).toMatchObject({ kernel: 1, rpi: 1 });
+    expect(rows['linux-kbuild-6.18.50+rpt']).toMatchObject({ kernel: 1, rpi: 1 });
+    expect(rows.kernelshark).toMatchObject({ kernel: 0, rpi: 0 });
+  });
+
   it('fixes rpi-eeprom history rows recorded under the old rule', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-up-'));
     const { db } = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });

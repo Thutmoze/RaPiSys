@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 // the file does not bind the socket: listen() sits behind `require.main`.
 process.env.AGENT_SECRET = 'test-secret-not-used-for-any-real-hmac';
 
-const { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, rpiTag } =
+const { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, rpiTag, isKernelPkg } =
   require('../agent/rapisys-agent.cjs');
 
 describe('isRptRebuild', () => {
@@ -142,13 +142,39 @@ describe('rpiTag: firmware from Raspberry Pi carries the Pi tag too', () => {
       firmware: true, fromRpiArchive: pi('archive.raspberrypi.com', '1:20260519-1~bpo13+1+rpt1') })).toBe(false);
   });
 
-  it('never tags kernels, even from the Raspberry Pi archive', () => {
-    expect(rpiTag({ name: 'linux-image-rpi-2712', kernel: true, fromRpiArchive: true })).toBe(false);
-  });
 
   it('keeps tagging Pi tooling by name or summary', () => {
     expect(rpiTag({ name: 'raspi-config' })).toBe(true);
     expect(rpiTag({ name: 'rc-gui', description: 'raspi-config GUI' })).toBe(true);
     expect(rpiTag({ name: 'nano', description: 'small editor' })).toBe(false);
+  });
+});
+
+describe('kernels', () => {
+  // Real packages on a Pi 5 (Trixie), 2026-10-09: all from archive.raspberrypi.com at 1:6.18.50-1+rpt1.
+  it('recognises the whole kernel set', () => {
+    for (const p of ['linux-image-rpi-2712', 'linux-image-6.18.50+rpt-rpi-2712', 'linux-headers-rpi-v8',
+      'linux-headers-6.18.50+rpt-common-rpi', 'linux-kbuild-6.18.50+rpt', 'linux-base-rpi-2712', 'linux-libc-dev', 'raspberrypi-kernel']) {
+      expect(isKernelPkg(p)).toBe(true);
+    }
+    for (const p of ['linux-sysctl-defaults', 'linux-perf', 'kernelshark', 'firmware-realtek']) expect(isKernelPkg(p)).toBe(false);
+  });
+
+  it('gives Raspberry Pi kernels the raspberry pi tag by origin, despite the +rpt1 suffix', () => {
+    expect(isRptRebuild('1:6.18.50-1+rpt1')).toBe(true);   // why origin, not the version, decides
+    for (const name of ['linux-image-rpi-2712', 'linux-kbuild-6.18.50+rpt', 'linux-libc-dev']) {
+      expect(rpiTag({ name, kernel: true, rpiArchive: isRpiArchiveHost('archive.raspberrypi.com') })).toBe(true);
+    }
+  });
+
+  it('keeps a Debian kernel kernel-only', () => {
+    expect(rpiTag({ name: 'linux-image-arm64', kernel: true, rpiArchive: isRpiArchiveHost('deb.debian.org') })).toBe(false);
+    expect(rpiTag({ name: 'linux-libc-dev', kernel: true, rpiArchive: false })).toBe(false);
+  });
+
+  it('falls back to the name when the origin is unknown', () => {
+    expect(rpiTag({ name: 'linux-image-6.18.50+rpt-rpi-2712', kernel: true })).toBe(true);
+    expect(rpiTag({ name: 'linux-kbuild-6.18.50+rpt', kernel: true })).toBe(true);
+    expect(rpiTag({ name: 'linux-image-arm64', kernel: true })).toBe(false);
   });
 });
