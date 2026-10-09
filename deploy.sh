@@ -3,7 +3,8 @@
 # RaPiSys — deployment script for Raspberry Pi 5 (Raspberry Pi OS Bookworm)
 # =============================================================================
 #   sudo ./deploy.sh install     first-time setup (deps, secrets, agent, app)
-#   sudo ./deploy.sh upgrade     snapshot -> rebuild -> health-gate -> rollback on failure
+#   sudo ./deploy.sh upgrade     the normal deploy: pull -> snapshot -> agent sync (only if
+#                                changed) -> rebuild -> health-gate -> rollback on failure
 #   sudo ./deploy.sh rollback    restore the newest snapshot
 #   sudo ./deploy.sh status      show app + agent + health state
 #   sudo ./deploy.sh uninstall   stop and remove (data kept unless --purge)
@@ -160,6 +161,46 @@ EOF
     || die "agent failed to start — journalctl -u rapisys-agent"
 }
 
+# Bring the installed agent (and its unit) in line with the checkout. Restarts
+# only when something changed, so a deploy can never leave the container on new
+# code while the agent runs old code ("operation not allowed").
+sync_agent() {
+  local src="${APP_DIR}/agent/rapisys-agent.cjs" dst="${AGENT_DIR}/rapisys-agent.cjs"
+  local unit_src="${APP_DIR}/agent/rapisys-agent.service" unit_dst="/etc/systemd/system/rapisys-agent.service"
+  local changed=0
+  node --check "$src" || { warn "agent/rapisys-agent.cjs does not parse; not installing it"; return 1; }
+  if ! cmp -s "$unit_src" "$unit_dst"; then
+    install -m 0644 "$unit_src" "$unit_dst"
+    systemctl daemon-reload
+    changed=1
+  fi
+  if ! cmp -s "$src" "$dst"; then
+    install -m 0755 "$src" "$dst"
+    changed=1
+  fi
+  if [[ $changed -eq 0 ]]; then
+    ok "agent unchanged (no restart)"
+    return 0
+  fi
+  log "Agent changed, restarting rapisys-agent…"
+  systemctl restart rapisys-agent
+  sleep 1
+  systemctl is-active --quiet rapisys-agent || { warn "agent failed to start — journalctl -u rapisys-agent"; return 1; }
+  ok "agent updated and running"
+}
+
+# git as the checkout's owner: pulling as root leaves root-owned files in .git
+# and breaks the owner's next plain `git pull`.
+pull_source() {
+  local owner; owner=$(stat -c %U "$APP_DIR")
+  log "Pulling latest source (as ${owner})…"
+  if sudo -u "$owner" git -C "$APP_DIR" pull --ff-only; then
+    ok "source at $(sudo -u "$owner" git -C "$APP_DIR" log --oneline -1)"
+  else
+    warn "git pull skipped (not a clone, diverged, or local changes); deploying the current checkout"
+  fi
+}
+
 # -----------------------------------------------------------------------------
 # App lifecycle
 # -----------------------------------------------------------------------------
@@ -209,8 +250,15 @@ snapshot() {
     cp "${DATA_DIR}/rapisys.db.bak" "${dir}/rapisys.db"
   fi
   tar -czf "${dir}/config.tgz" -C "$APP_DIR" .env data/settings.json 2>/dev/null || true
-  # keep last 3
-  ls -1dt "${SNAP_DIR}"/*/ 2>/dev/null | tail -n +4 | xargs -r rm -rf
+  # The agent as installed now, so a rollback puts it back too.
+  cp "${AGENT_DIR}/rapisys-agent.cjs" "${dir}/agent.cjs" 2>/dev/null || true
+  cp /etc/systemd/system/rapisys-agent.service "${dir}/agent.service" 2>/dev/null || true
+  # keep last 3 (and drop the image tags of the ones removed, or they pile up)
+  local old
+  for old in $(ls -1dt "${SNAP_DIR}"/*/ 2>/dev/null | tail -n +4); do
+    [[ -f "${old}image.txt" ]] && docker rmi "$(cat "${old}image.txt")" >/dev/null 2>&1 || true
+    rm -rf "$old"
+  done
   ok "snapshot ${stamp} (kept: $(ls -1d "${SNAP_DIR}"/*/ | wc -l))"
 }
 
@@ -231,13 +279,16 @@ cmd_install() {
 
 cmd_upgrade() {
   require_root
+  # Pull first, then re-run the freshly pulled script, so the upgrade steps
+  # are always the new version's (the pull may have changed this file).
+  if [[ "${1:-}" != "--pulled" ]]; then
+    pull_source
+    exec "${APP_DIR}/deploy.sh" upgrade --pulled
+  fi
   snapshot
-  log "Pulling latest source & rebuilding…"
-  (cd "$APP_DIR" && git pull --ff-only 2>/dev/null || warn "git pull skipped (not a clone or local changes)")
-  install -m 0755 "${APP_DIR}/agent/rapisys-agent.cjs" "${AGENT_DIR}/rapisys-agent.cjs"
-  systemctl restart rapisys-agent
-  if (cd "$APP_DIR" && $COMPOSE up -d --build) && health_gate "$HEALTH_URL" 120; then
-    ok "upgrade complete"
+  log "Rebuilding…"
+  if sync_agent && (cd "$APP_DIR" && $COMPOSE up -d --build) && health_gate "$HEALTH_URL" 120; then
+    ok "upgrade complete: $(sudo -u "$(stat -c %U "$APP_DIR")" git -C "$APP_DIR" log --oneline -1), agent $(systemctl is-active rapisys-agent)"
   else
     warn "upgrade failed — rolling back automatically"
     cmd_rollback
@@ -253,6 +304,21 @@ cmd_rollback() {
   docker tag "$image" rapisys:latest
   [[ -f "${latest}/rapisys.db" ]] && cp "${latest}/rapisys.db" "${DATA_DIR}/rapisys.db"
   tar -xzf "${latest}/config.tgz" -C "$APP_DIR" 2>/dev/null || true
+  # Put the snapshot's agent back if the failed upgrade changed it.
+  local agent_back=0
+  if [[ -f "${latest}/agent.service" ]] && ! cmp -s "${latest}/agent.service" /etc/systemd/system/rapisys-agent.service; then
+    install -m 0644 "${latest}/agent.service" /etc/systemd/system/rapisys-agent.service
+    systemctl daemon-reload
+    agent_back=1
+  fi
+  if [[ -f "${latest}/agent.cjs" ]] && ! cmp -s "${latest}/agent.cjs" "${AGENT_DIR}/rapisys-agent.cjs"; then
+    install -m 0755 "${latest}/agent.cjs" "${AGENT_DIR}/rapisys-agent.cjs"
+    agent_back=1
+  fi
+  if [[ $agent_back -eq 1 ]]; then
+    systemctl restart rapisys-agent
+    ok "agent restored from snapshot ($(systemctl is-active rapisys-agent))"
+  fi
   (cd "$APP_DIR" && $COMPOSE up -d --no-build)
   health_gate "$HEALTH_URL" 90 && ok "rollback complete" || die "rollback unhealthy — inspect docker logs rapisys"
 }
@@ -293,7 +359,7 @@ cmd_uninstall() {
 
 case "${1:-}" in
   install)   cmd_install ;;
-  upgrade)   cmd_upgrade ;;
+  upgrade)   shift; cmd_upgrade "$@" ;;
   rollback)  cmd_rollback ;;
   status)    cmd_status ;;
   uninstall) shift; cmd_uninstall "$@" ;;

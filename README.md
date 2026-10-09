@@ -128,10 +128,12 @@ Without the host agent you still get the full dashboard, history, wizard and ale
 
 ```bash
 sudo ./deploy.sh status      # app + agent + deep health
-sudo ./deploy.sh upgrade     # snapshot → rebuild → health-gate → auto-rollback on failure
-sudo ./deploy.sh rollback    # restore the newest snapshot
+sudo ./deploy.sh upgrade     # pull → snapshot → agent sync → rebuild → health-gate → auto-rollback on failure
+sudo ./deploy.sh rollback    # restore the newest snapshot (image, database, config and agent)
 sudo ./deploy.sh uninstall   # remove (add --purge to delete data)
 ```
+
+`upgrade` is the one command to deploy a new version. It pulls as the checkout's owner, reinstalls and restarts the host agent only when `agent/` changed (after a syntax check), and rolls the agent back with everything else if the new version fails its health gate. A plain `docker compose up -d --build` updates the container only, which can leave a new dashboard talking to an old agent ("operation not allowed").
 
 ### Database backups and restore
 
