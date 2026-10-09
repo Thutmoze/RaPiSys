@@ -26,6 +26,9 @@ import { createInventoryRepo } from './repositories/inventory.js';
 import { createLayoutsRepo } from './repositories/layouts.js';
 import { createUpdatesCollector } from './collectors/updates.js';
 import { createUpdatesRepo } from './repositories/updates.js';
+import { createNetTrafficRepo } from './repositories/net-traffic.js';
+import { createNetTraffic } from './services/net-traffic.js';
+import { agentCall, agentConfigured } from './core/agent-client.js';
 import { createPeersRepo } from './repositories/peers.js';
 import { createSampler } from './services/sampler.js';
 import { createRetention } from './services/retention.js';
@@ -120,7 +123,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo, layoutsRepo, peersRepo;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo, layoutsRepo, peersRepo, netTrafficRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
@@ -132,6 +135,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     layoutsRepo = createLayoutsRepo(getDb());
     updatesRepo = createUpdatesRepo(getDb());
     peersRepo = createPeersRepo(getDb(), { secrets });
+    netTrafficRepo = createNetTrafficRepo(getDb());
   }
   rebuildRepos();
 
@@ -157,6 +161,15 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     purgeOlderThan: (...a) => eventsRepo.purgeOlderThan(...a),
   };
   const peersFacade = new Proxy({}, { get: (_, m) => (...a) => peersRepo[m](...a) });
+  const netTrafficFacade = new Proxy({}, { get: (_, m) => (...a) => netTrafficRepo[m](...a) });
+  // Bandwidth history (replaces vnStat); imports vnStat's history once if the host has it.
+  const netTraffic = createNetTraffic({
+    repo: netTrafficFacade,
+    importVnstat: async () => {
+      if (!agentConfigured()) throw new Error('host agent not configured');
+      return JSON.parse((await agentCall('vnstat.json', {}, null, 9000)).output);
+    },
+  });
   const secretsFacade = {
     set: (...a) => secrets.set(...a),
     get: (...a) => secrets.get(...a),
@@ -212,6 +225,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     return piholeConfigCache;
   };
   const network = createNetworkCollector({
+    getTrafficHistory: () => netTraffic.history(),
     getPiholeConfig: () => piholeConfigCache,
     getPiholePassword: () => { try { return secretsFacade.get('pihole.password'); } catch { return null; } },
   });
@@ -267,6 +281,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // cadence lets a scheduled check fire within ~1 min of its target instead of
   // waiting up to the next 10-min boundary.
   scheduler.register('update-check', 60e3, () => updateScheduler.tick(), { runNow: true });
+  scheduler.register('net-traffic', 60e3, () => netTraffic.tick(), { runNow: true });
   scheduler.register('net-sampler', 10e3, () => {
     const t = network.throughput();
     const rows = [];

@@ -3,8 +3,8 @@
  * -------------------------------------
  * Lightweight, daemon-light approach chosen for the Pi 5:
  *  - live throughput: /proc/net/dev byte-counter deltas (zero deps)
- *  - bandwidth history: vnStat (`vnstat --json`) — ~1MB kernel-counter
- *    daemon, already collecting; gives 5-min/hour/day/month per interface
+ *  - bandwidth history: RaPiSys's own /proc/net/dev accounting into hour /
+ *    day / month buckets (services/net-traffic.js), served in vnStat's shape
  *  - protocol distribution: `ss -s` summary + /proc/net/{tcp,udp} state
  *  - top processes by bandwidth: `ss -tunp` socket→process deltas
  *  - DNS: resolver stats via `resolvectl statistics`, or a dnsmasq/Pi-hole
@@ -69,7 +69,8 @@ function readProcNetDev() {
   return out;
 }
 
-export function createNetworkCollector({ getPiholeConfig = () => null, getPiholePassword = () => null } = {}) {
+export function createNetworkCollector({ getPiholeConfig = () => null, getPiholePassword = () => null,
+  getTrafficHistory = () => ({ available: false, interfaces: [] }) } = {}) {
   let prev = null;
   let prevAt = 0;
 
@@ -97,33 +98,16 @@ export function createNetworkCollector({ getPiholeConfig = () => null, getPihole
     return { interfaces, ts: now };
   }
 
-  /** vnStat history for an interface (or default). */
+  /**
+   * Bandwidth history for an interface (or all), from RaPiSys's own counter
+   * accounting (services/net-traffic.js). Kept in vnStat's JSON shape under
+   * the old name so the Network page and the snapshot key stay unchanged.
+   */
   async function vnstat(iface = null) {
     try {
-      // vnstat lives on the HOST (not in the container image), so prefer
-      // the agent; fall back to a local binary if one is ever present.
-      let stdout;
-      if (agentConfigured()) {
-        const r = await agentCall('vnstat.json', { iface }, null, 9000);
-        stdout = r.output;
-      } else {
-        const args = ['--json'];
-        if (iface) args.push('-i', iface);
-        ({ stdout } = await execFileAsync('vnstat', args, { timeout: 6000 }));
-      }
-      const data = JSON.parse(stdout);
-      const ifaces = (data.interfaces || []).filter((i) => !SKIP_IF.test(i.name));
-      return {
-        available: true,
-        interfaces: ifaces.map((i) => ({
-          name: i.name,
-          today: i.traffic?.day?.[i.traffic.day.length - 1] || null,
-          hours: (i.traffic?.hour || []).slice(-24),
-          days: (i.traffic?.day || []).slice(-30),
-          months: (i.traffic?.month || []).slice(-12),
-          total: i.traffic?.total || null,
-        })),
-      };
+      const h = getTrafficHistory();
+      const ifaces = h.interfaces.filter((i) => !SKIP_IF.test(i.name) && (!iface || i.name === iface));
+      return { ...h, interfaces: ifaces };
     } catch {
       return { available: false, interfaces: [] };
     }

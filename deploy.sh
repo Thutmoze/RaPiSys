@@ -79,14 +79,11 @@ check_platform() {
 }
 
 install_deps() {
-  log "Installing host packages (cifs-utils, nfs-common, vnstat)…"
+  log "Installing host packages (cifs-utils, nfs-common)…"
   apt-get update -qq
   apt-get install -y -qq cifs-utils nfs-common curl >/dev/null
-  # vnStat is optional but tiny — install unless explicitly skipped
-  if [[ "${RAPISYS_NO_VNSTAT:-0}" != "1" ]]; then
-    apt-get install -y -qq vnstat >/dev/null && systemctl enable --now vnstat >/dev/null 2>&1 || true
-    ok "vnstat installed (network history)"
-  fi
+  # Bandwidth history is built in (no vnStat). An existing vnStat install is
+  # left alone; RaPiSys imports its history once on first run.
   ok "host dependencies present"
 }
 

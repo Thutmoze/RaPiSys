@@ -4874,8 +4874,8 @@ pageRenderers.network = (() => {
     let vn;
     try { vn = await api('/network/history'); } catch { return; }
     const vh = $('[data-net=history]', host);
-    if (!vn.available) { vh.innerHTML = '<p class="sess-empty">vnStat unavailable.</p>'; return; }
-    if (!vn.interfaces.length) { vh.innerHTML = '<p class="sess-empty">vnStat is collecting — history appears shortly.</p>'; return; }
+    if (!vn.available) { vh.innerHTML = '<p class="sess-empty">Bandwidth history is unavailable.</p>'; return; }
+    if (!vn.interfaces.length) { vh.innerHTML = '<p class="sess-empty">No traffic recorded yet. History appears within a few minutes.</p>'; return; }
 
     const KEY = { fiveminute: 'fiveminutes', minute: 'fiveminutes', hour: 'hours', day: 'days', week: 'days', month: 'months' };
     const histIfaces = vn.interfaces.filter((i) => pageRenderers.network._showVirtual || !/^(br-|docker|virbr)/.test(i.name));
