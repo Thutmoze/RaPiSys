@@ -6738,6 +6738,33 @@ body.rapisys-popout .rt-vnc { height: calc(100vh - 70px); }
 .dk-catpick label:hover{background:rgba(255,255,255,.02)}
 .dk-catpick input{accent-color:var(--accent-cyan);width:16px;height:16px}
 .dk-sz{margin-left:auto;color:var(--text-tertiary,#6b7280);font-size:12px}
+/* blocked category (autoremove would touch a protected package): not selectable */
+.dk-safe.blocked{color:#fca5a5;background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.25)}
+.dk-cat.blocked .dk-chk{cursor:not-allowed;opacity:.35}
+.dk-cat.blocked .dk-v{color:var(--text-muted)}
+.dk-blockmsg{margin-top:8px;font-size:12px;line-height:1.5;color:#fca5a5;max-width:62ch;word-break:break-word}
+/* purge confirmation: the exact list that will run */
+.dk-plist{border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden;margin-bottom:12px}
+.dk-prow{display:flex;justify-content:space-between;gap:12px;padding:9px 13px;font-size:12.8px;border-bottom:1px solid rgba(255,255,255,.07)}
+.dk-prow:last-child{border-bottom:0}
+.dk-prow span:last-child{color:var(--text-secondary,#9aa0ac);white-space:nowrap}
+.dk-pskip{font-size:12px;color:var(--text-secondary,#9aa0ac);line-height:1.55;margin-bottom:14px}
+.dk-pskip b{color:var(--text-primary);font-weight:600}
+/* clean result with failures */
+.dk-warnpill{display:inline-flex;align-items:center;gap:6px;color:#fbbf24;font-size:13px;font-weight:600;margin-right:auto}
+.dk-warnpill svg{width:15px;height:15px}
+.dk-log .dk-lfail{color:#fca5a5}
+.dk-log .dk-lok{color:#34d399}
+body.compact .dk-blockmsg{font-size:11.5px;margin-top:6px}
+body.compact .dk-prow{padding:7px 11px;font-size:12px}
+body.compact .dk-pskip{font-size:11.5px;margin-bottom:11px}
+body.compact .dk-warnpill{font-size:12px}
+body.ultra .dk-blockmsg{font-size:11px;margin-top:4px;line-height:1.4}
+body.ultra .dk-prow{padding:5px 9px;font-size:11.5px}
+body.ultra .dk-plist{margin-bottom:9px}
+body.ultra .dk-pskip{font-size:11px;margin-bottom:9px;line-height:1.45}
+body.ultra .dk-warnpill{font-size:11.5px}
+body.ultra .dk-warnpill svg{width:13px;height:13px}
 
 .dk-page{max-width:1120px}
 

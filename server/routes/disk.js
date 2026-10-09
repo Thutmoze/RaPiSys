@@ -63,8 +63,9 @@ export function diskRouter({ disk, requireControl, loadSettings, saveSettings, w
     send('start', { categories, mode: purgeAll ? 'purge' : 'clean' });
     try {
       const out = await disk.clean({ categories, journalTargetMB, purgeAll, confirm }, (line) => send('progress', { line }));
-      events.add('disk.clean', 'info', { categories: out.cleaned || categories, reclaimedBytes: out.reclaimedBytes || 0, purgeAll });
-      send('done', { cleaned: out.cleaned || [], reclaimedBytes: out.reclaimedBytes || 0 });
+      const failed = out.failed || [];
+      events.add('disk.clean', failed.length ? 'warning' : 'info', { categories: out.cleaned || categories, failed, reclaimedBytes: out.reclaimedBytes || 0, purgeAll });
+      send('done', { cleaned: out.cleaned || [], failed, reclaimedBytes: out.reclaimedBytes || 0 });
     } catch (err) {
       events.add('disk.clean.failed', 'warning', { error: err.message });
       send('error', { message: err.message });

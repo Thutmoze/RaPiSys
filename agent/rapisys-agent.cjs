@@ -1177,8 +1177,10 @@ const OPS = {
   // The dashboard NEVER sends paths: it sends category IDs from the fixed set
   // below and the agent maps each ID to a hardcoded operation. `disk.scan` is
   // strictly read-only; `disk.clean` deletes via execFile only (no shell),
-  // runs autoremove behind a simulate + protected-package guard, excludes
-  // Docker volumes, and refuses a full purge without a typed confirmation.
+  // re-simulates autoremove against a protected-package guard, excludes
+  // Docker volumes, never crosses into other filesystems (-xdev), and refuses
+  // a full purge without a typed confirmation. A command that exits non-zero
+  // fails its category; it is never reported as done.
   // =========================================================================
 
   async 'disk.usage'() {
@@ -1216,7 +1218,7 @@ const OPS = {
     // 1) APT package cache
     {
       const f = await sampleFind(['/var/cache/apt/archives', '-maxdepth', '1', '-type', 'f',
-        '-name', '*.deb', '-printf', '%s\t%p\n'], 'Cached installer package — its software is already installed');
+        '-name', '*.deb', '-printf', '%s\t%p\n'], 'Cached installer package, its software is already installed');
       cats.push({ id: 'apt-cache', name: 'APT package cache', path: '/var/cache/apt/archives',
         bytes: f.bytes, count: f.count, sample: f.sample, default: true, caution: false,
         cmd: 'apt-get clean', safe: 'Safe · apt-get clean',
@@ -1239,41 +1241,56 @@ const OPS = {
 
     // 3) rotated & compressed logs
     {
-      const gz = await sampleFind(['/var/log', '-type', 'f', '-name', '*.gz', '-printf', '%s\t%p\n'], 'Rotated log archive (gzip) — superseded by the current log');
-      const rot = await sampleFind(['/var/log', '-type', 'f', '-regextype', 'posix-extended',
-        '-regex', '.*\\.[0-9]+', '-printf', '%s\t%p\n'], 'Rotated log file — superseded by the current log');
+      const gz = await sampleFind(['/var/log', '-xdev', '-type', 'f', '-name', '*.gz', '-printf', '%s\t%p\n'], 'Rotated log archive (gzip), superseded by the current log');
+      const rot = await sampleFind(['/var/log', '-xdev', '-type', 'f', '-regextype', 'posix-extended',
+        '-regex', '.*\\.[0-9]+', '-printf', '%s\t%p\n'], 'Rotated log file, superseded by the current log');
       const sample = [...gz.sample, ...rot.sample].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
       cats.push({ id: 'logs-rotated', name: 'Rotated & compressed logs', path: '/var/log/*.gz, *.N',
         bytes: gz.bytes + rot.bytes, count: gz.count + rot.count, sample, default: true, caution: false,
-        cmd: "find /var/log -type f ( -name '*.gz' -o -regex '.*\\.[0-9]+' ) -delete", safe: 'Safe',
+        cmd: "find /var/log -xdev -type f ( -name '*.gz' -o -regex '.*\\.[0-9]+' ) -delete", safe: 'Safe',
         why: 'Old logs already rotated out by logrotate. Active log files are never touched.' });
     }
 
-    // 4) stale temp files (not accessed in > 7 days)
+    // 4) stale temp files: neither read nor modified in > 7 days, not held open
     {
-      const f = await sampleFind(['/tmp', '/var/tmp', '-type', 'f', '-atime', '+7', '-printf', '%s\t%p\n'], 'Temp file no process has opened in over 7 days');
+      const open = openFileInodes();
+      let bytes = 0, count = 0, sample = [];
+      for (const dir of ['/tmp', '/var/tmp']) {
+        const args = staleTmpArgs(dir, open);
+        if (!args) continue;
+        const f = await sampleFind([...args, '-printf', '%s\t%p\n'], 'Temp file not read or changed in over 7 days');
+        bytes += f.bytes; count += f.count; sample = sample.concat(f.sample);
+      }
+      sample.sort((a, b) => b.bytes - a.bytes);
       cats.push({ id: 'tmp-stale', name: 'Stale temp files', path: '/tmp, /var/tmp (>7 days)',
-        bytes: f.bytes, count: f.count, sample: f.sample, default: true, caution: false,
-        cmd: 'find /tmp /var/tmp -type f -atime +7 -delete', safe: 'Safe',
-        why: 'Temporary files no running process has opened in over a week. Files currently in use are skipped.' });
+        bytes, count, sample: sample.slice(0, 60), default: true, caution: false,
+        cmd: 'find /tmp /var/tmp -xdev -type f -atime +7 -mtime +7 -delete   # open files excluded', safe: 'Safe',
+        why: 'Temporary files nobody has read or changed in over a week. Files a running process holds open are skipped.' });
     }
 
-    // 5) orphaned packages (autoremove) — caution, shown behind a dry-run
+    // 5) orphaned packages (autoremove). Caution: every package is listed in
+    //    More details, and the clean re-simulates before removing anything.
     {
       const r = await run('apt-get', ['-s', '-o', 'DPkg::Lock::Timeout=5', 'autoremove'], 18000).catch(() => ({ stdout: '' }));
       const names = [];
       for (const line of (r.stdout || '').split('\n')) { const m = line.match(/^Remv\s+(\S+)/); if (m) names.push(m[1]); }
+      const rel = await run('uname', ['-r'], 3000).catch(() => ({ stdout: '' }));
+      const prot = new Set(autoremoveProtected(names, rel.stdout));
       let kb = 0; const sample = [];
       for (const n of names) {
         const meta = await run('dpkg-query', ['-W', '-f=${Installed-Size}', n], 3000).catch(() => ({ stdout: '0' }));
         const s = Number(meta.stdout) || 0; kb += s;
-        sample.push({ path: n, bytes: s * 1024, desc: 'Orphaned dependency — nothing installed requires it' });
+        sample.push({ path: n, bytes: s * 1024, desc: prot.has(n)
+          ? 'Protected (running kernel, firmware or boot), blocks the removal'
+          : 'Orphaned dependency, nothing installed requires it' });
       }
       sample.sort((a, b) => b.bytes - a.bytes);
+      const blocked = prot.size ? `apt would also remove protected package(s): ${[...prot].join(', ')}` : '';
       cats.push({ id: 'apt-autoremove', name: 'Orphaned packages', path: 'apt-get autoremove',
-        bytes: kb * 1024, count: names.length, sample: sample.slice(0, 5), default: true, caution: true,
-        cmd: 'apt-get -s autoremove   # simulated first, then confirmed', safe: 'Caution · dry-run first',
-        why: 'Dependencies no installed package needs anymore (e.g. old kernel headers). A dry-run is shown before removal.' });
+        bytes: kb * 1024, count: names.length, sample, default: !blocked, caution: true, blocked,
+        cmd: 'apt-get autoremove   # re-simulated and checked before removal',
+        safe: blocked ? 'Blocked · protected package' : 'Caution · review list',
+        why: 'Dependencies no installed package needs anymore, such as libraries replaced by newer versions and old kernels. The running kernel, firmware and bootloader are never removed. More details lists every package.' });
     }
 
     // 6) Docker dangling images + build cache (named volumes excluded)
@@ -1281,56 +1298,64 @@ const OPS = {
       const present = await run('sh', ['-c', 'command -v docker >/dev/null 2>&1 && echo yes || echo no'], 4000)
         .catch(() => ({ stdout: 'no' }));
       if (/yes/.test(present.stdout)) {
+        // Only what the prune actually removes: dangling images no container
+        // uses (their unique layers), plus the build cache.
+        const imgs = await run('docker', ['system', 'df', '-v', '--format', '{{json .Images}}'], 20000)
+          .catch(() => ({ stdout: '' }));
+        const dangling = dockerDangling(imgs.stdout);
         const df = await run('docker', ['system', 'df', '--format', '{{.Type}}\t{{.Reclaimable}}'], 8000)
           .catch(() => ({ stdout: '' }));
-        const parseSz = (s) => {
-          const m = (s || '').match(/([\d.]+)\s*([KMGT]?)B/i); if (!m) return 0;
-          const mult = { '': 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 };
-          return Math.round(parseFloat(m[1]) * (mult[(m[2] || '').toUpperCase()] || 1));
-        };
-        let bytes = 0;
+        let cache = 0;
         for (const line of (df.stdout || '').split('\n')) {
           const [type, recl] = line.split('\t');
-          if (/Images|Build Cache/i.test(type || '')) bytes += parseSz(recl);
+          if (/Build Cache/i.test(type || '')) cache += parseDockerSize(recl);
         }
         cats.push({ id: 'docker-prune', name: 'Docker dangling & build cache', path: 'docker image/builder prune',
-          bytes, count: 0, sample: [{ path: 'untagged image layers + build cache', bytes, desc: 'Untagged image layers and stale build cache (volumes excluded)' }],
+          bytes: dangling.bytes + cache, count: dangling.count,
+          sample: [
+            { path: `${dangling.count} untagged image${dangling.count === 1 ? '' : 's'} (unused)`, bytes: dangling.bytes, desc: 'Old image layers no container uses and no tag points to' },
+            { path: 'build cache', bytes: cache, desc: 'Stale build cache. The next --build starts from scratch and takes longer' },
+          ],
           default: true, caution: false, cmd: 'docker image prune -f && docker builder prune -f',
           safe: 'Safe · volumes excluded',
-          why: 'Untagged image layers and stale build cache. Running containers and named volumes are explicitly excluded.' });
+          why: 'Untagged image layers and stale build cache. Images used by any container, tagged images and named volumes are kept.' });
       }
     }
 
     // 7) crash & core dumps (off by default)
     {
-      const f = await sampleFind(['/var/crash', '-type', 'f', '-printf', '%s\t%p\n'], 'Saved crash / core dump report');
+      const f = await sampleFind(['/var/crash', '-xdev', '-type', 'f', '-printf', '%s\t%p\n'], 'Saved crash / core dump report');
       cats.push({ id: 'crash-dumps', name: 'Crash & core dumps', path: '/var/crash',
         bytes: f.bytes, count: f.count, sample: f.sample, default: false, caution: false,
-        cmd: 'rm -f /var/crash/*', safe: 'Optional',
+        cmd: 'find /var/crash -xdev -type f -delete', safe: 'Optional',
         why: 'Saved crash reports. Off by default in case you still want to inspect a recent one.' });
     }
 
     // 8) user trash & thumbnail cache (off by default)
     {
-      const trash = await sampleFind(['/home', '-maxdepth', '4', '-type', 'f', '-path', '*/.local/share/Trash/*', '-printf', '%s\t%p\n'], 'File sitting in the desktop trash');
-      const thumbs = await sampleFind(['/home', '-maxdepth', '5', '-type', 'f', '-path', '*/.cache/thumbnails/*', '-printf', '%s\t%p\n'], 'Regenerable thumbnail cache');
-      const sample = [...trash.sample, ...thumbs.sample].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
+      let bytes = 0, count = 0, sample = [];
+      for (const { dir, kind } of userCacheDirs()) {
+        const f = await sampleFind([dir, '-xdev', '-mindepth', '1', '-type', 'f', '-printf', '%s\t%p\n'],
+          kind === 'thumbs' ? 'Regenerable thumbnail cache' : 'File sitting in the desktop trash');
+        bytes += f.bytes; count += f.count; sample = sample.concat(f.sample);
+      }
+      sample.sort((a, b) => b.bytes - a.bytes);
       cats.push({ id: 'user-cache', name: 'Trash & thumbnail cache', path: '~/.local/share/Trash, ~/.cache/thumbnails',
-        bytes: trash.bytes + thumbs.bytes, count: trash.count + thumbs.count, sample, default: false, caution: false,
-        cmd: 'rm -rf ~/.local/share/Trash/* ~/.cache/thumbnails/*', safe: 'Optional',
+        bytes, count, sample: sample.slice(0, 5), default: false, caution: false,
+        cmd: 'find ~/.local/share/Trash/{files,info} ~/.cache/thumbnails -xdev -mindepth 1 -delete', safe: 'Optional',
         why: 'User trash and regenerable thumbnail caches for each login.' });
     }
 
-    // 9) old user files in Downloads / Desktop (off by default; user data — caution)
+    // 9) old user files in Downloads / Desktop (off by default; user data, caution)
     {
-      const f = await sampleFind(['/home', '-maxdepth', '4', '-type', 'f',
+      const f = await sampleFind(['/home', '-xdev', '-maxdepth', '4', '-type', 'f',
         '(', '-path', '*/Downloads/*', '-o', '-path', '*/Desktop/*', ')',
-        '-mtime', '+90', '-printf', '%s\t%p\n'], 'Old file in Downloads/Desktop — not modified in 90+ days');
+        '-mtime', '+90', '-printf', '%s\t%p\n'], 'Old file in Downloads/Desktop, not modified in 90+ days');
       cats.push({ id: 'user-old-files', name: 'Old user files', path: '~/Downloads, ~/Desktop (>90 days)',
         bytes: f.bytes, count: f.count, sample: f.sample, default: false, caution: true,
-        cmd: "find /home -maxdepth 4 -type f ( -path '*/Downloads/*' -o -path '*/Desktop/*' ) -mtime +90 -delete",
+        cmd: "find /home -xdev -maxdepth 4 -type f ( -path '*/Downloads/*' -o -path '*/Desktop/*' ) -mtime +90 -delete",
         safe: 'Caution · review first',
-        why: 'Files in your Downloads and Desktop not modified in over 90 days. Off by default — review the full list in “More details” before removing, since these are your own files.' });
+        why: 'Files in your Downloads and Desktop not modified in over 90 days. Off by default and never part of Purge all. Review the full list in More details before removing, since these are your own files.' });
     }
 
     const totalDefaultBytes = cats.reduce((a, c) => a + (c.default ? c.bytes : 0), 0);
@@ -1339,15 +1364,29 @@ const OPS = {
 
   // Destructive. `categories` is an array of IDs from the fixed allowlist; the
   // agent maps each to a hardcoded cleaner. Streams progress when a sink is
-  // given. A full purge (purgeAll) demands an explicit typed confirmation.
+  // given. A full purge (purgeAll) demands an explicit typed confirmation and
+  // never includes the user's own files.
   async 'disk.clean'({ categories = [], journalTargetMB = 200, purgeAll = false, confirm = '' } = {}, send) {
     assert(Array.isArray(categories) && categories.length, 'no categories selected');
     const target = Math.min(2000, Math.max(50, Number(journalTargetMB) || 200));
-    if (purgeAll) assert(confirm === 'PURGE', 'purge-all requires typing PURGE to confirm');
+    if (purgeAll) {
+      assert(confirm === 'PURGE', 'purge-all requires typing PURGE to confirm');
+      assert(!categories.includes('user-old-files'), 'purge-all never removes old user files; clean that category on its own');
+    }
     const ALLOWED = new Set(['apt-cache', 'journal', 'logs-rotated', 'tmp-stale',
       'apt-autoremove', 'docker-prune', 'crash-dumps', 'user-cache', 'user-old-files']);
     for (const id of categories) assert(ALLOWED.has(id), `unknown category: ${id}`);
     const log = (l) => { if (typeof send === 'function') send(l); };
+
+    // run() resolves on any exit code; a cleaner must fail when its command does.
+    const must = async (cmd, args, ms) => {
+      const r = await run(cmd, args, ms);
+      if (r.code !== 0) {
+        const last = (r.stderr || r.stdout || '').trim().split('\n').pop();
+        throw new Error(`${cmd} exited ${r.code}${last ? `: ${last.slice(0, 200)}` : ''}`);
+      }
+      return r;
+    };
 
     const avail = async () => {
       const r = await run('df', ['-B1', '--output=avail', '/'], 5000).catch(() => ({ stdout: '' }));
@@ -1355,56 +1394,65 @@ const OPS = {
     };
     const before = await avail();
     const done = [];
+    const failed = [];
 
     const CLEANERS = {
-      'apt-cache': async () => { log('› Cleaning APT package cache…'); await run('apt-get', ['clean'], 30000); },
-      'journal': async () => { log(`› Vacuuming journal to ${target} MB…`); await run('journalctl', ['--vacuum-size=' + target + 'M'], 30000); },
+      'apt-cache': async () => { log('› Cleaning APT package cache…'); await must('apt-get', ['clean'], 30000); },
+      'journal': async () => { log(`› Vacuuming journal to ${target} MB…`); await must('journalctl', ['--vacuum-size=' + target + 'M'], 30000); },
       'logs-rotated': async () => {
         log('› Removing rotated / compressed logs…');
-        await run('find', ['/var/log', '-type', 'f', '-name', '*.gz', '-delete'], 20000);
-        await run('find', ['/var/log', '-type', 'f', '-regextype', 'posix-extended', '-regex', '.*\\.[0-9]+', '-delete'], 20000);
+        await must('find', ['/var/log', '-xdev', '-type', 'f', '-name', '*.gz', '-delete'], 20000);
+        await must('find', ['/var/log', '-xdev', '-type', 'f', '-regextype', 'posix-extended', '-regex', '.*\\.[0-9]+', '-delete'], 20000);
       },
       'tmp-stale': async () => {
-        log('› Removing stale temp files (>7d)…');
-        await run('find', ['/tmp', '/var/tmp', '-type', 'f', '-atime', '+7', '-delete'], 30000);
+        log('› Removing stale temp files (>7d, not open)…');
+        const open = openFileInodes();
+        for (const dir of ['/tmp', '/var/tmp']) {
+          const args = staleTmpArgs(dir, open);
+          if (args) await must('find', [...args, '-delete'], 30000);
+        }
       },
       'apt-autoremove': async () => {
-        log('› Orphaned packages — simulating first…');
-        const sim = await run('apt-get', ['-s', 'autoremove'], 20000).catch(() => ({ stdout: '' }));
-        const PROT = /^(linux-image|linux-headers|linux-kbuild|raspberrypi-kernel|raspberrypi-bootloader|rpi-eeprom|raspi-firmware|firmware-|systemd$|udev$|grub|initramfs-tools|raspberrypi-sys-mods)/;
+        log('› Orphaned packages: simulating first…');
+        const sim = await must('apt-get', ['-s', 'autoremove'], 20000);
         const remv = []; for (const l of (sim.stdout || '').split('\n')) { const m = l.match(/^Remv\s+(\S+)/); if (m) remv.push(m[1]); }
-        const bad = remv.filter((p) => PROT.test(p));
+        if (!remv.length) { log('  nothing to remove'); return; }
+        const rel = await run('uname', ['-r'], 3000).catch(() => ({ stdout: '' }));
+        const bad = autoremoveProtected(remv, rel.stdout);
         assert(bad.length === 0, `autoremove would touch protected package(s): ${bad.join(', ')}`);
-        if (typeof send === 'function') await runStreaming('apt-get', ['-y', 'autoremove'], { DEBIAN_FRONTEND: 'noninteractive' }, send);
-        else await run('apt-get', ['-y', 'autoremove'], 120000);
+        log(`  removing: ${remv.join(', ')}`);
+        const r = typeof send === 'function'
+          ? await runStreaming('apt-get', ['-y', 'autoremove'], { DEBIAN_FRONTEND: 'noninteractive' }, send)
+          : await run('apt-get', ['-y', 'autoremove'], 120000);
+        if (r.code !== 0) throw new Error(`apt-get autoremove exited ${r.code}`);
       },
       'docker-prune': async () => {
         log('› Pruning Docker dangling images & build cache (volumes kept)…');
-        await run('docker', ['image', 'prune', '-f'], 60000);
-        await run('docker', ['builder', 'prune', '-f'], 60000);
+        await must('docker', ['image', 'prune', '-f'], 60000);
+        await must('docker', ['builder', 'prune', '-f'], 60000);
       },
       'crash-dumps': async () => {
         log('› Removing crash & core dumps…');
-        await run('find', ['/var/crash', '-type', 'f', '-delete'], 15000).catch(() => {});
+        if (!fs.existsSync('/var/crash')) { log('  /var/crash does not exist, nothing to do'); return; }
+        await must('find', ['/var/crash', '-xdev', '-type', 'f', '-delete'], 15000);
       },
       'user-cache': async () => {
         log('› Clearing user trash & thumbnail caches…');
-        await run('find', ['/home', '-maxdepth', '4', '-type', 'f', '-path', '*/.local/share/Trash/*', '-delete'], 20000).catch(() => {});
-        await run('find', ['/home', '-maxdepth', '5', '-type', 'f', '-path', '*/.cache/thumbnails/*', '-delete'], 20000).catch(() => {});
+        for (const { dir } of userCacheDirs()) await must('find', [dir, '-xdev', '-mindepth', '1', '-delete'], 20000);
       },
       'user-old-files': async () => {
         log('› Removing old files in Downloads/Desktop (>90d)…');
-        await run('find', ['/home', '-maxdepth', '4', '-type', 'f', '(', '-path', '*/Downloads/*', '-o', '-path', '*/Desktop/*', ')', '-mtime', '+90', '-delete'], 30000).catch(() => {});
+        await must('find', ['/home', '-xdev', '-maxdepth', '4', '-type', 'f', '(', '-path', '*/Downloads/*', '-o', '-path', '*/Desktop/*', ')', '-mtime', '+90', '-delete'], 30000);
       },
     };
 
     for (const id of categories) {
       try { await CLEANERS[id](); done.push(id); log(`✓ ${id} done`); }
-      catch (e) { log(`✗ ${id}: ${e.message}`); }
+      catch (e) { failed.push({ id, error: e.message }); log(`✗ ${id}: ${e.message}`); }
     }
     const reclaimed = Math.max(0, (await avail()) - before);
     log(`Reclaimed ~${(reclaimed / 1048576).toFixed(0)} MB.`);
-    return { ok: true, cleaned: done, reclaimedBytes: reclaimed };
+    return { ok: failed.length === 0, cleaned: done, failed, reclaimedBytes: reclaimed };
   },
 
     async 'sessions.list'() {
@@ -3175,6 +3223,107 @@ const server = net.createServer((sock) => {
   sock.on('error', () => {});
 });
 
+// ---- Disk cleanup helpers ---------------------------------------------------
+
+// Packages autoremove must never take, whatever apt decides. Old versioned
+// kernels may go (apt itself keeps the running and the newest one); the kernel
+// the Pi is running now, the kernel meta packages, firmware and boot may not.
+const DISK_PROTECTED_RE = /^(linux-image-rpi-|linux-headers-rpi-|raspberrypi-kernel|raspberrypi-bootloader|rpi-eeprom|raspi-firmware|firmware-|systemd$|udev$|grub|initramfs-tools|raspberrypi-sys-mods)/;
+
+/**
+ * The subset of `names` (apt `Remv` package names) autoremove must not touch.
+ * `release` is `uname -r` (6.18.50+rpt-rpi-2712); every linux-* package of that
+ * version is protected, in all flavours (rpi-v8, common-rpi, kbuild). Without
+ * a release, all kernel packages are protected (fail closed).
+ */
+function autoremoveProtected(names, release = '') {
+  const base = String(release || '').trim().replace(/-rpi-[^-]+$/, '');
+  return names.filter((n) => DISK_PROTECTED_RE.test(n)
+    || (base ? (/^linux-/.test(n) && n.includes(base)) : /^linux-(image|headers|kbuild)/.test(n)));
+}
+
+/** Docker's human sizes ("632.6MB", "399.7kB", "0B") to bytes. Decimal units, as docker prints them. */
+function parseDockerSize(s) {
+  const m = String(s || '').match(/([\d.]+)\s*([kKMGT]?)B/);
+  if (!m) return 0;
+  const mult = { '': 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 };
+  return Math.round(parseFloat(m[1]) * (mult[m[2].toUpperCase()] || 1));
+}
+
+/**
+ * What `docker image prune -f` frees, from `docker system df -v --format
+ * '{{json .Images}}'`: untagged images no container uses, counting only their
+ * unique layers (shared base layers stay for the images still using them).
+ */
+function dockerDangling(imagesJson) {
+  let list = [];
+  try { list = JSON.parse(String(imagesJson || '').trim() || '[]') || []; } catch { return { bytes: 0, count: 0 }; }
+  const d = list.filter((i) => i.Repository === '<none>' && i.Tag === '<none>' && !(Number(i.Containers) > 0));
+  return { bytes: d.reduce((a, i) => a + parseDockerSize(i.UniqueSize), 0), count: d.length };
+}
+
+/** Map of device -> Set of inode numbers for regular files any process holds open. */
+function openFileInodes() {
+  const byDev = new Map();
+  let pids = [];
+  try { pids = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p)); } catch { return byDev; }
+  for (const pid of pids) {
+    let fds = [];
+    try { fds = fs.readdirSync(`/proc/${pid}/fd`); } catch { continue; }
+    for (const fd of fds) {
+      try {
+        const st = fs.statSync(`/proc/${pid}/fd/${fd}`);
+        if (!st.isFile()) continue;
+        const k = String(st.dev);
+        if (!byDev.has(k)) byDev.set(k, new Set());
+        byDev.get(k).add(String(st.ino));
+      } catch { /* fd closed meanwhile */ }
+    }
+  }
+  return byDev;
+}
+
+/**
+ * `find` arguments for stale files under `dir`: not read AND not modified in
+ * over 7 days (the root fs is mounted noatime, so atime alone says little),
+ * minus every inode a process holds open on that filesystem. null when `dir`
+ * is missing.
+ */
+function staleTmpArgs(dir, openByDev) {
+  let st;
+  try { st = fs.lstatSync(dir); } catch { return null; }
+  if (!st.isDirectory()) return null;
+  const skip = [...(openByDev.get(String(st.dev)) || [])].flatMap((ino) => ['!', '-inum', ino]);
+  return [dir, '-xdev', '-type', 'f', '-atime', '+7', '-mtime', '+7', ...skip];
+}
+
+/**
+ * Each login's Trash (files + info) and thumbnail cache directories. Every
+ * path component below /home must be a real directory, not a symlink, so a
+ * link planted in a home directory can never point the root-run delete at
+ * another part of the system.
+ */
+function userCacheDirs() {
+  const out = [];
+  let homes = [];
+  try { homes = fs.readdirSync('/home'); } catch { return out; }
+  const realDir = (p) => { try { const s = fs.lstatSync(p); return s.isDirectory() && !s.isSymbolicLink(); } catch { return false; } };
+  const chain = (home, parts) => {
+    let cur = home;
+    for (const part of parts) { cur += '/' + part; if (!realDir(cur)) return null; }
+    return cur;
+  };
+  for (const h of homes) {
+    const home = `/home/${h}`;
+    if (!realDir(home)) continue;
+    for (const [parts, kind] of [[['.local', 'share', 'Trash', 'files'], 'trash'], [['.local', 'share', 'Trash', 'info'], 'trash'], [['.cache', 'thumbnails'], 'thumbs']]) {
+      const dir = chain(home, parts);
+      if (dir) out.push({ dir, kind });
+    }
+  }
+  return out;
+}
+
 // Only bind the socket when run as the service (systemd ExecStart). Requiring
 // this file as a module — which the test suite does to exercise the pure
 // classification helpers — must not try to listen on /run/rapisys.
@@ -3189,4 +3338,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); process.exit(0); });
 }
 
-module.exports = { createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };

@@ -405,7 +405,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       const cats = (cfg.categories || []).filter(Boolean);
       if (cfg.mode === 'clean' && cats.length) {
         const out = await disk.clean({ categories: cats, journalTargetMB: cfg.journalTargetMB || 200 });
-        eventsFacade.add('disk.autoclean', 'info', { mode: 'clean', categories: out.cleaned || cats, reclaimedBytes: out.reclaimedBytes || 0 });
+        const failed = out.failed || [];
+        eventsFacade.add('disk.autoclean', failed.length ? 'warning' : 'info', { mode: 'clean', categories: out.cleaned || cats, failed, reclaimedBytes: out.reclaimedBytes || 0 });
       } else {
         const scan = await disk.scan(cfg.journalTargetMB || 200);
         eventsFacade.add('disk.autoclean', 'info', { mode: 'scan', reclaimableBytes: scan.totalDefaultBytes || 0 });
