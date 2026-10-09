@@ -233,7 +233,7 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
         entries = list.map((b) => ({
           ts: Date.now(), packageName: b.package,
           fromV: b.installed || null, toV: b.candidate || null,
-          description: b.description || null,
+          description: b.description || null, origin: b.origin || null,
           result: 'success', log: logBuf.slice(0, 4000),
         }));
         if (!entries.length) {
@@ -247,7 +247,8 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
           : (packages || []).map((p) => {
               const b = beforeMap[p];
               return { ts: Date.now(), packageName: p, fromV: b?.installed || null, toV: b?.candidate || null,
-                       description: b?.description || null, result: ok ? 'success' : 'failed', log: logBuf.slice(0, 4000) };
+                       description: b?.description || null, origin: b?.origin || null,
+                       result: ok ? 'success' : 'failed', log: logBuf.slice(0, 4000) };
             });
       }
       updatesRepo.recordBatch(entries);

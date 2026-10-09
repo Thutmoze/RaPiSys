@@ -2837,6 +2837,8 @@ WantedBy=multi-user.target
       // fallback so nothing that was tagged before can regress — and so the
       // tag still works if `apt-cache policy` was unavailable this pass.
       const host = originMap[u.package];
+      // Kept on the entry so Update History can tag by origin too.
+      u.origin = host || null;
       const fromRpiArchive = isRpiArchiveHost(host) && !isRptRebuild(u.candidate);
       u.rpi = rpiTag({ name: u.package, description: u.description, kernel: u.kernel, firmware: u.firmware,
         fromRpiArchive, rpiArchive: host ? isRpiArchiveHost(host) : null });

@@ -74,6 +74,32 @@ describe('update history security tags', () => {
     expect(rows.kernelshark).toMatchObject({ kernel: 0, rpi: 0 });
   });
 
+  it('tags by the recorded origin, like Available Updates', () => {
+    const r = repo();
+    const pi = 'archive.raspberrypi.com';
+    r.record({ ts: 1, packageName: 'linux-libc-dev', fromV: '1:6.18.39-1+rpt1', toV: '1:6.18.50-1+rpt1', result: 'success', log: '', origin: pi });
+    r.record({ ts: 2, packageName: 'libpisp1', fromV: '1.6.0-1', toV: '1.7.0-1', result: 'success', log: '', origin: pi });
+    r.record({ ts: 3, packageName: 'firefox', fromV: '152.0-1+rpt1', toV: '153.0.4-1+rpt1', result: 'success', log: '', origin: pi });
+    r.record({ ts: 4, packageName: 'poppler-utils', fromV: '25.03.0-5', toV: '25.03.0-5+deb13u4', result: 'success', log: '', origin: 'deb.debian.org' });
+    const rows = Object.fromEntries(r.recent(10).rows.map((x) => [x.package, x]));
+    expect(rows['linux-libc-dev']).toMatchObject({ kernel: 1, rpi: 1, origin: pi });   // kernel from the Pi archive
+    expect(rows.libpisp1).toMatchObject({ rpi: 1 });                                     // Pi's own, no name hint
+    expect(rows.firefox).toMatchObject({ rpi: 0 });                                      // +rpt1 rebuild of Debian's
+    expect(rows['poppler-utils']).toMatchObject({ rpi: 0, origin: 'deb.debian.org' });
+  });
+
+  it('keeps origin-based tags when a later start re-derives the flags', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-up-'));
+    const { db } = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });
+    const r = createUpdatesRepo(db);
+    r.record({ ts: 1, packageName: 'linux-libc-dev', fromV: '1', toV: '1:6.18.50-1+rpt1', result: 'success', log: '', origin: 'archive.raspberrypi.com' });
+    r.record({ ts: 2, packageName: 'linux-libc-dev', fromV: '1', toV: '2', result: 'success', log: '' });   // older row, no origin
+    createUpdatesRepo(db);
+    const rows = r.recent(10).rows;
+    expect(rows.find((x) => x.origin)).toMatchObject({ kernel: 1, rpi: 1 });
+    expect(rows.find((x) => !x.origin)).toMatchObject({ kernel: 1, rpi: 0 });   // unknown origin: name only
+  });
+
   it('fixes rpi-eeprom history rows recorded under the old rule', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-up-'));
     const { db } = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });

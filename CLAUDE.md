@@ -108,6 +108,8 @@ allowed".
   never gets the Pi tag from its summary, only from origin. Kernels are decided by
   origin alone: their `+rpt1` suffix looks like a rebuild but isn't. One kernel rule
   (`linux-image|headers|kbuild|base|libc-dev`, `raspberrypi-kernel`) in agent and History.
+  History stores each upgrade's archive `origin` and tags by it; rows from before that
+  column fall back to the name rules.
 - binNMU (`+bN`): the newest changelog entry predates the installed version, so the
   highlighted entry must come from version comparison, not array index.
 - Peer health is sampled as an ordinary metric (`peer.<n>.up`, 60 s); peer-down alerts

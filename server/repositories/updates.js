@@ -102,6 +102,9 @@ export function createUpdatesRepo(db) {
   try { db.exec(`ALTER TABLE update_history ADD COLUMN firmware INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN rpi INTEGER`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE update_history ADD COLUMN description TEXT`); } catch { /* exists */ }
+  // Archive host the upgrade came from (archive.raspberrypi.com, deb.debian.org),
+  // captured from the Available Updates entry; null for rows from before.
+  try { db.exec(`ALTER TABLE update_history ADD COLUMN origin TEXT`); } catch { /* exists */ }
 
   // Firmware classification — mirrors the agent's rule (name prefix or a dpkg
   // summary that mentions "firmware") so the History tag matches the Available
@@ -123,27 +126,34 @@ export function createUpdatesRepo(db) {
   const KERNEL_RE = /^linux-(image|headers|kbuild|base|libc-dev)|^raspberrypi-kernel/;
   const RPI_KERNEL_NAME_RE = /-rpi|\+rpt|^raspberrypi-kernel/;
   const isKernelPkg = (name) => KERNEL_RE.test(String(name || ''));
-  const isRpiPkg = (name, kernel, fw, desc) => (kernel
-    ? RPI_KERNEL_NAME_RE.test(String(name || ''))
-    : (RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || '')))));
+  // Same as the agent's isRpiArchiveHost() / isRptRebuild().
+  const isRpiArchiveHost = (host) => /(^|\.)raspberrypi\.(com|org)$/i.test(String(host || ''));
+  const isRptRebuild = (version) => /[+~]rpt(\d{1,5})(?!\d)/.test(String(version || ''));
+  // With the origin recorded, History tags exactly like the agent's rpiTag();
+  // without it (older rows), by name only.
+  const isRpiPkg = (name, kernel, fw, desc, origin = null, toV = null) => {
+    if (kernel) return origin ? isRpiArchiveHost(origin) : RPI_KERNEL_NAME_RE.test(String(name || ''));
+    return (!!origin && isRpiArchiveHost(origin) && !isRptRebuild(toV))
+      || RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || '')));
+  };
   // Rows recorded under older rules (firmware and kernels never got the Pi
   // tag; the kernel rule differed from the agent's): re-derive the kernel and
   // raspberry pi flags from the current rules. Idempotent; only touches rows
   // whose flags differ, and leaves null flags to the read-time backfill.
   try {
     const fix = db.prepare('UPDATE update_history SET kernel = ?, rpi = ? WHERE id = ?');
-    const rows = db.prepare(`SELECT id, package, kernel, firmware, rpi, description FROM update_history
+    const rows = db.prepare(`SELECT id, package, kernel, firmware, rpi, description, origin, to_v FROM update_history
       WHERE kernel IS NOT NULL AND rpi IS NOT NULL`).all();
     db.transaction(() => {
       for (const r of rows) {
         const kernel = isKernelPkg(r.package) ? 1 : 0;
-        const rpi = isRpiPkg(r.package, kernel, r.firmware, r.description) ? 1 : 0;
+        const rpi = isRpiPkg(r.package, kernel, r.firmware, r.description, r.origin, r.to_v) ? 1 : 0;
         if (kernel !== r.kernel || rpi !== r.rpi) fix.run(kernel, rpi, r.id);
       }
     })();
   } catch { /* table not created yet */ }
 
-  function record({ ts, packageName, fromV, toV, result, log, description }) {
+  function record({ ts, packageName, fromV, toV, result, log, description, origin = null }) {
     // capture the package's known security tags at the moment of the upgrade
     let sec = null, cves = null, kern = null, fw = null, rpi = null;
     try {
@@ -151,11 +161,11 @@ export function createUpdatesRepo(db) {
       if (t) { sec = t.security ? 1 : 0; cves = t.cves || 0; }
       kern = isKernelPkg(packageName) ? 1 : 0;
       fw = isFirmwarePkg(packageName, description) ? 1 : 0;
-      rpi = isRpiPkg(packageName, kern, fw, description) ? 1 : 0;
+      rpi = isRpiPkg(packageName, kern, fw, description, origin, toV) ? 1 : 0;
     } catch { /* best-effort */ }
-    db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel, firmware, rpi, description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(ts, packageName, fromV || null, toV || null, result, (log || '').slice(0, 20000), sec, cves, kern, fw, rpi, description || null);
+    db.prepare(`INSERT INTO update_history (ts, package, from_v, to_v, result, log, security, cves, kernel, firmware, rpi, description, origin)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(ts, packageName, fromV || null, toV || null, result, (log || '').slice(0, 20000), sec, cves, kern, fw, rpi, description || null, origin || null);
   }
   function recordBatch(entries) {
     const tx = db.transaction((rows) => { for (const r of rows) record(r); });
@@ -169,7 +179,7 @@ export function createUpdatesRepo(db) {
     const off = Math.max(Number(offset) || 0, 0);
     const total = db.prepare(`SELECT COUNT(*) AS c FROM update_history`).get().c;
     const rows = db.prepare(`SELECT id, ts, package, from_v AS fromV, to_v AS toV, result, log,
-                              security, cves, kernel, firmware, rpi, description
+                              security, cves, kernel, firmware, rpi, description, origin
                        FROM update_history ORDER BY ts DESC LIMIT ? OFFSET ?`).all(lim, off);
     // Backfill rows that predate per-row tag capture (security IS NULL): if the
     // package still has a tag in update_sectags, surface it so older history
@@ -191,7 +201,7 @@ export function createUpdatesRepo(db) {
       if (r.firmware == null) r.firmware = isFirmwarePkg(r.package, r.description) ? 1 : 0;
       // Same for the broader Raspberry Pi tag — needs the final kernel/firmware
       // values above so it never overlaps with either.
-      if (r.rpi == null) r.rpi = isRpiPkg(r.package, r.kernel, r.firmware, r.description) ? 1 : 0;
+      if (r.rpi == null) r.rpi = isRpiPkg(r.package, r.kernel, r.firmware, r.description, r.origin, r.toV) ? 1 : 0;
     }
     return { rows, total };
   }
