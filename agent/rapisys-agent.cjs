@@ -31,6 +31,7 @@ const net = require('net');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns');
 const http = require('http');
 const https = require('https');
 const { execFile, spawn } = require('child_process');
@@ -665,6 +666,102 @@ function classifyCgroup(cgroupText) {
   if (svc) return { kind: 'service', unit: svc[1] };
   if (p.startsWith('/user.slice/')) return { kind: 'desktop', unit: null };
   return { kind: 'process', unit: null };
+}
+
+// ---- This Pi's own resolver -> Pi-hole ---------------------------------------
+// On NetworkManager hosts /etc/resolv.conf is NM's output: writing it directly
+// only lasts until the next DHCP renewal or link change. The DNS servers are
+// set on the NM connections instead (persisted through netplan on Raspberry Pi
+// OS), with the originals saved here so turning it off restores them exactly.
+
+const PIHOLE_NM_STATE = '/etc/rapisys/pihole-dns.nm.json';
+const NM_DNS_PROPS = ['ipv4.dns', 'ipv4.ignore-auto-dns', 'ipv6.ignore-auto-dns', 'ipv4.dns-options'];
+
+/** Split one `nmcli -t` line on unescaped ':' and undo nmcli's \\: / \\\\ escapes. */
+function nmcliFields(line) {
+  const out = [];
+  let cur = '';
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '\\' && i + 1 < line.length) { cur += line[++i]; continue; }
+    if (ch === ':') { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * The devices whose connections carry this Pi's DNS, from `nmcli -t -f
+ * DEVICE,TYPE,STATE,CON-UUID,CONNECTION device status`: ethernet / Wi-Fi that
+ * NM itself brought up. Docker veths and bridges, tailscale0 and lo are
+ * 'connected (externally)' and are left alone.
+ */
+function nmDnsTargets(stdout) {
+  return String(stdout || '').split('\n').filter(Boolean).map(nmcliFields)
+    .filter(([, type, state, uuid]) => (type === 'ethernet' || type === 'wifi') && state === 'connected' && !!uuid)
+    .map(([device, type, , uuid, name]) => ({ device, type, uuid, name }));
+}
+
+/** First `nameserver` in a resolv.conf, or null. */
+function firstNameserver(rc) {
+  const m = String(rc || '').match(/^\s*nameserver\s+(\S+)/m);
+  return m ? m[1] : null;
+}
+
+/** Does Pi-hole answer DNS on 127.0.0.1? A NXDOMAIN/NODATA reply still counts. */
+async function piholeAnswersLocally() {
+  const r = new dns.promises.Resolver({ timeout: 2000, tries: 1 });
+  r.setServers(['127.0.0.1']);
+  try { await r.resolve4('pi.hole'); return true; }
+  catch (e) { return e.code === 'ENOTFOUND' || e.code === 'ENODATA'; }
+}
+
+async function nmActive() {
+  const r = await run('systemctl', ['is-active', '--quiet', 'NetworkManager'], 4000).catch(() => ({ code: 1 }));
+  return r.code === 0;
+}
+
+async function nmTargets() {
+  const r = await run('nmcli', ['-t', '-f', 'DEVICE,TYPE,STATE,CON-UUID,CONNECTION', 'device', 'status'], 8000);
+  assert(r.code === 0, `nmcli device status failed: ${(r.stderr || '').trim()}`);
+  return nmDnsTargets(r.stdout);
+}
+
+/** Apply connection properties, then push them to the live device. */
+async function nmApply(uuid, device, props) {
+  const r = await run('nmcli', ['connection', 'modify', uuid, ...props], 10000);
+  if (r.code !== 0) throw new Error(`nmcli connection modify failed: ${(r.stderr || r.stdout).trim()}`);
+  if (!device) return;
+  const ap = await run('nmcli', ['device', 'reapply', device], 15000);
+  if (ap.code !== 0) throw new Error(`nmcli device reapply ${device} failed: ${(ap.stderr || ap.stdout).trim()}`);
+}
+
+/** Put every connection back the way it was before Pi-hole was switched on. */
+async function nmRestoreDns() {
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(PIHOLE_NM_STATE, 'utf-8')); } catch { /* none */ }
+  const live = await nmTargets();
+  const deviceOf = (uuid) => live.find((t) => t.uuid === uuid)?.device || null;
+  const errors = [];
+  if (saved) {
+    for (const [uuid, orig] of Object.entries(saved)) {
+      const props = NM_DNS_PROPS.flatMap((p) => [p, orig[p] ?? '']);
+      try { await nmApply(uuid, deviceOf(uuid), props); }
+      catch (e) { if (!/unknown connection|not found/i.test(e.message)) errors.push(e.message); }
+    }
+  } else {
+    // No saved state (switched on by an older build or by hand): go back to
+    // the DHCP-provided DNS on connections that point at the local Pi-hole.
+    for (const t of live) {
+      const g = await run('nmcli', ['-t', '-g', 'ipv4.dns', 'connection', 'show', t.uuid], 8000);
+      if (!/^127\.0\.0\.1\b/.test(g.stdout.trim())) continue;
+      try { await nmApply(t.uuid, t.device, ['ipv4.dns', '', 'ipv4.ignore-auto-dns', 'no', 'ipv6.ignore-auto-dns', 'no', 'ipv4.dns-options', '']); }
+      catch (e) { errors.push(e.message); }
+    }
+  }
+  if (errors.length) throw new Error(errors.join('; '));
+  try { fs.unlinkSync(PIHOLE_NM_STATE); } catch { /* none */ }
 }
 
 const OPS = {
@@ -1572,7 +1669,9 @@ const OPS = {
   // Point THIS Pi's own resolver at the local Pi-hole (127.0.0.1:53), so the Pi's
   // own lookups flow through Pi-hole and appear in analytics. Reversible. Keeps a
   // fallback nameserver so the Pi still resolves if Pi-hole is down (those few
-  // fallback queries bypass Pi-hole). Only affects this Pi — not other devices.
+  // fallback queries bypass Pi-hole). Only affects this Pi, not other devices.
+  // NetworkManager hosts: set on the NM connections (survives DHCP renewals and
+  // reboots). Other hosts: write /etc/resolv.conf as before.
   async 'pihole.setSystemResolver'({ enable, fallback = '1.1.1.1' } = {}) {
     const BACKUP = '/etc/rapisys/resolv.conf.pihole.orig';
     const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
@@ -1581,15 +1680,48 @@ const OPS = {
     try {
       const rc = fs.readFileSync('/etc/resolv.conf', 'utf-8');
       if (/generated by tailscale/i.test(rc)) {
-        throw new Error('Tailscale manages this Pi\u2019s DNS (MagicDNS). Pointing the Pi at Pi-hole would require disabling MagicDNS for the whole node. Use Tailscale split-DNS in the admin console instead.');
+        throw new Error('Tailscale manages this Pi’s DNS (MagicDNS). Pointing the Pi at Pi-hole would require disabling MagicDNS for the whole node. Use Tailscale split-DNS in the admin console instead.');
       }
     } catch (e) { if (/Tailscale manages/.test(e.message)) throw e; }
 
+    // Never strand the Pi with a dead resolver.
+    if (enable) assert(await piholeAnswersLocally(), 'Pi-hole is not answering DNS on 127.0.0.1:53, so this Pi was left on its current resolver.');
+
+    if (await nmActive()) {
+      if (!enable) { await nmRestoreDns(); return { ok: true, enabled: false, via: 'networkmanager' }; }
+      const targets = await nmTargets();
+      assert(targets.length, 'no NetworkManager Ethernet or Wi-Fi connection is up');
+      // Save each connection's original DNS settings once; enabling again
+      // (or for a newly connected interface) must not save ours over them.
+      let saved = {};
+      try { saved = JSON.parse(fs.readFileSync(PIHOLE_NM_STATE, 'utf-8')) || {}; } catch { /* first time */ }
+      for (const t of targets) {
+        if (saved[t.uuid]) continue;
+        const g = await run('nmcli', ['-t', '-g', NM_DNS_PROPS.join(','), 'connection', 'show', t.uuid], 8000);
+        assert(g.code === 0, `nmcli connection show ${t.name} failed`);
+        const vals = g.stdout.split('\n').map((v) => v.replace(/\\(.)/g, '$1'));
+        saved[t.uuid] = { name: t.name, ...Object.fromEntries(NM_DNS_PROPS.map((p, i) => [p, vals[i] ?? ''])) };
+      }
+      fs.mkdirSync('/etc/rapisys', { recursive: true });
+      fs.writeFileSync(PIHOLE_NM_STATE, JSON.stringify(saved, null, 2), { mode: 0o600 });
+      const servers = ['127.0.0.1', ...(fallback ? [fallback] : [])].join(',');
+      try {
+        for (const t of targets) {
+          await nmApply(t.uuid, t.device, ['ipv4.ignore-auto-dns', 'yes', 'ipv6.ignore-auto-dns', 'yes',
+            'ipv4.dns', servers, 'ipv4.dns-options', 'timeout:2,attempts:2']);
+        }
+        // NM regenerates resolv.conf on reapply; a systemd-resolved stub
+        // (127.0.0.53) forwards to the servers above, so it counts too.
+        const ns = firstNameserver(fs.readFileSync('/etc/resolv.conf', 'utf-8'));
+        assert(ns === '127.0.0.1' || ns === '127.0.0.53', `resolv.conf still points at ${ns || 'nothing'}`);
+      } catch (e) {
+        await nmRestoreDns().catch(() => {});
+        throw new Error(`could not switch to Pi-hole (${e.message}); previous DNS restored`);
+      }
+      return { ok: true, enabled: true, via: 'networkmanager', fallback: fallback || null, connections: targets.map((t) => t.name) };
+    }
+
     if (enable) {
-      // Verify the local Pi-hole is actually answering DNS on :53 before we
-      // repoint, so we never strand the Pi with a dead resolver.
-      const probe = await run('sh', ['-c', "command -v dig >/dev/null && dig @127.0.0.1 +time=2 +tries=1 +short pi.hole || nslookup -timeout=2 pi.hole 127.0.0.1 >/dev/null 2>&1 && echo ok"], 6000).catch(() => ({ stdout: '', code: 1 }));
-      // Don't hard-fail on probe (pi.hole may not resolve), but warn via state.
       // Back up the current resolv.conf once (follow symlink to capture content).
       fs.mkdirSync('/etc/rapisys', { recursive: true });
       if (!fs.existsSync(BACKUP)) {
@@ -1606,7 +1738,7 @@ const OPS = {
       lines.push('options timeout:2 attempts:2 edns0');
       try { fs.unlinkSync('/etc/resolv.conf'); } catch { /* symlink or file */ }
       fs.writeFileSync('/etc/resolv.conf', lines.join('\n') + '\n');
-      return { ok: true, enabled: true, fallback: fallback || null, probedOk: /ok|\d+\.\d+/.test(probe.stdout || '') };
+      return { ok: true, enabled: true, via: 'resolv.conf', fallback: fallback || null };
     } else {
       // Restore the backup; if none, fall back to a sane public resolver so the
       // Pi is never left without DNS.
@@ -1618,18 +1750,19 @@ const OPS = {
         try { fs.unlinkSync('/etc/resolv.conf'); } catch { /* */ }
         fs.writeFileSync('/etc/resolv.conf', `nameserver ${fallback || '1.1.1.1'}\noptions edns0\n`);
       }
-      return { ok: true, enabled: false };
+      return { ok: true, enabled: false, via: 'resolv.conf' };
     }
   },
 
-  // Report whether the Pi is currently pointed at Pi-hole (our managed marker).
+  // Report whether the Pi is currently pointed at Pi-hole: the resolver it
+  // actually uses, whichever way it was set.
   async 'pihole.systemResolverStatus'() {
     try {
       const rc = fs.readFileSync('/etc/resolv.conf', 'utf-8');
-      const managed = /Managed by RaPiSys \(point this Pi at Pi-hole\)/.test(rc);
-      const pointsLocal = /^\s*nameserver\s+127\.0\.0\.1\s*$/m.test(rc);
+      const ns = firstNameserver(rc);
       const tailscale = /generated by tailscale/i.test(rc);
-      return { enabled: managed && pointsLocal, tailscaleManaged: tailscale };
+      const viaStub = ns === '127.0.0.53' && fs.existsSync(PIHOLE_NM_STATE);
+      return { enabled: ns === '127.0.0.1' || viaStub, tailscaleManaged: tailscale };
     } catch (e) { return { enabled: false, error: e.message }; }
   },
 
@@ -3408,4 +3541,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { nmcliFields, nmDnsTargets, firstNameserver, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
