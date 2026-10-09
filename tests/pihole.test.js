@@ -6,6 +6,8 @@ const { createPiholeClient } = await import('../server/collectors/pihole.js');
 
 // A tiny stand-in for Pi-hole that can speak either the v6 or the v5 API,
 // letting us exercise auth, snapshot normalization, and blocking control.
+// v6 shapes follow a real Pi-hole 6.4 (XRPi, 2026-10-09): the summary has no
+// blocking field; /api/dns/blocking reports it as 'enabled' / 'disabled'.
 function startMockPihole(mode) {
   const state = { blocking: true, sid: 'TEST-SID', authed: false };
   const server = http.createServer((req, res) => {
@@ -20,7 +22,7 @@ function startMockPihole(mode) {
       if (url.pathname === '/api/stats/summary') {
         return send(200, { queries: { total: 1000, blocked: 250, percent_blocked: 25, unique_domains: 120, forwarded: 600, cached: 150,
           types: { A: 700, AAAA: 250, HTTPS: 50 }, status: { FORWARDED: 600, CACHE: 150, GRAVITY: 250 } },
-          clients: { active: 4, total: 6 }, gravity: { domains_being_blocked: 450000 }, blocking: state.blocking });
+          clients: { active: 4, total: 6 }, gravity: { domains_being_blocked: 450000 } });
       }
       if (url.pathname === '/api/stats/top_domains') {
         const blocked = url.searchParams.get('blocked') === 'true';
@@ -29,10 +31,12 @@ function startMockPihole(mode) {
           : [{ domain: 'github.com', count: 300 }, { domain: 'api.foo.dev', count: 120 }] });
       }
       if (url.pathname === '/api/stats/top_clients') return send(200, { clients: [{ name: 'laptop', ip: '10.0.0.5', count: 500 }] });
+      const blockingStr = () => (state.blocking ? 'enabled' : 'disabled');
+      if (url.pathname === '/api/dns/blocking' && req.method === 'GET') return send(200, { blocking: blockingStr(), timer: null });
       if (url.pathname === '/api/dns/blocking' && req.method === 'POST') {
         let body = ''; req.on('data', (c) => body += c); req.on('end', () => {
           const b = JSON.parse(body || '{}'); state.blocking = !!b.blocking;
-          send(200, { blocking: state.blocking, timer: b.timer ?? null });
+          send(200, { blocking: blockingStr(), timer: b.timer ?? null });
         }); return;
       }
       return send(404, { error: 'not found' });
@@ -87,6 +91,14 @@ describe('pihole client — v6', () => {
     const blockedCat = s.categories.find((c) => c.key === 'blocked');
     expect(blockedCat.count).toBe(250);
     expect(blockedCat.percent).toBe(25);
+  });
+
+  it('reports the blocking state from /api/dns/blocking', async () => {
+    mock.state.blocking = true;
+    expect((await client.snapshot(5)).blocking).toBe(true);
+    mock.state.blocking = false;
+    expect((await client.snapshot(5)).blocking).toBe(false);
+    mock.state.blocking = true;
   });
 
   it('toggles blocking', async () => {

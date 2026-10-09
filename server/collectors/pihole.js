@@ -117,20 +117,26 @@ export function createPiholeClient({ getConfig, getPassword }) {
     return r.json;
   }
 
+  // v6 reports blocking as a string ('enabled' | 'disabled' | 'failed' |
+  // 'unknown') and only at /api/dns/blocking: /api/stats/summary has no such
+  // field, so reading it there always gave null and the card said "paused".
+  const v6Blocking = (b) => (b === 'enabled' || b === true ? true : (b === 'disabled' || b === false ? false : null));
+
   async function v6Snapshot(limit) {
     await v6Auth();
-    const [summary, perm, blocked, clients] = await Promise.all([
+    const [summary, perm, blocked, clients, blk] = await Promise.all([
       v6Get('stats/summary'),
       v6Get(`stats/top_domains?count=${limit}`),
       v6Get(`stats/top_domains?blocked=true&count=${limit}`),
       v6Get(`stats/top_clients?count=${limit}`).catch(() => null),
+      v6Get('dns/blocking').catch(() => null),
     ]);
     const q = summary?.queries || {};
     const norm = (arr) => (arr?.domains || arr?.top_domains || [])
       .map((d) => ({ domain: d.domain, count: d.count })).filter((d) => d.domain);
     return {
       available: true, source: 'pihole', apiVersion: 6, loggingEnabled: true, webPort: base().port,
-      blocking: summary?.blocking ?? null,
+      blocking: v6Blocking(blk?.blocking),
       totals: {
         total: q.total ?? null,
         blocked: q.blocked ?? null,
@@ -162,7 +168,7 @@ export function createPiholeClient({ getConfig, getPassword }) {
     const r = await request(`${url}/api/dns/blocking`, { method: 'POST', headers, body });
     if (r.status === 401) { sid = null; await v6Auth(); }
     if (r.status !== 200 && r.status !== 201) throw new Error(`Pi-hole blocking control -> HTTP ${r.status}`);
-    return { ok: true, blocking: r.json?.blocking ?? !!enabled, timer: r.json?.timer ?? null };
+    return { ok: true, blocking: v6Blocking(r.json?.blocking) ?? !!enabled, timer: r.json?.timer ?? null };
   }
 
   // ---- v5 -----------------------------------------------------------------
