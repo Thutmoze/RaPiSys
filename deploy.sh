@@ -143,12 +143,9 @@ EOF
   local gid; gid=$(getent group rapisys | cut -d: -f3)
   sed -i "/^RAPISYS_GID=/d" "${APP_DIR}/.env"
   echo "RAPISYS_GID=${gid}" >> "${APP_DIR}/.env"
-  # Docker socket group: the non-root container needs it to read
-  # /var/run/docker.sock for the Containers card.
-  local dgid
-  dgid=$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 998)
+  # The container no longer mounts /var/run/docker.sock (the agent serves a
+  # read-only Docker API), so it needs no docker group.
   sed -i "/^DOCKER_GID=/d" "${APP_DIR}/.env"
-  echo "DOCKER_GID=${dgid}" >> "${APP_DIR}/.env"
   ok "rapisys group GID ${gid} recorded in .env"
   # Capture the host timezone so the container's time-of-day logic (e.g. the
   # night light scheduler) matches local time instead of UTC.

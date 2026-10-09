@@ -18,6 +18,8 @@
  *  - All parameters are validated against strict patterns; commands run via
  *    execFile (no shell interpolation, ever).
  *  - Every operation is logged to journald.
+ *  - A second socket, /run/rapisys/docker-ro.sock, is a read-only Docker API
+ *    (container list + inspect only) so the container never gets docker.sock.
  *
  * Zero npm dependencies — uses only Node built-ins, so it runs on the host's
  * Node (installed by deploy.sh) without a node_modules directory.
@@ -1141,6 +1143,15 @@ const OPS = {
     assert(['stop', 'start', 'restart', 'disable', 'enable'].includes(action), 'invalid action');
     const r = await run('systemctl', [action, `${name}.service`], 15000);
     return { ok: r.code === 0, log: (r.stderr || r.stdout || '') };
+  },
+  // Stop + remove a container (Inventory "remove"). The dashboard only gets
+  // the read-only Docker socket below, so this one mutation comes through here.
+  async 'docker.removeContainer'({ name }) {
+    assert(CONTAINER_NAME_RE.test(String(name || '')), 'invalid container name');
+    await run('docker', ['stop', name], 20000).catch(() => {});
+    const r = await run('docker', ['rm', name], 20000);
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout || `docker rm exited ${r.code}`).trim());
+    return { ok: true };
   },
   async 'inventory.services'() {
     // systemd units: load/active/sub state + since-timestamp.
@@ -3324,6 +3335,58 @@ function userCacheDirs() {
   return out;
 }
 
+// ---- Read-only Docker API socket --------------------------------------------
+// The dashboard container needs container lists and inspect data, but the raw
+// /var/run/docker.sock is full control of Docker (`:ro` on a socket mount does
+// not stop API writes), i.e. root on the host. The agent serves a filtered
+// socket instead: only the GETs the dashboard makes are forwarded; everything
+// else is refused.
+
+const DOCKER_SOCK = '/var/run/docker.sock';
+const DOCKER_RO_SOCKET = path.join(SOCKET_DIR, 'docker-ro.sock');
+
+/** 'list' | 'inspect' for an allowed request, otherwise null. */
+function dockerReadRoute(method, url) {
+  if (method !== 'GET') return null;
+  const u = String(url || '');
+  if (u === '/containers/json' || u === '/containers/json?all=1') return 'list';
+  const m = u.match(/^\/containers\/([^/?]+)\/json$/);
+  return m && CONTAINER_NAME_RE.test(m[1]) ? 'inspect' : null;
+}
+
+/** Inspect data minus the container's environment (other services' secrets). */
+function redactInspect(info) {
+  if (info && info.Config) delete info.Config.Env;
+  return info;
+}
+
+const dockerRoServer = http.createServer((req, res) => {
+  const reply = (code, body) => {
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(body);
+  };
+  const route = dockerReadRoute(req.method, req.url);
+  if (!route) {
+    console.warn(`[agent] DENIED docker ${req.method} ${String(req.url).slice(0, 200)}`);
+    return reply(403, JSON.stringify({ message: 'not allowed on the RaPiSys read-only Docker socket' }));
+  }
+  const up = http.request({ socketPath: DOCKER_SOCK, path: req.url, method: 'GET', timeout: 8000 }, (ur) => {
+    let body = '';
+    ur.setEncoding('utf-8');
+    ur.on('data', (c) => (body += c));
+    ur.on('end', () => {
+      if (route === 'inspect' && ur.statusCode === 200) {
+        try { body = JSON.stringify(redactInspect(JSON.parse(body))); }
+        catch { return reply(502, JSON.stringify({ message: 'unreadable Docker response' })); }
+      }
+      reply(ur.statusCode || 502, body);
+    });
+  });
+  up.on('timeout', () => up.destroy(new Error('Docker API timed out')));
+  up.on('error', (e) => { if (!res.headersSent) reply(502, JSON.stringify({ message: e.message })); });
+  up.end();
+});
+
 // Only bind the socket when run as the service (systemd ExecStart). Requiring
 // this file as a module — which the test suite does to exercise the pure
 // classification helpers — must not try to listen on /run/rapisys.
@@ -3335,7 +3398,14 @@ if (require.main === module) {
     console.log(`[agent] rapisys-agent listening on ${SOCKET_PATH}`);
   });
 
-  process.on('SIGTERM', () => { server.close(); process.exit(0); });
+  try { fs.unlinkSync(DOCKER_RO_SOCKET); } catch { /* fresh */ }
+  dockerRoServer.listen(DOCKER_RO_SOCKET, () => {
+    fs.chmodSync(DOCKER_RO_SOCKET, 0o660);
+    run('chgrp', [SOCKET_GROUP, DOCKER_RO_SOCKET]).catch(() => {});
+    console.log(`[agent] read-only Docker API on ${DOCKER_RO_SOCKET}`);
+  });
+
+  process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };

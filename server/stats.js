@@ -541,10 +541,10 @@ async function addStoppedContainers(health) {
 
 // Get Docker container stats via Docker socket API + /proc for memory + cgroups for CPU
 // Works WITHOUT cgroup memory controller and without docker CLI
-async function getDockerContainerStats() {
+async function getDockerContainerStats(list) {
   try {
     // Use Docker API via socket to get container info
-    const containers = await dockerApiGet('/containers/json');
+    const containers = list || await dockerApiGet('/containers/json');
     if (!containers || containers.length === 0) {
       const stopped = new Map();
       await addStoppedContainers(stopped);
@@ -594,6 +594,7 @@ async function getDockerContainerStats() {
         const memPercent = (memUsageKB / memTotalKB) * 100;
         
         statsMap.set(shortId, {
+          started: info.State?.StartedAt ? Math.round(new Date(info.State.StartedAt).getTime() / 1000) : 0,
           cpuPercent,
           memPercent: Math.round(memPercent * 10) / 10,
           memUsage: memUsageKB * 1024,
@@ -615,11 +616,14 @@ async function getDockerContainerStats() {
   }
 }
 
+// Read-only Docker API served by the host agent (never the raw docker.sock).
+const DOCKER_SOCK = process.env.DOCKER_SOCKET || '/run/rapisys/docker-ro.sock';
+
 // Helper: Docker API GET request via socket
 function dockerApiGet(path) {
   return new Promise((resolve, reject) => {
     const options = {
-      socketPath: '/var/run/docker.sock',
+      socketPath: DOCKER_SOCK,
       path: path,
       method: 'GET',
     };
@@ -841,26 +845,28 @@ export async function getSystemStats() {
   // Get Docker containers with stats
   let containers = [];
   try {
-    // Get container list from systeminformation
-    const dockerContainers = await si.dockerContainers();
+    // Container list straight from the (read-only) Docker API. This replaced
+    // si.dockerContainers(), which only knows /var/run/docker.sock; the fields
+    // below are the ones it produced (it never set `status`).
+    const listed = await dockerApiGet('/containers/json');
+    const dockerContainers = Array.isArray(listed) ? listed : [];
     if (dockerContainers.length === 0) containerHealth = new Map();
 
     if (dockerContainers.length > 0) {
       // Get real stats using docker stats command
-      const statsMap = await getDockerContainerStats();
+      const statsMap = await getDockerContainerStats(dockerContainers);
       
       containers = dockerContainers.map(container => {
         // Match by short ID (first 12 chars)
-        const shortId = container.id.substring(0, 12);
+        const shortId = container.Id.substring(0, 12);
         const stats = statsMap.get(shortId) || {};
         
         return {
-          id: container.id,
-          name: container.name,
-          image: container.image,
-          state: container.state,
-          status: container.status,
-          started: container.started,
+          id: container.Id,
+          name: (container.Names?.[0] || '').replace(/^\/|\/$/g, ''),
+          image: container.Image,
+          state: container.State,
+          started: stats.started || 0,
           cpuPercent: stats.cpuPercent || 0,
           memPercent: stats.memPercent || 0,
           memUsage: stats.memUsage || 0,

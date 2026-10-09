@@ -10,7 +10,8 @@
 import http from 'http';
 import { agentCall, agentConfigured } from '../core/agent-client.js';
 
-const DOCKER_SOCK = '/var/run/docker.sock';
+// Read-only Docker API served by the host agent (never the raw docker.sock).
+const DOCKER_SOCK = process.env.DOCKER_SOCKET || '/run/rapisys/docker-ro.sock';
 
 function dockerApiGet(path) {
   return new Promise((resolve) => {
@@ -116,17 +117,9 @@ export function createInventoryCollector() {
     return agentCall('inventory.serviceControl', { name, action }, null, 18000);
   }
   async function removeContainer(name) {
-    // stop + remove via Docker API
-    await new Promise((resolve) => {
-      const req = http.request({ socketPath: DOCKER_SOCK, path: `/containers/${name}/stop`, method: 'POST', timeout: 12000 }, () => resolve());
-      req.on('error', () => resolve()); req.on('timeout', () => { req.destroy(); resolve(); }); req.end();
-    });
-    return new Promise((resolve, reject) => {
-      const req = http.request({ socketPath: DOCKER_SOCK, path: `/containers/${name}`, method: 'DELETE', timeout: 12000 }, (res) => {
-        resolve({ ok: res.statusCode < 300, status: res.statusCode });
-      });
-      req.on('error', reject); req.on('timeout', () => { req.destroy(); reject(new Error('docker timeout')); }); req.end();
-    });
+    // The dashboard's Docker socket is read-only; stop + rm runs in the agent.
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('docker.removeContainer', { name }, null, 45000);
   }
 
   /** Full inventory across all kinds. */

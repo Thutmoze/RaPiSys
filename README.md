@@ -278,6 +278,7 @@ RAPISYS_DEMO=1 node server/index.js
 - SMB1 (needed by the WD My Book World Edition II) is insecure by nature; the wizard warns and we recommend isolating such devices on a trusted VLAN.
 - **Pi-hole DB backups** never run the live SQLite database off the NAS (SQLite over CIFS/NFS risks corruption and can stop FTL from starting). The live DB stays on the Pi; RaPiSys archives a consistent, gzipped `sqlite3 .backup` snapshot to the NAS on a schedule, pruned to a retention count.
 - The agent socket is `0660 root:rapisys`; every operation is HMAC-verified with a 30 s replay window and audit-logged to journald.
+- **No Docker socket in the container.** `/var/run/docker.sock` is full control of Docker (mounting it `:ro` does not stop API writes), which is root on the host. Instead the agent serves `/run/rapisys/docker-ro.sock` (`0660 root:rapisys`), which forwards only `GET /containers/json` and `GET /containers/<id>/json`, with each container's environment stripped from inspect data. Everything else gets a 403 and a journald entry. Removing a container from Inventory goes through the allowlisted `docker.removeContainer` agent op.
 - **Case controller (Pironman):** the optional SunFounder pm_dashboard listens on port 34001 without authentication. RaPiSys talks to it on localhost; the Case tab warns you to keep that port firewalled or bound to localhost on a shared LAN, and the SunFounder software runs as its own GPL process, isolated from RaPiSys.
 
 ## License & credits
