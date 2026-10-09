@@ -28,6 +28,7 @@ import { createUpdatesCollector } from './collectors/updates.js';
 import { createUpdatesRepo } from './repositories/updates.js';
 import { createNetTrafficRepo } from './repositories/net-traffic.js';
 import { createNetTraffic } from './services/net-traffic.js';
+import { createPiholeBackupJob } from './services/pihole-backup.js';
 import { agentCall, agentConfigured } from './core/agent-client.js';
 import { createPeersRepo } from './repositories/peers.js';
 import { createSampler } from './services/sampler.js';
@@ -349,24 +350,9 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   // Scheduled Pi-hole DB backup to the NAS (safe sqlite .backup + gzip). Live DB
   // stays on the Pi; this just archives a consistent copy on the configured NAS.
-  globalThis.__rapisysPiholeBackup = globalThis.__rapisysPiholeBackup || { lastRunAt: 0, lastOk: null, lastError: null };
-  scheduler.register('pihole-nas-backup', 3600e3, async () => {
-    let s; try { s = await loadSettings(); } catch { return; }
-    const cfg = s.rapisys?.piholeBackup;
-    const nas = s.rapisys?.nas;
-    if (!cfg?.enabled || !nas?.mountpoint) return;
-    const intervalMs = cfg.frequency === 'weekly' ? 7 * 24 * 3600e3 : 24 * 3600e3;
-    const last = globalThis.__rapisysPiholeBackup.lastRunAt || 0;
-    if (Date.now() - last < intervalMs - 3600e3) return;   // honor frequency (with slack)
-    try {
-      const res = await network.piholeBackupToNas({ mountpoint: nas.mountpoint, retain: cfg.retain || 14 });
-      globalThis.__rapisysPiholeBackup = { lastRunAt: Date.now(), lastOk: { file: res.file, size: res.size }, lastError: null };
-      eventsFacade.add('pihole.backup.ok', 'info', { file: res.file, size: res.size });
-    } catch (e) {
-      globalThis.__rapisysPiholeBackup = { ...globalThis.__rapisysPiholeBackup, lastRunAt: Date.now(), lastError: e.message };
-      eventsFacade.add('pihole.backup.failed', 'warning', { error: e.message });
-    }
-  }, { runNow: false });
+  // Due-ness comes from the newest backup on the NAS, so restarts add none.
+  const piholeBackupJob = createPiholeBackupJob({ loadSettings, network, events: eventsFacade });
+  scheduler.register('pihole-nas-backup', 3600e3, () => piholeBackupJob.tick(), { runNow: false });
   // Scheduled rapisys.db backup to the NAS (online snapshot on local disk,
   // then gzip streamed to <nas>/rapisys-backups). Checked at startup and
   // hourly; runs only when due, so restarts do not add extra backups.

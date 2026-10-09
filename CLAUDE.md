@@ -118,4 +118,4 @@ allowed".
 
 ## Open items
 
-- Pi-hole rebuild (container was pruned).
+None.
