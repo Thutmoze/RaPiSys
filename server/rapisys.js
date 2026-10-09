@@ -44,7 +44,7 @@ import { createRemoteAccess } from './services/remote-access.js';
 import { createPeerPoller } from './services/peer-poller.js';
 import { getSystemStats } from './stats.js';
 import { historyRouter } from './routes/history.js';
-import { deepHealthRouter } from './routes/health.js';
+import { deepHealthRouter, agentHealthRouter } from './routes/health.js';
 import { nodesRouter } from './routes/nodes.js';
 import { setupRouter } from './routes/setup.js';
 import { createDbBackup } from './services/db-backup.js';
@@ -444,6 +444,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   const rc = auth.requireConfig;
   app.use('/api/history', rc, historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
   app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb }));
+  app.use('/api/health/agent', agentHealthRouter({ getNodeName }));
   app.use('/api/auth', authRouter({ auth, loadSettings }));
   // Mount-level auth on every data router: requireConfig is open in monitor mode
   // (upstream read-only behavior) but requires a session/admin token in full

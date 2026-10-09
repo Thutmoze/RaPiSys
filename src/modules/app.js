@@ -739,6 +739,82 @@ function setNavRebootDot(status) {
   if (dot) dot.hidden = status?.level !== 'reboot';
 }
 
+// ---------------------------------------------------------------------------
+// Host agent banner: shown at the top of every page when the agent of the node
+// being viewed runs other code than this dashboard ships ("stale": a deploy
+// that skipped the agent) or does not answer ("down"). /api/health/agent
+// follows the node switcher. Checked on load, on node change, every 5 min.
+// ---------------------------------------------------------------------------
+const agentBanner = (() => {
+  const slot = el('div', 'agent-banner-slot');
+  let status = null;
+  let timer = null;
+
+  async function copyText(txt) {
+    // navigator.clipboard only exists in secure contexts; plain-HTTP LAN falls back.
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(txt); return true; }
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch { return false; }
+  }
+
+  function render() {
+    const st = status?.state;
+    if (st !== 'stale' && st !== 'down') { slot.innerHTML = ''; return; }
+    const stale = st === 'stale';
+    const node = escNodeName(status.node || 'this Pi');
+    const cmd = stale ? 'cd ~/RaPiSys && sudo ./deploy.sh upgrade' : 'sudo systemctl restart rapisys-agent';
+    slot.innerHTML = `<div class="up-banner agent-banner ${stale ? 'up-banner-warn' : 'up-banner-fail'}">
+        <div class="up-banner-icon">${WARN_ICON}</div>
+        <div class="up-banner-text">
+          <div class="up-banner-title">${stale ? `Host agent on ${node} is out of date` : `Host agent on ${node} is not responding`}</div>
+          <div class="up-banner-desc">${stale
+            ? '<span class="agent-why">The dashboard was updated but the host agent still runs older code, so actions that go through it (updates, fan, NAS, DNS) can fail with “operation not allowed”. </span>Update it on the Pi:'
+            : '<span class="agent-why">Actions that need host access (updates, fan, NAS, DNS) will fail until it is back. </span>Restart it on the Pi:'}
+            <div class="agent-cmd"><code>${escNodeName(cmd)}</code><button type="button" data-ab="copy">Copy</button></div>
+          </div>
+        </div>
+        <div class="up-banner-actions"><button type="button" class="set-btn set-btn-detect" data-ab="check">${DETECT_ICON}<span>Check again</span></button></div>
+      </div>`;
+    slot.querySelector('[data-ab=copy]').onclick = async (e) => {
+      const b = e.currentTarget;
+      b.textContent = (await copyText(cmd)) ? 'Copied' : 'Copy failed';
+      setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+    };
+    slot.querySelector('[data-ab=check]').onclick = async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true; b.querySelector('span').textContent = 'Checking…';
+      await check();
+      if (status?.state === 'ok') toast('success', 'Host agent', `The agent on ${status.node || 'this Pi'} is up to date`);
+    };
+  }
+
+  /** Keep the banner at the top of whichever page is showing. */
+  function place() {
+    const host = document.querySelector('.rapisys-page') || (activePage === 'overview' ? $('.container') : null);
+    if (host && slot.parentElement !== host) host.prepend(slot);
+  }
+
+  async function check() {
+    try { status = await api('/health/agent'); } catch { status = null; }
+    render();
+    place();
+  }
+
+  function start() {
+    check();
+    clearInterval(timer);
+    timer = setInterval(check, 300e3);
+  }
+
+  return { start, check, place };
+})();
+
 function route() {
   const id = (window.location.hash.replace(/^#\//, '') || 'overview').split('?')[0];
   const page = PAGES.find((p) => p.id === id) ? id : 'overview';
@@ -773,6 +849,7 @@ function route() {
   }
   activePage = page;
   nodeSwitcher?.place();
+  agentBanner.place();
 }
 
 // The node switcher picked another node. Requests already follow it
@@ -792,6 +869,7 @@ window.addEventListener('rapisys:nodechange', () => {
   setNavRebootDot(null);
   if (_globalCheckTimer) startGlobalCheckPoll(document.querySelector('.nav-checking'));
   containerBells.load();
+  agentBanner.check();
 });
 
 function comingSoonPage(id) {
@@ -8560,4 +8638,5 @@ window.addEventListener('DOMContentLoaded', () => {
   refreshAuthBadge();
   nodeSwitcher = initNodeSwitcher({ onManage: () => { window.location.hash = '#/settings?tab=nodes'; } });
   containerBells.init();
+  agentBanner.start();
 });

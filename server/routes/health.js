@@ -2,7 +2,7 @@
 
 import express from 'express';
 import fs from 'fs';
-import { agentAvailable } from '../core/agent-client.js';
+import { agentAvailable, agentStatus } from '../core/agent-client.js';
 
 export function deepHealthRouter({ dbMeta, scheduler, getDb }) {
   const r = express.Router();
@@ -27,6 +27,20 @@ export function deepHealthRouter({ dbMeta, scheduler, getDb }) {
     } catch { checks.disk = { ok: true }; }
     const ok = checks.database.ok && checks.scheduler.ok; // agent optional
     res.status(ok ? 200 : 503).json({ ok, checks, ts: Date.now() });
+  });
+  return r;
+}
+
+/**
+ * /api/health/agent: is the host agent running the code this dashboard ships?
+ * Drives the "agent out of date / not responding" banner. Follows the node
+ * switcher like any other request, so it reports the node being viewed.
+ */
+export function agentHealthRouter({ getNodeName }) {
+  const r = express.Router();
+  r.get('/', async (req, res) => {
+    try { res.json({ ...(await agentStatus()), node: await getNodeName() }); }
+    catch (err) { res.status(500).json({ state: 'unknown', error: err.message }); }
   });
   return r;
 }

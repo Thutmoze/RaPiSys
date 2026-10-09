@@ -5509,6 +5509,31 @@ body.ultra .up-rb-item { font-size: 11px; gap: 8px; }
 body.ultra .up-rb-item code { font-size: 10.5px; }
 body.ultra .up-rb-kind { width: 64px; font-size: 9px; }
 body.ultra .up-banner-actions .action-btn { padding: 4px 8px; font-size: 11px; }
+
+/* Host agent out of date / not responding banner (top of every page). */
+.agent-banner-slot:empty { display: none; }
+.agent-banner .up-banner-text { min-width: 0; }
+.agent-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 6px 6px 10px; max-width: 520px;
+  background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.agent-cmd code { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-primary);
+  overflow-x: auto; white-space: nowrap; }
+.agent-cmd button { flex-shrink: 0; font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 6px;
+  cursor: pointer; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-color); }
+.agent-cmd button:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
+.agent-banner .up-banner-actions .set-btn { padding: 7px 12px; font-size: 12px; }
+.agent-banner .up-banner-actions .set-btn:disabled { opacity: 0.5; cursor: progress; }
+body.compact .agent-cmd { margin-top: 6px; padding: 4px 4px 4px 8px; }
+body.compact .agent-cmd code { font-size: 11.5px; }
+body.compact .agent-banner .up-banner-actions .set-btn { padding: 6px 10px; font-size: 11.5px; }
+body.ultra .agent-banner .agent-why { display: none; }
+body.ultra .agent-cmd { margin-top: 4px; padding: 3px 3px 3px 8px; }
+body.ultra .agent-cmd code { font-size: 10.5px; }
+body.ultra .agent-cmd button { padding: 2px 8px; font-size: 10.5px; }
+body.ultra .agent-banner .up-banner-actions .set-btn { padding: 4px 8px; font-size: 11px; }
+@media (max-width: 640px) {
+  .agent-banner { flex-wrap: wrap; }
+  .agent-banner .up-banner-actions { width: 100%; justify-content: flex-end; }
+}
 body.ultra .up-rb-procs table { font-size: 10.5px; }
 body.ultra .up-rb-procs td.desc { min-width: 140px; }
 body.ultra .up-plan-reboot { padding: 6px 8px; font-size: 11px; }

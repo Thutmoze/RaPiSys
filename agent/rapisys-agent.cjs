@@ -41,6 +41,13 @@ const SOCKET_PATH = path.join(SOCKET_DIR, 'agent.sock');
 const SECRET = process.env.AGENT_SECRET || '';
 const SOCKET_GROUP = process.env.AGENT_SOCKET_GROUP || 'rapisys';
 const REPLAY_WINDOW_MS = 30000;
+// Hash of the code this process started from. The dashboard compares it with
+// the agent file baked into its image to spot an agent left on old code (a
+// deploy that skipped the agent, or an install without a restart).
+const AGENT_SHA256 = (() => {
+  try { return crypto.createHash('sha256').update(fs.readFileSync(__filename)).digest('hex'); }
+  catch { return null; }
+})();
 
 if (SECRET.length < 32) {
   console.error('FATAL: AGENT_SECRET missing/too short (set in /etc/rapisys/agent.env)');
@@ -990,7 +997,7 @@ const OPS = {
     return { ok: true, applied: Object.keys(clean), configPath: p, restarted: true };
   },
   async 'ping'() {
-    return { pong: true, version: '1.0.0', pid: process.pid };
+    return { pong: true, version: '1.0.0', pid: process.pid, sha256: AGENT_SHA256 };
   },
 
   // ---- In-browser remote access -------------------------------------------
@@ -3587,4 +3594,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { rpiTag, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { AGENT_SHA256, rpiTag, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };

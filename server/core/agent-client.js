@@ -11,6 +11,7 @@
  */
 
 import net from 'net';
+import fs from 'fs';
 import crypto from 'crypto';
 
 const SOCKET = process.env.AGENT_SOCKET || '/run/rapisys/agent.sock';
@@ -72,6 +73,42 @@ export function agentCall(op, params = {}, onLine = null, timeoutMs = TIMEOUT_MS
       reject(new Error(`agent unreachable: ${err.message}`));
     });
   });
+}
+
+/**
+ * Hash of the agent shipped with this dashboard (agent/rapisys-agent.cjs,
+ * copied into the image). null when the file isn't there (e.g. an old image).
+ */
+let expectedSha;
+export function expectedAgentSha() {
+  if (expectedSha === undefined) {
+    try {
+      const file = new URL('../../agent/rapisys-agent.cjs', import.meta.url);
+      expectedSha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    } catch { expectedSha = null; }
+  }
+  return expectedSha;
+}
+
+/**
+ * Is the host agent there and running the code this dashboard was built with?
+ * state: 'absent' (not configured: manual install, by design) | 'down' (no
+ * answer) | 'stale' (answers, but with other code) | 'ok' | 'unknown' (no
+ * reference hash to compare with).
+ */
+export function agentSyncState({ configured, ping, expected }) {
+  if (!configured) return 'absent';
+  if (!ping) return 'down';
+  if (!expected) return 'unknown';
+  return ping.sha256 === expected ? 'ok' : 'stale';
+}
+
+export async function agentStatus() {
+  const configured = agentConfigured();
+  let ping = null;
+  if (configured) { try { ping = await agentCall('ping', {}, null, 3000); } catch { ping = null; } }
+  const expected = expectedAgentSha();
+  return { state: agentSyncState({ configured, ping, expected }), agentSha: ping?.sha256 || null, expectedSha: expected };
 }
 
 /** Quick availability probe used by /api/health/deep and the wizard. */

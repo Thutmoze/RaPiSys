@@ -133,7 +133,7 @@ sudo ./deploy.sh rollback    # restore the newest snapshot (image, database, con
 sudo ./deploy.sh uninstall   # remove (add --purge to delete data)
 ```
 
-`upgrade` is the one command to deploy a new version. It pulls as the checkout's owner, reinstalls and restarts the host agent only when `agent/` changed (after a syntax check), and rolls the agent back with everything else if the new version fails its health gate. A plain `docker compose up -d --build` updates the container only, which can leave a new dashboard talking to an old agent ("operation not allowed").
+`upgrade` is the one command to deploy a new version. It pulls as the checkout's owner, reinstalls and restarts the host agent only when `agent/` changed (after a syntax check), and rolls the agent back with everything else if the new version fails its health gate. A plain `docker compose up -d --build` updates the container only, which can leave a new dashboard talking to an old agent ("operation not allowed"). If that happens, or the agent stops answering, a banner at the top of every page says so for the node you are viewing, with the command that fixes it (`/api/health/agent` compares the hash of the code the agent is running with the agent shipped in the dashboard image).
 
 ### Database backups and restore
 

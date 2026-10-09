@@ -30,6 +30,9 @@ RUN apk add --no-cache --virtual .build python3 make g++ \
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server ./server
+# The agent the dashboard expects (hash only, never run here): lets it spot a
+# host agent still on older code (/api/health/agent).
+COPY agent/rapisys-agent.cjs ./agent/rapisys-agent.cjs
 
 # Default settings config
 COPY settings.json ./settings.json

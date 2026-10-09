@@ -117,5 +117,4 @@ allowed".
 ## Open items
 
 - Kernel tagging decision (deferred).
-- Agent stale-detection banner (proposed, not built).
 - Pi-hole rebuild (container was pruned).
