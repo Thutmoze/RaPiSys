@@ -108,14 +108,23 @@ export function createUpdatesRepo(db) {
   // Updates tag for the same package.
   const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
   const isFirmwarePkg = (name, desc) => FIRMWARE_RE.test(String(name || '')) || /firmware/i.test(String(desc || ''));
-  // Raspberry Pi ecosystem classification — mirrors the agent's rule. Only
-  // applies when the package isn't already kernel/firmware, so History never
-  // shows two overlapping Pi tags on the same row. Companion tools without a
-  // recognizable name prefix (e.g. "rc-gui", "rpcc") are caught by the
-  // description fallback instead.
+  // Raspberry Pi ecosystem classification — mirrors the agent's rpiTag()
+  // without the archive origin, which History doesn't record. Raspberry Pi's
+  // own firmware (rpi-eeprom, raspi-firmware) carries both the firmware and
+  // the raspberry pi tag; generic firmware only matches by name, never by a
+  // summary mentioning the Pi. Kernels never get it. Companion tools without
+  // a recognizable name prefix (e.g. "rc-gui", "rpcc") are caught by the
+  // description fallback.
   const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
   const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
-  const isRpiPkg = (name, kernel, fw, desc) => !kernel && !fw && (RPI_RE.test(String(name || '')) || RPI_DESC_RE.test(String(desc || '')));
+  const isRpiPkg = (name, kernel, fw, desc) => !kernel
+    && (RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || ''))));
+  // Rows recorded under the old rule (firmware never got the Pi tag): give
+  // Raspberry Pi's own firmware its tag. Idempotent, cheap, name-only.
+  try {
+    db.exec(`UPDATE update_history SET rpi = 1 WHERE rpi = 0 AND firmware = 1 AND IFNULL(kernel, 0) = 0
+      AND (package LIKE 'rpi-%' OR package LIKE 'raspberrypi-%' OR package LIKE 'raspi-%' OR package LIKE 'libraspberrypi%')`);
+  } catch { /* table not created yet */ }
 
   function record({ ts, packageName, fromV, toV, result, log, description }) {
     // capture the package's known security tags at the moment of the upgrade

@@ -36,6 +36,25 @@ describe('update history security tags', () => {
     expect(row.security).toBeNull();   // no sectag → null, not a false 0-vs-1 guess
   });
 
+  it('gives Raspberry Pi firmware both the firmware and the raspberry pi tag', () => {
+    const r = repo();
+    r.record({ ts: 1, packageName: 'rpi-eeprom', fromV: '28.32-1', toV: '28.33-1', result: 'success', log: '', description: 'Raspberry Pi 4/5 boot EEPROM updater' });
+    r.record({ ts: 2, packageName: 'firmware-brcm80211', fromV: '1', toV: '2', result: 'success', log: '', description: 'Binary firmware for Broadcom wireless cards (Raspberry Pi)' });
+    const rows = Object.fromEntries(r.recent(10).rows.map((x) => [x.package, x]));
+    expect(rows['rpi-eeprom']).toMatchObject({ firmware: 1, rpi: 1 });
+    expect(rows['firmware-brcm80211']).toMatchObject({ firmware: 1, rpi: 0 });
+  });
+
+  it('fixes rpi-eeprom history rows recorded under the old rule', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rapisys-up-'));
+    const { db } = openDatabase({ dbPath: path.join(dir, 't.db'), fallbackPath: path.join(dir, 'f.db') });
+    const r = createUpdatesRepo(db);
+    r.record({ ts: 1, packageName: 'rpi-eeprom', fromV: '1', toV: '2', result: 'success', log: '', description: 'Raspberry Pi 4/5 boot EEPROM updater' });
+    db.prepare(`UPDATE update_history SET rpi = 0 WHERE package = 'rpi-eeprom'`).run();   // as the old rule stored it
+    createUpdatesRepo(db);                                                                // next start
+    expect(r.recent(10).rows[0]).toMatchObject({ package: 'rpi-eeprom', firmware: 1, rpi: 1 });
+  });
+
   it('records null tags for an unknown, non-kernel package', () => {
     const r = repo();
     r.record({ ts: Date.now(), packageName: 'nano', fromV: '7', toV: '8', result: 'success', log: '' });

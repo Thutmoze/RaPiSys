@@ -103,6 +103,9 @@ allowed".
 - Raspberry Pi package tagging: `archive.raspberrypi.com` origin is the authoritative
   signal, not name prefixes or dpkg text. `+rptN` (small int) = Debian rebuild, not
   tagged; `+rpt<date>` = RPi fork, tagged.
+- Raspberry Pi's own firmware (`rpi-eeprom`, `raspi-firmware`) carries both the
+  `firmware` and `raspberry pi` tags. Generic firmware (`firmware-*`) never gets the
+  Pi tag from its summary, only from origin. Kernels never get it (deferred).
 - binNMU (`+bN`): the newest changelog entry predates the installed version, so the
   highlighted entry must come from version comparison, not array index.
 - Peer health is sampled as an ordinary metric (`peer.<n>.up`, 60 s); peer-down alerts
@@ -113,9 +116,6 @@ allowed".
 
 ## Open items
 
-- `rpi-eeprom` is missing its Raspberry Pi tag: the `!u.firmware` guard silences the tag
-  for all firmware packages regardless of origin. Remove or scope the guard.
-- Decide whether `rpi-eeprom` carries both `firmware` and `raspberry-pi` tags.
 - Kernel tagging decision (deferred).
 - Agent stale-detection banner (proposed, not built).
 - Pi-hole rebuild (container was pruned).

@@ -506,6 +506,31 @@ async function pironmanConfigPath() {
  * Debian packages misclassified.
  */
 
+// Raspberry Pi ecosystem classification: the OS-integration/tooling packages
+// specific to Raspberry Pi OS (sys/ui/net mods, raspi-config and companions,
+// GPIO/camera libraries, the Imager, Connect, ...). Any "rpi-*" name is Pi
+// ecosystem (the prefix isn't used elsewhere in Debian/Raspberry Pi OS repos).
+// Companion tools without a recognizable prefix (e.g. "rc-gui", "rpcc") are
+// caught by the dpkg summary mentioning "Raspberry Pi" or "raspi-config".
+const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
+const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
+
+/**
+ * The "raspberry pi" tag. Origin first: served by the Raspberry Pi archive and
+ * not one of its rebuilds of a Debian package. Name/summary are an OR fallback
+ * (and cover passes where `apt-cache policy` was unavailable).
+ *
+ * Firmware from Raspberry Pi (rpi-eeprom, raspi-firmware) carries both the
+ * firmware and the raspberry pi tag. Generic firmware is kept out of the
+ * summary fallback: Debian firmware rebuilt for the Pi (firmware-brcm80211,
+ * +rptN) often mentions the Pi in its summary but is not Raspberry Pi's own.
+ * Kernels never get it (that tagging decision is deferred).
+ */
+function rpiTag({ name, description = '', kernel = false, firmware = false, fromRpiArchive = false }) {
+  if (kernel) return false;
+  return fromRpiArchive || RPI_RE.test(name) || (!firmware && RPI_DESC_RE.test(description));
+}
+
 /** True when the version's `rpt` marker is a rebuild counter, not a date
  *  snapshot. `+rpt1`/`~rpt3`/`+rpt2+deb13u2` → rebuild; `+rpt20260817` → not. */
 function isRptRebuild(version) {
@@ -2786,19 +2811,6 @@ WantedBy=multi-user.target
     // "Raspberry Pi Firmware …" EEPROM/crypto libraries and tools). Kept strict:
     // this does NOT tag EEPROM/OTP HAT tooling like raspi-utils-eeprom.
     const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
-    // Broader Raspberry Pi ecosystem classification — the OS-integration/tooling
-    // packages that are specific to Raspberry Pi OS but aren't the kernel or
-    // firmware (already covered by their own tags above): sys/ui/net mods,
-    // config tools (raspi-config and its GUI/companion tools), GPIO/camera
-    // libraries, the Imager, Connect, etc. Any "rpi-*" name is treated as Pi
-    // ecosystem tooling (the prefix isn't used outside this ecosystem in
-    // Debian/Raspberry Pi OS repos). Excludes anything already tagged
-    // kernel/firmware so a package never double-tags. Some companion tools
-    // (e.g. "rc-gui", "rpcc") don't carry a recognizable name prefix at all,
-    // so we also fall back to the dpkg summary mentioning "Raspberry Pi" or
-    // "raspi-config" directly.
-    const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
-    const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
     for (const u of updates) {
       u.description = desc[u.package] || '';
       u.sizeBytes = sizeMap[u.package] || null;
@@ -2808,8 +2820,7 @@ WantedBy=multi-user.target
       // fallback so nothing that was tagged before can regress — and so the
       // tag still works if `apt-cache policy` was unavailable this pass.
       const fromRpiArchive = isRpiArchiveHost(originMap[u.package]) && !isRptRebuild(u.candidate);
-      u.rpi = !u.kernel && !u.firmware
-        && (fromRpiArchive || RPI_RE.test(u.package) || RPI_DESC_RE.test(u.description));
+      u.rpi = rpiTag({ name: u.package, description: u.description, kernel: u.kernel, firmware: u.firmware, fromRpiArchive });
       try { u.installedAt = Math.floor(fs.statSync(`/var/lib/dpkg/info/${u.package}.list`).mtimeMs); }
       catch { u.installedAt = null; }
     }
@@ -3576,4 +3587,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { rpiTag, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };

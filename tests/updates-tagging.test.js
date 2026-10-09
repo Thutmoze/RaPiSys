@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 // the file does not bind the socket: listen() sits behind `require.main`.
 process.env.AGENT_SECRET = 'test-secret-not-used-for-any-real-hmac';
 
-const { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost } =
+const { parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, rpiTag } =
   require('../agent/rapisys-agent.cjs');
 
 describe('isRptRebuild', () => {
@@ -119,5 +119,36 @@ describe('combined rule against real upgrade data', () => {
 
   it('does not tag anything from Debian', () => {
     expect(rpiPkg('deb.debian.org', '25.03.0-5+deb13u4')).toBe(false);     // poppler
+  });
+});
+
+describe('rpiTag: firmware from Raspberry Pi carries the Pi tag too', () => {
+  // Real packages on a Pi 5 (Trixie), 2026-10-09.
+  const pi = (host, version) => isRpiArchiveHost(host) && !isRptRebuild(version);
+
+  it('tags rpi-eeprom (Raspberry Pi archive, its own package) as well as firmware', () => {
+    expect(rpiTag({ name: 'rpi-eeprom', description: 'Raspberry Pi 4/5 boot EEPROM updater', firmware: true,
+      fromRpiArchive: pi('archive.raspberrypi.com', '28.33-1') })).toBe(true);
+    expect(rpiTag({ name: 'raspi-firmware', description: 'Raspberry Pi family GPU firmware and bootloaders', firmware: true,
+      fromRpiArchive: pi('archive.raspberrypi.com', '1:1.20260915-1') })).toBe(true);
+  });
+
+  it('still tags rpi-eeprom by name when the archive origin is unknown', () => {
+    expect(rpiTag({ name: 'rpi-eeprom', firmware: true, fromRpiArchive: false })).toBe(true);
+  });
+
+  it('keeps Debian firmware rebuilt for the Pi firmware-only', () => {
+    expect(rpiTag({ name: 'firmware-brcm80211', description: 'Binary firmware for Broadcom/Cypress 802.11 wireless cards (Raspberry Pi)',
+      firmware: true, fromRpiArchive: pi('archive.raspberrypi.com', '1:20260519-1~bpo13+1+rpt1') })).toBe(false);
+  });
+
+  it('never tags kernels, even from the Raspberry Pi archive', () => {
+    expect(rpiTag({ name: 'linux-image-rpi-2712', kernel: true, fromRpiArchive: true })).toBe(false);
+  });
+
+  it('keeps tagging Pi tooling by name or summary', () => {
+    expect(rpiTag({ name: 'raspi-config' })).toBe(true);
+    expect(rpiTag({ name: 'rc-gui', description: 'raspi-config GUI' })).toBe(true);
+    expect(rpiTag({ name: 'nano', description: 'small editor' })).toBe(false);
   });
 });
