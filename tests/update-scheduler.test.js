@@ -106,9 +106,9 @@ describe('update scheduler', () => {
   it('tick fires within the window after the scheduled time, once per occurrence', async () => {
     const { sched, updates } = fixture({ updatesList: [] });
     await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00', tzOffsetMinutes: 0 });
-    const before = new Date(Date.UTC(2026, 0, 1, 2, 55, 0));  // 02:55 — before target
-    const at = new Date(Date.UTC(2026, 0, 1, 3, 1, 0));       // 03:01 — within 2-min window
-    const after = new Date(Date.UTC(2026, 0, 1, 3, 1, 30));   // 03:01:30 — same occurrence
+    const before = new Date(2026, 0, 1, 2, 55, 0);  // 02:55 — before target
+    const at = new Date(2026, 0, 1, 3, 1, 0);       // 03:01 — within 2-min window
+    const after = new Date(2026, 0, 1, 3, 1, 30);   // 03:01:30 — same occurrence
     await sched.tick(before);
     expect(updates.refresh).toHaveBeenCalledTimes(0);   // not yet due
     await sched.tick(at);
@@ -120,17 +120,17 @@ describe('update scheduler', () => {
   it('does not fire well past the scheduled time (missed window)', async () => {
     const { sched } = fixture();
     const cfg = await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00', tzOffsetMinutes: 0 });
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 3, 1, 0)))).toBe(true);    // 03:01 — in window
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 3, 30, 0)))).toBe(false);  // 03:30 — too late
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 1, 2, 58, 0)))).toBe(false);  // 02:58 — too early
+    expect(sched.isDue(cfg, new Date(2026, 0, 1, 3, 1, 0))).toBe(true);    // 03:01 — in window
+    expect(sched.isDue(cfg, new Date(2026, 0, 1, 3, 30, 0))).toBe(false);  // 03:30 — too late
+    expect(sched.isDue(cfg, new Date(2026, 0, 1, 2, 58, 0))).toBe(false);  // 02:58 — too early
   });
 
   it('isDue respects weekly day-of-week', async () => {
     const { sched } = fixture();
     const cfg = await sched.setConfig({ enabled: true, frequency: 'weekly', time: '03:00', dayOfWeek: 1, tzOffsetMinutes: 0 });
-    // 2026-01-05 is a Monday (getUTCDay()===1)
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 5, 3, 1)))).toBe(true);
-    expect(sched.isDue(cfg, new Date(Date.UTC(2026, 0, 6, 3, 1)))).toBe(false);  // Tuesday
+    // 2026-01-05 is a Monday (getDay()===1)
+    expect(sched.isDue(cfg, new Date(2026, 0, 5, 3, 1))).toBe(true);
+    expect(sched.isDue(cfg, new Date(2026, 0, 6, 3, 1))).toBe(false);  // Tuesday
   });
 
   it('records a failed check distinctly instead of a false zero, and does not email', async () => {
@@ -202,13 +202,26 @@ describe('update scheduler', () => {
     expect(r.flagged).toBe(false);
   });
 
-  it('isDue shifts by tzOffsetMinutes so local time matches a UTC container', async () => {
+  it('runs on the local clock of the Pi, whatever browser offset was saved', async () => {
     const { sched } = fixture();
-    // user in UTC+3 (Doha) wants 03:00 local → that's 00:00 UTC
+    // A stale offset (e.g. captured before a DST change) no longer moves the run.
     const cfg = await sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00', tzOffsetMinutes: 180 });
-    const utcMatch = new Date(Date.UTC(2026, 0, 5, 0, 1));    // 00:01 UTC = 03:01 local — in window
-    const utcLate = new Date(Date.UTC(2026, 0, 5, 3, 5));     // 03:05 UTC = 06:05 local — wrong time
-    expect(sched.isDue(cfg, utcMatch)).toBe(true);            // fires at user's 03:00
-    expect(sched.isDue(cfg, utcLate)).toBe(false);            // not at user's 06:00
+    expect(sched.isDue(cfg, new Date(2026, 0, 5, 3, 1))).toBe(true);     // 03:01 local
+    expect(sched.isDue(cfg, new Date(2026, 0, 5, 0, 1))).toBe(false);    // 00:01 local
+  });
+
+  it('does not fire twice for one occurrence across a restart', async () => {
+    const f = fixture({ updatesList: [] });
+    await f.sched.setConfig({ enabled: true, frequency: 'daily', time: '03:00' });
+    await f.sched.tick(new Date(2026, 0, 1, 3, 0, 30));
+    expect(f.updates.refresh).toHaveBeenCalledTimes(1);
+    // A new scheduler over the same settings = the app restarted inside the window.
+    const { createUpdateScheduler } = await import('../server/services/update-scheduler.js');
+    let settings = f.settings;
+    const again = createUpdateScheduler({ updates: f.updates, mailer: f.mailer, telegram: f.telegram,
+      loadSettings: async () => settings, saveSettings: async (s) => { settings = s; },
+      withFileLock: async (fn) => fn(), events: { add: () => {} } });
+    await again.tick(new Date(2026, 0, 1, 3, 1, 30));
+    expect(f.updates.refresh).toHaveBeenCalledTimes(1);
   });
 });

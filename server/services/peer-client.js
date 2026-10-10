@@ -57,14 +57,30 @@ function fingerprintOf(socket) {
  * Never throws for network conditions — an unreachable peer is a normal state,
  * not an exception.
  */
-export function fetchNodeSummary(baseUrl, apiKey, { timeout = DEFAULT_TIMEOUT } = {}) {
-  return new Promise((resolve) => {
+export function fetchNodeSummary(baseUrl, apiKey, { timeout = DEFAULT_TIMEOUT, deadline = timeout * 2.5 } = {}) {
+  return new Promise((done) => {
     const started = Date.now();
+    // `timeout` is an idle timeout: a peer trickling bytes never trips it. The
+    // deadline bounds the whole exchange, and every path settles exactly once,
+    // so one stuck peer cannot hang the poll cycle (and with it every peer).
+    let settled = false;
+    let req = null;
+    const timer = setTimeout(() => {
+      resolve({ ok: false, state: 'unreachable', latencyMs: Date.now() - started,
+        error: `no complete response within ${Math.round(deadline / 1000)}s` });
+      req?.destroy();
+    }, deadline);
+    function resolve(v) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      done(v);
+    }
     let url;
     try { url = new URL(`${baseUrl}/api/v1/node-summary`); }
     catch { return resolve({ ok: false, state: 'unreachable', error: 'bad URL', latencyMs: 0 }); }
 
-    const req = https.request(url, {
+    req = https.request(url, {
       method: 'GET',
       timeout,
       // Homelab nodes use self-signed certs; the fingerprint pin below is what
@@ -74,7 +90,18 @@ export function fetchNodeSummary(baseUrl, apiKey, { timeout = DEFAULT_TIMEOUT } 
     }, (res) => {
       const fingerprint = fingerprintOf(res.socket);
       let data = '';
-      res.on('data', (c) => { data += c; if (data.length > 1_000_000) req.destroy(); });
+      res.on('data', (c) => {
+        data += c;
+        if (data.length > 1_000_000) {
+          resolve({ ok: false, status: res.statusCode, state: 'unreachable', fingerprint,
+            latencyMs: Date.now() - started, error: 'response too large' });
+          req.destroy();
+        }
+      });
+      res.on('aborted', () => resolve({ ok: false, state: 'unreachable', fingerprint,
+        latencyMs: Date.now() - started, error: 'connection closed mid-response' }));
+      res.on('error', (e) => resolve({ ok: false, state: 'unreachable', fingerprint,
+        latencyMs: Date.now() - started, error: e.message }));
       res.on('end', () => {
         const latencyMs = Date.now() - started;
         let json = null;

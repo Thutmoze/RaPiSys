@@ -42,6 +42,10 @@ export function createMailer({ getSmtpSettings, secrets, events, getNodeName }) 
       requireTLS: !cfg.secure,               // otherwise enforce STARTTLS
       auth: cfg.user ? { user: cfg.user, pass: password || '' } : undefined,
       connectionTimeout: 10000,
+      // nodemailer's defaults are 30 s for the greeting and 10 min of socket
+      // inactivity: a stalled server would hold the alert pass that long.
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
     });
   }
 

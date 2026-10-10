@@ -510,6 +510,14 @@ export function getContainerHealth() {
   return containerHealth;
 }
 
+// Whether the last container listing came back from Docker. A failed read
+// (agent restarting, socket timeout) reports no containers at all; callers
+// that track containers over time must not read that as "all removed".
+let dockerListOk = true;
+export function getDockerListOk() {
+  return dockerListOk;
+}
+
 function healthFromInspect(info) {
   const h = info.State?.Health;
   const last = h?.Log?.length ? h.Log[h.Log.length - 1] : null;
@@ -849,6 +857,7 @@ export async function getSystemStats() {
     // si.dockerContainers(), which only knows /var/run/docker.sock; the fields
     // below are the ones it produced (it never set `status`).
     const listed = await dockerApiGet('/containers/json');
+    dockerListOk = Array.isArray(listed);
     const dockerContainers = Array.isArray(listed) ? listed : [];
     if (dockerContainers.length === 0) containerHealth = new Map();
 
@@ -878,6 +887,7 @@ export async function getSystemStats() {
     }
   } catch (error) {
     console.error('Docker containers error:', error.message);
+    dockerListOk = false;
     containers = [];
   }
 

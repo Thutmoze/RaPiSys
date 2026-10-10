@@ -241,7 +241,7 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 |---|---|
 | `GET /api/history?metric=temp.cpu&range=24h` | stored series, auto-resolution |
 | `GET /api/history/metrics` · `/api/history/events` | available series, event log |
-| `GET /api/health/deep` | db/agent/scheduler/disk health (deploy gate) |
+| `GET /api/health/deep` | db/agent/scheduler/disk health (deploy gate), plus event-loop delay (mean/p50/p99/max over 5 min windows, informational) |
 | `GET /api/hardware` · `POST /api/hardware/fan` | Pi 5 snapshot, fan control 🔒 |
 | `/api/setup/*` | wizard: status, mode, NAS mount, storage, retention, SMTP, complete |
 | `/api/auth/*` | register + MFA enrolment (wizard-only), login, logout, whoami |

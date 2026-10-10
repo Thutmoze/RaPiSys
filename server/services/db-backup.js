@@ -60,16 +60,28 @@ function openReadOnly(file) {
   }
 }
 
-export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, saveSettings, events, now = () => new Date(), isNetworkMount }) {
+export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, saveSettings, events, now = () => new Date(), isNetworkMount, nasTimeoutMs = 5000 }) {
   let running = null;
   let lastAttempt = { at: 0, ok: null, error: null };
   let enabledCache = false;   // refreshed on every settings read (tick is hourly)
 
+  // Every touch of the share is async and bounded: a hung CIFS mount puts a
+  // synchronous stat/readdir into uninterruptible sleep and would freeze the
+  // whole server (the same reason the database itself stays local).
+  const bounded = (p, fallback) => Promise.race([
+    p.catch(() => fallback),
+    new Promise((r) => setTimeout(() => r(fallback), nasTimeoutMs).unref?.()),
+  ]);
+
   // Injected in tests; in production: the mountpoint must really be a share,
   // otherwise an unmounted NAS would silently fill the Pi's own disk.
-  const mounted = isNetworkMount || ((dir) => {
-    try { return fs.statSync(dir).isDirectory() && NETWORK_FS.has(fsTypeOf(dir)); } catch { return false; }
-  });
+  const mounted = (dir) => bounded(isNetworkMount
+    ? Promise.resolve().then(() => isNetworkMount(dir))
+    : fs.promises.stat(dir).then((st) => st.isDirectory() && NETWORK_FS.has(fsTypeOf(dir))), false);
+
+  // status() is polled by the Storage page; the share is read at most this often.
+  const STATUS_TTL_MS = 30e3;
+  let statusCache = null;   // { at, value }
 
   async function settings() {
     const s = await loadSettings();
@@ -78,14 +90,14 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
     return { nas: s.rapisys?.nas || null, config };
   }
 
-  function listBackups(mountpoint) {
+  async function listBackups(mountpoint) {
     const dir = path.join(mountpoint, DB_BACKUP_DIR);
-    let names = [];
-    try { names = fs.readdirSync(dir).filter((n) => NAME_RE.test(n)); } catch { return []; }
-    return names.map((name) => {
-      try { const st = fs.statSync(path.join(dir, name)); return { name, size: st.size, mtime: st.mtimeMs }; }
-      catch { return null; }
-    }).filter(Boolean).sort((a, b) => b.name.localeCompare(a.name));
+    return bounded((async () => {
+      const names = (await fs.promises.readdir(dir)).filter((n) => NAME_RE.test(n));
+      const rows = await Promise.all(names.map((name) => fs.promises.stat(path.join(dir, name))
+        .then((st) => ({ name, size: st.size, mtime: st.mtimeMs }), () => null)));
+      return rows.filter(Boolean).sort((a, b) => b.name.localeCompare(a.name));
+    })(), []);
   }
 
   /** Last failure, if it is newer than the last success (survives restarts via the event log). */
@@ -101,10 +113,16 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
 
   async function status() {
     const { nas, config } = await settings();
-    const backups = nas?.mountpoint && mounted(nas.mountpoint) ? listBackups(nas.mountpoint) : [];
+    let share = statusCache && Date.now() - statusCache.at < STATUS_TTL_MS ? statusCache.value : null;
+    if (!share) {
+      const isMounted = !!(nas?.mountpoint && await mounted(nas.mountpoint));
+      share = { isMounted, backups: isMounted ? await listBackups(nas.mountpoint) : [] };
+      statusCache = { at: Date.now(), value: share };
+    }
+    const { isMounted, backups } = share;
     return {
       nasConfigured: !!nas?.mountpoint,
-      nas: nas ? { label: nas.label, mountpoint: nas.mountpoint, mounted: !!(nas.mountpoint && mounted(nas.mountpoint)) } : null,
+      nas: nas ? { label: nas.label, mountpoint: nas.mountpoint, mounted: isMounted } : null,
       dir: nas?.mountpoint ? path.join(nas.mountpoint, DB_BACKUP_DIR) : null,
       config, backups, running: !!running, failure: lastFailure(backups),
       db: { path: dbMeta().path, fsType: dbMeta().fsType },
@@ -127,7 +145,7 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
     const t0 = Date.now();
     const { nas, config } = await settings();
     if (!nas?.mountpoint) throw new Error('No NAS is configured. Set one up in Settings → Storage first');
-    if (!mounted(nas.mountpoint)) throw new Error(`NAS not mounted: ${nas.mountpoint} is not available`);
+    if (!await mounted(nas.mountpoint)) throw new Error(`NAS not mounted: ${nas.mountpoint} is not available`);
     const meta = dbMeta();
     if (NETWORK_FS.has(meta.fsType)) {
       throw new Error('The database itself is on a network share. Move it to local storage first');
@@ -158,18 +176,18 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
       // 3. compress + copy (streamed)
       log(`Compressing and copying to ${dest}…`);
       const t2 = Date.now();
-      fs.mkdirSync(dir, { recursive: true });
+      await fs.promises.mkdir(dir, { recursive: true });
       await pipeline(fs.createReadStream(tmp), zlib.createGzip({ level: 6 }), fs.createWriteStream(partial));
-      fs.renameSync(partial, dest);
-      const out = fs.statSync(dest).size;
+      await fs.promises.rename(partial, dest);
+      const out = (await fs.promises.stat(dest)).size;
       log(`Copied ${mb(out)} in ${secs(Date.now() - t2)}`);
 
       // 4. prune
-      const all = listBackups(nas.mountpoint);
+      const all = await listBackups(nas.mountpoint);
       const old = all.slice(config.retain);
-      for (const b of old) fs.rmSync(path.join(dir, b.name), { force: true });
-      for (const n of safeReaddir(dir)) {
-        if (n.endsWith('.partial') && path.join(dir, n) !== partial) fs.rmSync(path.join(dir, n), { force: true });
+      for (const b of old) await fs.promises.rm(path.join(dir, b.name), { force: true });
+      for (const n of await bounded(fs.promises.readdir(dir), [])) {
+        if (n.endsWith('.partial') && path.join(dir, n) !== partial) await fs.promises.rm(path.join(dir, n), { force: true });
       }
       if (old.length) log(`Pruned ${old.length} old backup${old.length === 1 ? '' : 's'} (keeping ${config.retain})`);
 
@@ -177,7 +195,7 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
       log(`✓ Backup complete (${mb(out)}).`);
       return result;
     } catch (err) {
-      fs.rmSync(partial, { force: true });
+      await fs.promises.rm(partial, { force: true }).catch(() => {});
       throw err;
     } finally {
       removeSnapshot(tmp);
@@ -199,6 +217,7 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
         throw err;
       } finally {
         running = null;
+        statusCache = null;   // the share changed: show it on the next status()
       }
     })();
     return running;
@@ -210,7 +229,7 @@ export function createDbBackup({ getDb, dbMeta, loadSettings, withFileLock, save
     if (!config.enabled || !nas?.mountpoint || running) return null;
     if (!lastAttempt.ok && lastAttempt.at && Date.now() - lastAttempt.at < RETRY_AFTER_FAIL_MS) return null;
     const interval = config.frequency === 'weekly' ? 7 * 24 * 3600e3 : 24 * 3600e3;
-    const newest = mounted(nas.mountpoint) ? listBackups(nas.mountpoint)[0] : null;
+    const newest = await mounted(nas.mountpoint) ? (await listBackups(nas.mountpoint))[0] : null;
     if (newest && Date.now() - newest.mtime < interval - 3600e3) return null;   // 1 h slack, like Pi-hole
     try { return await run(); } catch { return null; }   // recorded as an event
   }
@@ -230,4 +249,3 @@ const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
 function removeSnapshot(file) {
   for (const f of [file, `${file}-wal`, `${file}-shm`, `${file}-journal`]) fs.rmSync(f, { force: true });
 }
-function safeReaddir(dir) { try { return fs.readdirSync(dir); } catch { return []; } }

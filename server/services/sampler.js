@@ -6,7 +6,7 @@
  * collector (legacy, untouched) plus the new hardware collector.
  */
 
-import { getSystemStats, getContainerHealth } from '../stats.js';
+import { getSystemStats, getContainerHealth, getDockerListOk } from '../stats.js';
 import { slugify } from '../core/metric-catalog.js';
 
 // A container that's fully removed (not just stopped) would otherwise go
@@ -18,19 +18,24 @@ import { slugify } from '../core/metric-catalog.js';
 const CONTAINER_GRACE_MS = 30 * 60 * 1000;
 
 export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, rebootStatus, dbBackup,
-  containerHealth = getContainerHealth }) {
+  containerHealth = getContainerHealth, dockerListOk = getDockerListOk, getStats = getSystemStats }) {
   // slug -> { label, lastSeenTs, image, state, ...health } — used for the
   // grace window, to resolve friendly names in the Alerts metric picker, and
   // for the container health alert texts and Containers card bells.
   const knownContainers = new Map();
   const knownServices = new Map();
+  let statsFailing = false;   // log a failing collector once, not every cycle
 
   async function sampleOnce() {
     const ts = Date.now();
     const samples = [];
 
     const [stats, hw, serviceResults] = await Promise.all([
-      getSystemStats().catch(() => null),
+      getStats().catch((err) => {
+        if (!statsFailing) console.warn(`[sampler] system stats failed: ${err?.message || err}`);
+        statsFailing = true;
+        return null;
+      }).then((s) => { if (s && statsFailing) { statsFailing = false; console.warn('[sampler] system stats recovered'); } return s; }),
       hardware.snapshot().catch(() => null),
       servicesApi
         ? servicesApi.loadServices()
@@ -59,9 +64,13 @@ export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, 
       // container status: 1 = running, 0 = present but not running.
       // Health: 1 = healthy, 0 = unhealthy, nothing while "starting" or when
       // the image has no HEALTHCHECK. Restarts: Docker's RestartCount.
+      // When Docker could not be read this cycle, record nothing for
+      // containers: an empty list would mark every one as removed and fire
+      // "not running" alerts for all of them.
+      const dockerOk = dockerListOk();
       const seenSlugs = new Set();
       const healthByName = containerHealth() || new Map();
-      for (const c of stats.containers || []) {
+      for (const c of dockerOk ? stats.containers || [] : []) {
         if (!c?.name) continue;
         const slug = slugify(c.name);
         seenSlugs.add(slug);
@@ -75,7 +84,7 @@ export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, 
       }
       // grace window: a container that vanished entirely (removed, not just
       // stopped) keeps reading 0 until the window elapses, then is retired.
-      for (const [slug, info] of knownContainers) {
+      for (const [slug, info] of dockerOk ? knownContainers : []) {
         if (seenSlugs.has(slug)) continue;
         if (ts - info.lastSeenTs <= CONTAINER_GRACE_MS) {
           // Still listed by Docker = stopped (keep its exit code); else removed.

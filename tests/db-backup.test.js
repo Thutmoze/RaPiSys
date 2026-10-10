@@ -86,6 +86,23 @@ describe('database backup to NAS', () => {
     expect((await f.svc.status()).failure).toBeNull();
   });
 
+  it('reports a hung share as not mounted instead of freezing', async () => {
+    const f = fixture();
+    const hung = createDbBackup({
+      getDb: () => f.handle.db, dbMeta: () => ({ ...f.handle.meta, fsType: 'ext4' }),
+      loadSettings: async () => structuredClone(f.getSettings()), saveSettings: async () => {},
+      withFileLock: async (fn) => fn(), events: f.events,
+      isNetworkMount: () => new Promise(() => {}),   // a CIFS stat that never returns
+      nasTimeoutMs: 50,
+    });
+    const started = Date.now();
+    const st = await hung.status();
+    expect(st.nas.mounted).toBe(false);
+    expect(st.backups).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1000);
+    await expect(hung.run()).rejects.toThrow(/NAS not mounted/);
+  });
+
   it('refuses while the database itself is on a network share', async () => {
     const f = fixture({ fsType: 'cifs' });
     await expect(f.svc.run()).rejects.toThrow(/network share/);

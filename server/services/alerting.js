@@ -109,40 +109,50 @@ export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer,
     const values = metricsRepo.latestValues();
     for (const rule of alertsRepo.listRules()) {
       if (!rule.enabled) continue;
-      if (rule.metric === CONTAINER_HEALTH_METRIC) {
-        await evaluateContainerRule(rule, values, now);
-        continue;
+      // One rule failing (a DB write, a notifier throwing) must not skip the
+      // rules after it for this pass.
+      try {
+        await evaluateRule(rule, values, now);
+      } catch (err) {
+        console.error(`[alerting] rule ${rule.id} (${rule.metric}) failed: ${err?.message || err}`);
       }
-      const sample = values[rule.metric];
-      if (!sample) continue;                       // metric not collected (yet)
-      const breach = (OPS[rule.op] || OPS['>'])(sample.value, rule.threshold);
-      const st = alertsRepo.getState(rule.id);
+    }
+  }
 
-      if (st.state === 'ok' && breach) {
-        alertsRepo.setState(rule.id, 'pending', now, st.last_notified);
-      } else if (st.state === 'pending') {
-        if (!breach) {
-          alertsRepo.setState(rule.id, 'ok', null, st.last_notified);
-        } else if (now - st.since >= rule.sustain_s * 1000) {
-          alertsRepo.setState(rule.id, 'firing', now, now);
-          alertsRepo.openIncident(rule.id, now, sample.value);
-          const channels = await notify(rule, 'fired', sample.value);
-          alertsRepo.markNotified(rule.id, channels);
-        }
-      } else if (st.state === 'firing') {
-        if (!breach) {
-          alertsRepo.setState(rule.id, 'ok', null, st.last_notified);
-          alertsRepo.resolveIncident(rule.id, now);
-          await notify(rule, 'resolved', sample.value);
-        } else {
-          alertsRepo.updateIncidentPeak(rule.id, sample.value);
-          // Escalation / re-notify after cooldown.
-          const esc = rule.escalate_after_s ? rule.escalate_after_s * 1000 : null;
-          const cooled = now - (st.last_notified || 0) >= rule.cooldown_s * 1000;
-          if (esc && now - st.since >= esc && cooled) {
-            alertsRepo.setState(rule.id, 'firing', st.since, now);
-            await notify(rule, 'fired', sample.value);
-          }
+  async function evaluateRule(rule, values, now) {
+    if (rule.metric === CONTAINER_HEALTH_METRIC) {
+      await evaluateContainerRule(rule, values, now);
+      return;
+    }
+    const sample = values[rule.metric];
+    if (!sample) return;                         // metric not collected (yet)
+    const breach = (OPS[rule.op] || OPS['>'])(sample.value, rule.threshold);
+    const st = alertsRepo.getState(rule.id);
+
+    if (st.state === 'ok' && breach) {
+      alertsRepo.setState(rule.id, 'pending', now, st.last_notified);
+    } else if (st.state === 'pending') {
+      if (!breach) {
+        alertsRepo.setState(rule.id, 'ok', null, st.last_notified);
+      } else if (now - st.since >= rule.sustain_s * 1000) {
+        alertsRepo.setState(rule.id, 'firing', now, now);
+        alertsRepo.openIncident(rule.id, now, sample.value);
+        const channels = await notify(rule, 'fired', sample.value);
+        alertsRepo.markNotified(rule.id, channels);
+      }
+    } else if (st.state === 'firing') {
+      if (!breach) {
+        alertsRepo.setState(rule.id, 'ok', null, st.last_notified);
+        alertsRepo.resolveIncident(rule.id, now);
+        await notify(rule, 'resolved', sample.value);
+      } else {
+        alertsRepo.updateIncidentPeak(rule.id, sample.value);
+        // Escalation / re-notify after cooldown.
+        const esc = rule.escalate_after_s ? rule.escalate_after_s * 1000 : null;
+        const cooled = now - (st.last_notified || 0) >= rule.cooldown_s * 1000;
+        if (esc && now - st.since >= esc && cooled) {
+          alertsRepo.setState(rule.id, 'firing', st.since, now);
+          await notify(rule, 'fired', sample.value);
         }
       }
     }

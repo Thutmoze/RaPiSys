@@ -166,3 +166,20 @@ describe('utmp parser', () => {
     expect(out[0].loginAt).toBe(1770000000000);
   });
 });
+
+describe('alert engine isolation', () => {
+  it('evaluates the remaining rules when one rule throws', async () => {
+    const f = fixture();
+    const bad = f.alertsRepo.createRule({ name: 'bad', metric: 'cpu.usage', op: '>', threshold: 1,
+      sustain_s: 0, severity: 'warning', enabled: 1, cooldown_s: 900, escalate_after_s: null, channels: ['ui'] });
+    const good = f.alertsRepo.createRule({ name: 'good', metric: 'temp.cpu', op: '>', threshold: 80,
+      sustain_s: 0, severity: 'critical', enabled: 1, cooldown_s: 900, escalate_after_s: null, channels: ['ui'] });
+    const t0 = Date.now();
+    f.metricsRepo.writeBatch(t0, [{ metric: 'cpu.usage', value: 50 }, { metric: 'temp.cpu', value: 90 }]);
+    const getState = f.alertsRepo.getState;
+    f.alertsRepo.getState = (id) => { if (id === bad) throw new Error('boom'); return getState(id); };
+    await f.engine.evaluateOnce(t0);
+    await f.engine.evaluateOnce(t0 + 1000);
+    expect(getState(good).state).toBe('firing');
+  });
+});

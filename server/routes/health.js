@@ -4,7 +4,7 @@ import express from 'express';
 import fs from 'fs';
 import { agentAvailable, agentStatus } from '../core/agent-client.js';
 
-export function deepHealthRouter({ dbMeta, scheduler, getDb }) {
+export function deepHealthRouter({ dbMeta, scheduler, getDb, eventLoop }) {
   const r = express.Router();
   r.get('/', async (req, res) => {
     const checks = {};
@@ -25,6 +25,8 @@ export function deepHealthRouter({ dbMeta, scheduler, getDb }) {
       checks.disk = { ok: stat.bavail * stat.bsize > 100 * 1024 * 1024,
         freeBytes: stat.bavail * stat.bsize };
     } catch { checks.disk = { ok: true }; }
+    // Informational: how long the main thread was blocked (never fails the check).
+    if (eventLoop) checks.eventLoop = eventLoop.status();
     const ok = checks.database.ok && checks.scheduler.ok; // agent optional
     res.status(ok ? 200 : 503).json({ ok, checks, ts: Date.now() });
   });

@@ -69,6 +69,7 @@ import { pironmanRouter } from './routes/pironman.js';
 import { createDiskCollector } from './collectors/disk.js';
 import { diskRouter } from './routes/disk.js';
 import { nightAction } from './services/night-schedule.js';
+import { createEventLoopMonitor } from './core/event-loop.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -430,7 +431,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   // requireConfig: open in monitor mode, auth-required in full mode.
   const rc = auth.requireConfig;
   app.use('/api/history', rc, historyRouter({ metricsRepo: metricsFacade, eventsRepo: eventsFacade }));
-  app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb }));
+  app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb, eventLoop: createEventLoopMonitor() }));
   app.use('/api/health/agent', agentHealthRouter({ getNodeName }));
   app.use('/api/auth', authRouter({ auth, loadSettings }));
   // Mount-level auth on every data router: requireConfig is open in monitor mode

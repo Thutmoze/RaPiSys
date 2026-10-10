@@ -50,6 +50,7 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
         telegramEnabled: patch.telegramEnabled != null ? !!patch.telegramEnabled : cur.telegramEnabled,
         lastRun: cur.lastRun || null,   // preserve the last-run summary across edits
         runHistory: cur.runHistory || [],
+        lastFiredKey: cur.lastFiredKey || null,
       };
       s.rapisys.updateSchedule = saved;
       await saveSettings(s);
@@ -247,34 +248,29 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
     return { skipped: null, ...result };
   }
 
-  // The scheduler ticks every ~10 min; this fires the check once when the
-  // current local time has reached the scheduled HH:MM (within a tick window)
-  // on a matching day, and not already fired for that occurrence. The container
-  // clock is UTC, so we shift `now` by tzOffsetMinutes (minutes to ADD to UTC
-  // to get the user's local time) captured by the browser when saved.
+  // The scheduler ticks every minute; this fires the check once when the
+  // local time has reached the scheduled HH:MM (within a tick window) on a
+  // matching day, and not already fired for that occurrence. "Local" is the
+  // Pi's own clock: the container runs with the host's TZ, so DST changes are
+  // followed. (tzOffsetMinutes, a browser offset captured at save time, is
+  // still stored but no longer used: it went stale at every DST change.)
   const TICK_WINDOW_MS = 2 * 60000;   // fire within ~1-2 min of the target (60s tick)
-  let lastFiredKey = null;
-  function localNow(cfg, now = new Date()) {
-    const offsetMin = Number(cfg.tzOffsetMinutes) || 0;
-    return new Date(now.getTime() + offsetMin * 60000);
-  }
-  // The scheduled local Date for the day `local` falls on.
-  function scheduledTimeOn(cfg, local) {
+  let lastFiredKey = null;            // also persisted, so a restart in the window cannot fire twice
+  // The scheduled local Date for the day `now` falls on.
+  function scheduledTimeOn(cfg, now) {
     const [h, m] = String(cfg.time || '03:00').split(':').map(Number);
-    const t = new Date(local.getTime());
-    t.setUTCHours(h, m, 0, 0);   // local is a UTC-shifted clock, so use UTC setters
+    const t = new Date(now.getTime());
+    t.setHours(h, m, 0, 0);
     return t;
   }
-  function dayMatches(cfg, local) {
-    if (cfg.frequency === 'weekly') return local.getUTCDay() === cfg.dayOfWeek;
-    if (cfg.frequency === 'monthly') return local.getUTCDate() === cfg.dayOfMonth;
+  function dayMatches(cfg, now) {
+    if (cfg.frequency === 'weekly') return now.getDay() === cfg.dayOfWeek;
+    if (cfg.frequency === 'monthly') return now.getDate() === cfg.dayOfMonth;
     return true;   // daily
   }
   function isDue(cfg, now = new Date()) {
-    const local = localNow(cfg, now);
-    if (!dayMatches(cfg, local)) return false;
-    const target = scheduledTimeOn(cfg, local);
-    const delta = local.getTime() - target.getTime();
+    if (!dayMatches(cfg, now)) return false;
+    const delta = now.getTime() - scheduledTimeOn(cfg, now).getTime();
     // due if we're at or just past the scheduled time, within one tick window
     return delta >= 0 && delta < TICK_WINDOW_MS;
   }
@@ -282,11 +278,18 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
     const cfg = await getConfig();
     if (!cfg.enabled) return;
     if (!isDue(cfg, now)) return;
-    const local = localNow(cfg, now);
     // one fire per scheduled day+time occurrence
-    const key = `${local.getUTCFullYear()}-${local.getUTCMonth()}-${local.getUTCDate()}-${cfg.time}`;
-    if (key === lastFiredKey) return;                  // already fired this occurrence
+    const key = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${cfg.time}`;
+    if (key === lastFiredKey || key === cfg.lastFiredKey) return;   // already fired this occurrence
     lastFiredKey = key;
+    try {
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        s.rapisys.updateSchedule = { ...(s.rapisys.updateSchedule || {}), lastFiredKey: key };
+        await saveSettings(s);
+      });
+    } catch { /* the in-memory key still prevents a second fire until restart */ }
     try { await runOnce(); } catch (err) { events?.add?.('update.check.fail', 'warning', { error: err.message }); }
   }
 
