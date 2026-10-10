@@ -17,7 +17,7 @@ jobs:
     env:
       # The host agent creates its socket directory when loaded; on the
       # (non-root) runner it must not be /run/rapisys.
-      AGENT_SOCKET_DIR: ${{ runner.temp }}/rapisys
+      AGENT_SOCKET_DIR: /tmp/rapisys
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
