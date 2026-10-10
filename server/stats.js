@@ -722,7 +722,6 @@ function getHostOsInfo() {
 const staticCache = {
   osInfo: null,
   hostOsInfo: null,
-  networkInterfaces: null,
   lastDiskCheck: 0,
   disks: [],
   lastStaticRefresh: 0
@@ -821,13 +820,12 @@ export async function getSystemStats() {
   
   // Refresh static data only every minute
   if (!staticCache.osInfo || now - staticCache.lastStaticRefresh > STATIC_CACHE_TTL) {
-    const [osInfo, networkInterfaces] = await Promise.all([
-      si.osInfo(),
-      si.networkInterfaces().catch(() => [])
-    ]);
-    staticCache.osInfo = osInfo;
+    // No si.networkInterfaces() here: its result was never used, and it runs
+    // synchronous shell commands per interface (~300 ms of blocked event loop
+    // every minute on a node with ~20 Docker veths/bridges). Interface data in
+    // the response comes from getHostNetworkInfo().
+    staticCache.osInfo = await si.osInfo();
     staticCache.hostOsInfo = getHostOsInfo();
-    staticCache.networkInterfaces = networkInterfaces;
     staticCache.lastStaticRefresh = now;
   }
   
@@ -848,7 +846,6 @@ export async function getSystemStats() {
   ]);
   
   const osInfo = staticCache.osInfo;
-  const networkInterfaces = staticCache.networkInterfaces;
 
   // Get Docker containers with stats
   let containers = [];
