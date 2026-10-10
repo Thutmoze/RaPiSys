@@ -1,5 +1,39 @@
 /** RaPiSys — update_history repository. */
 
+// Firmware classification — mirrors the agent's rule (name prefix or a dpkg
+// summary that mentions "firmware") so the History tag matches the Available
+// Updates tag for the same package.
+const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
+const isFirmwarePkg = (name, desc) => FIRMWARE_RE.test(String(name || '')) || /firmware/i.test(String(desc || ''));
+// Raspberry Pi ecosystem classification — mirrors the agent's rpiTag()
+// without the archive origin, which History doesn't record. Raspberry Pi's
+// own firmware (rpi-eeprom, raspi-firmware) carries both the firmware and
+// the raspberry pi tag; generic firmware only matches by name, never by a
+// summary mentioning the Pi. Kernels never get it. Companion tools without
+// a recognizable name prefix (e.g. "rc-gui", "rpcc") are caught by the
+// description fallback.
+const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
+const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
+// Same kernel rule as the agent's isKernelPkg(). Raspberry Pi kernels carry
+// the raspberry pi tag too; History has no archive origin, so they are
+// recognised by name (linux-image-rpi-2712, ...+rpt-rpi-2712, linux-kbuild-...+rpt).
+const KERNEL_RE = /^linux-(image|headers|kbuild|base|libc-dev)|^raspberrypi-kernel/;
+const RPI_KERNEL_NAME_RE = /-rpi|\+rpt|^raspberrypi-kernel/;
+const isKernelPkg = (name) => KERNEL_RE.test(String(name || ''));
+// Same as the agent's isRpiArchiveHost() / isRptRebuild().
+const isRpiArchiveHost = (host) => /(^|\.)raspberrypi\.(com|org)$/i.test(String(host || ''));
+const isRptRebuild = (version) => /[+~]rpt(\d{1,5})(?!\d)/.test(String(version || ''));
+// With the origin recorded, History tags exactly like the agent's rpiTag();
+// without it (older rows), by name only.
+const isRpiPkg = (name, kernel, fw, desc, origin = null, toV = null) => {
+  if (kernel) return origin ? isRpiArchiveHost(origin) : RPI_KERNEL_NAME_RE.test(String(name || ''));
+  return (!!origin && isRpiArchiveHost(origin) && !isRptRebuild(toV))
+    || RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || '')));
+};
+
+/** The tagging rules, for the parity test against the agent's (tests/updates-tag-parity.test.js). */
+export const tagging = { isKernelPkg, isFirmwarePkg, isRpiPkg, isRpiArchiveHost, isRptRebuild };
+
 export function createUpdatesRepo(db) {
   // sentinel stored in update_changelogs.changelog to mark "we downloaded the
   // package and it has no obtainable changelog" — distinct from "never fetched".
@@ -106,36 +140,6 @@ export function createUpdatesRepo(db) {
   // captured from the Available Updates entry; null for rows from before.
   try { db.exec(`ALTER TABLE update_history ADD COLUMN origin TEXT`); } catch { /* exists */ }
 
-  // Firmware classification — mirrors the agent's rule (name prefix or a dpkg
-  // summary that mentions "firmware") so the History tag matches the Available
-  // Updates tag for the same package.
-  const FIRMWARE_RE = /^(rpi-eeprom|rpieeprom|rpifw|librpieeprom|librpifw|raspi-firmware|raspberrypi-bootloader|firmware-)/;
-  const isFirmwarePkg = (name, desc) => FIRMWARE_RE.test(String(name || '')) || /firmware/i.test(String(desc || ''));
-  // Raspberry Pi ecosystem classification — mirrors the agent's rpiTag()
-  // without the archive origin, which History doesn't record. Raspberry Pi's
-  // own firmware (rpi-eeprom, raspi-firmware) carries both the firmware and
-  // the raspberry pi tag; generic firmware only matches by name, never by a
-  // summary mentioning the Pi. Kernels never get it. Companion tools without
-  // a recognizable name prefix (e.g. "rc-gui", "rpcc") are caught by the
-  // description fallback.
-  const RPI_RE = /^(raspberrypi-|libraspberrypi|raspi-|rpi-|pi-bluetooth|wiringpi|pigpio|python3-rpi\.gpio|python3-rpi-lgpio|python3-gpiozero|python3-picamera|libcamera|rpicam-)/;
-  const RPI_DESC_RE = /raspberry\s*pi|raspi-config/i;
-  // Same kernel rule as the agent's isKernelPkg(). Raspberry Pi kernels carry
-  // the raspberry pi tag too; History has no archive origin, so they are
-  // recognised by name (linux-image-rpi-2712, ...+rpt-rpi-2712, linux-kbuild-...+rpt).
-  const KERNEL_RE = /^linux-(image|headers|kbuild|base|libc-dev)|^raspberrypi-kernel/;
-  const RPI_KERNEL_NAME_RE = /-rpi|\+rpt|^raspberrypi-kernel/;
-  const isKernelPkg = (name) => KERNEL_RE.test(String(name || ''));
-  // Same as the agent's isRpiArchiveHost() / isRptRebuild().
-  const isRpiArchiveHost = (host) => /(^|\.)raspberrypi\.(com|org)$/i.test(String(host || ''));
-  const isRptRebuild = (version) => /[+~]rpt(\d{1,5})(?!\d)/.test(String(version || ''));
-  // With the origin recorded, History tags exactly like the agent's rpiTag();
-  // without it (older rows), by name only.
-  const isRpiPkg = (name, kernel, fw, desc, origin = null, toV = null) => {
-    if (kernel) return origin ? isRpiArchiveHost(origin) : RPI_KERNEL_NAME_RE.test(String(name || ''));
-    return (!!origin && isRpiArchiveHost(origin) && !isRptRebuild(toV))
-      || RPI_RE.test(String(name || '')) || (!fw && RPI_DESC_RE.test(String(desc || '')));
-  };
   // Rows recorded under older rules (firmware and kernels never got the Pi
   // tag; the kernel rule differed from the agent's): re-derive the kernel and
   // raspberry pi flags from the current rules. Idempotent; only touches rows
