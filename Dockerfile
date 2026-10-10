@@ -24,8 +24,12 @@ WORKDIR /app
 RUN apk add --no-cache procps util-linux iproute2 wireguard-tools
 
 COPY package*.json ./
+# Build caches go in the same step as the install, or they stay in the
+# image layer: node-gyp's headers (~65 MB in /root/.cache) and npm's cache.
 RUN apk add --no-cache --virtual .build python3 make g++ \
  && npm ci --omit=dev \
+ && npm cache clean --force \
+ && rm -rf /root/.cache /root/.npm /tmp/* \
  && apk del .build
 
 COPY --from=builder /app/dist ./dist
