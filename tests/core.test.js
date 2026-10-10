@@ -62,7 +62,8 @@ describe('metrics repo', () => {
     for (let i = 0; i < 6; i++) {
       repo.writeBatch(base + i * 10000, [{ metric: 'cpu.usage', value: i * 10 }]);
     }
-    const moved = repo.downsample('10s', '1m', 60000, base + 7 * 10000);
+    // Cutoff past the last (whole) minute bucket the rows fall in.
+    const moved = repo.downsample('10s', '1m', 60000, base + 10 * 10000);
     expect(moved).toBeGreaterThan(0);
     const { res, points } = repo.query('cpu.usage', base - 60000, base + 70000, '1m');
     expect(res).toBe('1m');

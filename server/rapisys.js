@@ -68,6 +68,7 @@ import { createPironmanClient } from './collectors/pironman.js';
 import { pironmanRouter } from './routes/pironman.js';
 import { createDiskCollector } from './collectors/disk.js';
 import { diskRouter } from './routes/disk.js';
+import { nightAction } from './services/night-schedule.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -488,12 +489,13 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     const sched = cfg.nightSchedule;
     if (!sched?.enabled) { nightInWindow = null; return; }
     const want = inOffWindow(sched);
-    if (want === nightInWindow) return;   // no transition
+    const action = nightAction(nightInWindow, want, !!sched._saved);
+    if (action === 'none') { nightInWindow = want; return; }
     const snap = await pironman.snapshot({ withDetect: false }).catch(() => null);
     if (!snap || snap.installed !== true) return;
     const t = sched.targets || { rgb: true, fanLed: true };
 
-    if (want) {
+    if (action === 'off') {
       // Entering the window: snapshot current light state, then switch off.
       const saved = {
         rgb_enable: snap.rgb?.enable ?? null,
@@ -524,6 +526,13 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       if (t.fanLed) patch.gpio_fan_led = saved.gpio_fan_led || 'follow';
       if (Object.keys(patch).length) await pironman.setConfig(patch).catch(() => {});
       eventsFacade.add('case.night_lights_on', 'info', { targets: t, restored: saved });
+      // Restored: the snapshot is spent, so a later restart does not replay it.
+      await withFileLock(async () => {
+        const st = await loadSettings();
+        const ns = st.rapisys?.pironman?.nightSchedule;
+        if (ns && '_saved' in ns) { delete ns._saved; await saveSettings(st); }
+      });
+      await refreshPironmanConfig();
     }
     nightInWindow = want;
   });

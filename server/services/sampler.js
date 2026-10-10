@@ -52,15 +52,9 @@ export function createSampler({ metricsRepo, eventsRepo, hardware, servicesApi, 
       const legacyTemp = stats.temperature?.main || null;
       const hwTemp = hw?.thermal?.cpuTemp ?? null;
       samples.push({ metric: 'temp.cpu', value: hwTemp ?? legacyTemp });
-      // network is { interfaces, stats } from the legacy collector;
-      // stats entries carry per-second rates computed from /proc/net/dev deltas.
-      for (const iface of stats.network?.stats || []) {
-        if (!iface.iface) continue;
-        samples.push(
-          { metric: `net.${iface.iface}.rx`, value: iface.rxSec ?? iface.rx_sec ?? null },
-          { metric: `net.${iface.iface}.tx`, value: iface.txSec ?? iface.tx_sec ?? null },
-        );
-      }
+      // net.<iface>.rx/tx are recorded by the 'net-sampler' job alone (the
+      // network collector's throughput(), with its interface filter): writing
+      // them here too interleaved two sources in one series.
 
       // container status: 1 = running, 0 = present but not running.
       // Health: 1 = healthy, 0 = unhealthy, nothing while "starting" or when

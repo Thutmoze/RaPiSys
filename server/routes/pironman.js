@@ -101,6 +101,8 @@ export function pironmanRouter({ pironman, requireControl, loadSettings, saveSet
             rgb: typeof b?.targets?.rgb === 'boolean' ? b.targets.rgb : (cur.targets?.rgb ?? true),
             fanLed: typeof b?.targets?.fanLed === 'boolean' ? b.targets.fanLed : (cur.targets?.fanLed ?? true),
           },
+          // Editing the schedule mid-window must not lose the lights to restore.
+          ...(cur._saved ? { _saved: cur._saved } : {}),
         };
         await saveSettings(s);
       });

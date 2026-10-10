@@ -69,7 +69,10 @@ export function createReports({ metricsRepo, eventsRepo, reportsRepo, getStorage
     out.push(materializeDay(startOfDay(Date.now())));
     for (let i = 1; i <= n; i++) {
       const dayStart = startOfDay(Date.now() - i * 86400e3);
-      if (!reportsRepo.getDaily(ymd(dayStart))) out.push(materializeDay(dayStart));
+      // A past day still marked partial was last written while it was today:
+      // finish it from the full day's data.
+      const have = reportsRepo.getDaily(ymd(dayStart));
+      if (!have || have.partial) out.push(materializeDay(dayStart));
     }
     return out;
   }
@@ -130,4 +133,9 @@ export function createReports({ metricsRepo, eventsRepo, reportsRepo, getStorage
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const startOfDay = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
-const ymd = (ts) => new Date(ts).toISOString().slice(0, 10);
+// Local calendar date, matching startOfDay(): toISOString() is UTC, so east of
+// UTC local midnight fell on the previous date and every day was filed a day early.
+const ymd = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};

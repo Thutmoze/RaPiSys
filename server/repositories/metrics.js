@@ -17,13 +17,38 @@ export function createMetricsRepo(db) {
     }
   });
 
-  /** Query a series; resolution picked automatically from the time range. */
+  /**
+   * Query a series.
+   *
+   * With an explicit `res`, reads that tier only (falling back to raw rows
+   * when it is empty). Otherwise the resolution comes from the span, and the
+   * data from every tier that overlaps the range: retention keeps tiers by
+   * AGE (raw for 48 h, 1m to 30 d, 10m to 90 d, 1h beyond), so a 24 h or 7 d
+   * window is mostly raw rows, which are bucketed here to the target size.
+   */
+  const allTiersRaw = db.prepare(
+    `SELECT ts, value, vmin, vmax FROM metrics
+     WHERE metric = ? AND res IN ('10s', '1m', '10m', '1h') AND ts BETWEEN ? AND ? ORDER BY ts`
+  );
+  // Bucket size inlined as an integer literal so `ts / n` is integer division.
+  const bucketed = (bucketMs) => db.prepare(
+    `SELECT (ts / ${bucketMs}) * ${bucketMs} AS ts, AVG(value) AS value,
+            MIN(COALESCE(vmin, value)) AS vmin, MAX(COALESCE(vmax, value)) AS vmax
+     FROM metrics
+     WHERE metric = ? AND res IN ('10s', '1m', '10m', '1h') AND ts BETWEEN ? AND ?
+     GROUP BY ts / ${bucketMs} ORDER BY ts`
+  );
+  const AUTO_STMT = { '10s': allTiersRaw, '1m': bucketed(60000), '10m': bucketed(600000), '1h': bucketed(3600000) };
+
   function query(metric, fromTs, toTs, res = null) {
-    const span = toTs - fromTs;
-    const auto = span <= 6 * 3600e3 ? '10s'
-      : span <= 48 * 3600e3 ? '1m'
-      : span <= 30 * 86400e3 ? '10m' : '1h';
-    let useRes = res || auto;
+    if (!res) {
+      const span = toTs - fromTs;
+      const auto = span <= 6 * 3600e3 ? '10s'
+        : span <= 48 * 3600e3 ? '1m'
+        : span <= 30 * 86400e3 ? '10m' : '1h';
+      return { res: auto, points: AUTO_STMT[auto].all(metric, fromTs, toTs) };
+    }
+    let useRes = res;
     let rows = db.prepare(
       `SELECT ts, value, vmin, vmax FROM metrics
        WHERE metric = ? AND res = ? AND ts BETWEEN ? AND ? ORDER BY ts`
@@ -64,6 +89,10 @@ export function createMetricsRepo(db) {
    * raw rows are deleted. Called by the retention job for each tier.
    */
   function downsample(fromRes, toRes, bucketMs, olderThanTs) {
+    // Only whole buckets: a bucket straddling the cutoff would be written now
+    // from its early rows, then overwritten next run from the rest alone,
+    // losing the first part's min/max.
+    olderThanTs = Math.floor(olderThanTs / bucketMs) * bucketMs;
     const agg = db.prepare(
       `SELECT metric, (ts / ${bucketMs}) * ${bucketMs} AS bts,
               AVG(value) AS v, MIN(COALESCE(vmin, value)) AS mn, MAX(COALESCE(vmax, value)) AS mx
