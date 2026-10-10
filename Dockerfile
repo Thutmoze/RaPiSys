@@ -38,8 +38,11 @@ COPY agent/rapisys-agent.cjs ./agent/rapisys-agent.cjs
 COPY settings.json ./settings.json
 
 # Run as non-root: privileged work happens in the host agent, not here.
+# The app only writes under /app/data (settings, database); its code and
+# node_modules stay root-owned and read-only to it. (A `chown -R /app` here
+# copied every file into one more ~32 MB layer.)
 RUN addgroup -g 990 rapisys && adduser -D -G rapisys -u 990 rapisys \
- && mkdir -p /app/data && chown -R rapisys:rapisys /app
+ && mkdir -p /app/data && chown rapisys:rapisys /app/data
 USER rapisys
 
 # ===================
