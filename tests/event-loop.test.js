@@ -26,12 +26,28 @@ describe('stall detector', () => {
     await new Promise((r) => setTimeout(r, 30));
     const until = Date.now() + 150;
     while (Date.now() < until) { /* sync block */ }
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 300));   // attribution is recorded a moment later
     det.stop();
     const [s] = det.stalls();
     expect(s.blockedMs).toBeGreaterThanOrEqual(100);
     expect(s.jobs).toEqual(['retention']);
     expect(logs[0]).toMatch(/blocked \d+ ms/);
+  });
+
+  it('attributes a forced major GC pause', async () => {
+    const { createStallDetector } = await import('../server/core/event-loop.js');
+    const { setFlagsFromString } = await import('v8');
+    const { runInNewContext } = await import('vm');
+    setFlagsFromString('--expose-gc');
+    const gc = runInNewContext('gc');
+    const det = createStallDetector({ thresholdMs: 1, intervalMs: 5, log: () => {} });
+    await new Promise((r) => setTimeout(r, 20));
+    const junk = Array.from({ length: 200000 }, (_, i) => ({ i, s: 'x'.repeat(20) }));
+    gc();
+    junk.length = 0;
+    await new Promise((r) => setTimeout(r, 300));
+    det.stop();
+    expect(det.stalls().some((s) => s.gcMs && Object.keys(s.gcMs).length)).toBe(true);
   });
 });
 
