@@ -144,6 +144,17 @@ const LABEL_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const HOST_RE = /^[A-Za-z0-9._-]{1,253}$/;
 const SHARE_RE = /^[A-Za-z0-9 _./-]{1,128}$/;
 const MOUNT_BASE = '/mnt/rapisys';
+// A mountpoint argument must be a normalized path strictly under MOUNT_BASE:
+// '/mnt/rapisys/../../etc' starts with the base but resolves outside it.
+function underMountBase(mountpoint) {
+  return typeof mountpoint === 'string' && mountpoint === path.posix.normalize(mountpoint)
+    && mountpoint.startsWith(MOUNT_BASE + '/') && !mountpoint.split('/').includes('..');
+}
+// systemd unit names as accepted from the dashboard. The first character may
+// not be '-': systemctl would read the argument as an option.
+const UNIT_NAME_RE = /^[a-zA-Z0-9@][a-zA-Z0-9@._\\-]{0,127}$/;
+// Where certificates are written. Fixed here, not taken from the caller.
+const TLS_DIR = '/var/lib/rapisys/tls';
 const ALLOWED_CIFS_OPTS = new Set(['vers=1.0', 'vers=2.0', 'vers=2.1', 'vers=3.0', 'vers=3.1.1',
   'ro', 'rw', 'noperm', 'iocharset=utf8', 'file_mode=0664', 'dir_mode=0775',
   'nofail', '_netdev', 'soft', 'noserverino', 'nounix', 'nobrl',
@@ -1309,7 +1320,7 @@ const OPS = {
   },
 
   async 'inventory.serviceControl'({ name, action }) {
-    assert(/^[a-zA-Z0-9@._\\-]{1,128}$/.test(name), 'invalid service');
+    assert(UNIT_NAME_RE.test(String(name || '')), 'invalid service');
     assert(['stop', 'start', 'restart', 'disable', 'enable'].includes(action), 'invalid action');
     const r = await run('systemctl', [action, `${name}.service`], 15000);
     return { ok: r.code === 0, log: (r.stderr || r.stdout || '') };
@@ -1340,7 +1351,7 @@ const OPS = {
     return { services };
   },
   async 'inventory.serviceDetail'({ name }) {
-    assert(/^[a-zA-Z0-9@._\\-]{1,128}$/.test(name), 'invalid service name');
+    assert(UNIT_NAME_RE.test(String(name || '')), 'invalid service name');
     const r = await run('systemctl',
       ['show', `${name}.service`, '-p', 'ActiveEnterTimestamp,MainPID,MemoryCurrent,ExecMainStartTimestamp,UnitFileState'], 6000)
       .catch(() => ({ code: 1, stdout: '' }));
@@ -2199,8 +2210,7 @@ const OPS = {
   // take a CONSISTENT copy with sqlite3 .backup (safe while FTL is writing),
   // gzip it, and drop it on the NAS mount. Old backups are pruned to `retain`.
   async 'pihole.backupToNas'({ mountpoint, retain = 14 } = {}, send) {
-    assert(typeof mountpoint === 'string' && mountpoint.startsWith(MOUNT_BASE + '/'),
-      `mountpoint must be under ${MOUNT_BASE}`);
+    assert(underMountBase(mountpoint), `mountpoint must be under ${MOUNT_BASE}`);
     const r = Math.min(Math.max(parseInt(retain, 10) || 14, 1), 365);
     // NAS must be mounted.
     const st = await OPS['nas.status']({ mountpoint });
@@ -2273,8 +2283,7 @@ const OPS = {
 
   // List existing Pi-hole backups on the NAS.
   async 'pihole.backupStatus'({ mountpoint } = {}) {
-    assert(typeof mountpoint === 'string' && mountpoint.startsWith(MOUNT_BASE + '/'),
-      `mountpoint must be under ${MOUNT_BASE}`);
+    assert(underMountBase(mountpoint), `mountpoint must be under ${MOUNT_BASE}`);
     const dir = path.join(mountpoint, 'pihole-backups');
     if (!fs.existsSync(dir)) return { backups: [] };
     const backups = fs.readdirSync(dir).filter((f) => /^pihole-FTL-.*\.db\.gz$/.test(f))
@@ -2555,12 +2564,12 @@ const OPS = {
 
   /** Which processes hold a mountpoint open — the answer to "target is busy". */
   async 'nas.holders'({ mountpoint }) {
-    assert(mountpoint.startsWith(MOUNT_BASE), `mountpoint must be under ${MOUNT_BASE}`);
+    assert(underMountBase(mountpoint), `mountpoint must be under ${MOUNT_BASE}`);
     return { mounted: await isMounted(mountpoint), holders: await mountHolders(mountpoint) };
   },
 
   async 'nas.status'({ mountpoint }) {
-    assert(mountpoint.startsWith(MOUNT_BASE), `mountpoint must be under ${MOUNT_BASE}`);
+    assert(underMountBase(mountpoint), `mountpoint must be under ${MOUNT_BASE}`);
     const { stdout } = await run('findmnt', ['-J', '-o', 'TARGET,SOURCE,FSTYPE,OPTIONS', mountpoint], 5000)
       .catch(() => ({ stdout: '' }));
     let info = null;
@@ -3326,7 +3335,8 @@ WantedBy=multi-user.target
   // Cert+key live in a host dir bind-mounted into the container read-only.
   // Generate a long-lived self-signed cert covering localhost, the LAN IP and
   // the hostname. No external dependency; browsers warn once until trusted.
-  async 'tls.selfSigned'({ dir = '/var/lib/rapisys/tls', altNames = [] } = {}) {
+  async 'tls.selfSigned'({ dir = TLS_DIR, altNames = [] } = {}) {
+    assert(dir === TLS_DIR, `certificates are only written to ${TLS_DIR}`);
     fs.mkdirSync(dir, { recursive: true });
     const crt = path.join(dir, 'server.crt');
     const key = path.join(dir, 'server.key');
@@ -3363,7 +3373,8 @@ WantedBy=multi-user.target
 
   // Provision (or renew) a Tailscale cert. Re-running only fetches a new cert
   // when the current one is near expiry, so a periodic call = auto-renew.
-  async 'tls.tailscaleCert'({ dir = '/var/lib/rapisys/tls', dnsName = null } = {}) {
+  async 'tls.tailscaleCert'({ dir = TLS_DIR, dnsName = null } = {}) {
+    assert(dir === TLS_DIR, `certificates are only written to ${TLS_DIR}`);
     fs.mkdirSync(dir, { recursive: true });
     let name = dnsName;
     if (!name) {
@@ -3405,6 +3416,30 @@ function verify({ id, op, params, ts, hmac }) {
   } catch { return false; }
 }
 
+/**
+ * Authenticate and run one request. Only the ops table's OWN keys are ops:
+ * inherited names ('constructor', 'toString', '__proto__') are refused like
+ * any other unknown op. Never throws; the result is the reply body.
+ */
+async function dispatch(req, onStream = () => {}) {
+  if (!verify(req || {})) {
+    console.warn(`[agent] DENIED unauthenticated request op=${req?.op}`);
+    return { ok: false, error: 'authentication failed' };
+  }
+  if (typeof req.op !== 'string' || !Object.hasOwn(OPS, req.op)) {
+    console.warn(`[agent] DENIED non-allowlisted op=${req.op}`);
+    return { ok: false, error: `operation not allowed: ${req.op}` };
+  }
+  console.log(`[agent] op=${req.op} params=${redactParams(req.params)}`);
+  try {
+    // Invoke via OPS so handlers that call this['other.op'] (e.g. removePackage
+    // → removeSimulate guard) have `this` bound to the ops table.
+    return { ok: true, result: await OPS[req.op](req.params || {}, onStream) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 fs.mkdirSync(SOCKET_DIR, { recursive: true });
 try { fs.unlinkSync(SOCKET_PATH); } catch { /* fresh */ }
 
@@ -3419,26 +3454,7 @@ const server = net.createServer((sock) => {
     try { req = JSON.parse(line); } catch { sock.end(); return; }
 
     const reply = (obj) => sock.write(JSON.stringify({ id: req.id, ...obj }) + '\n');
-    if (!verify(req)) {
-      console.warn(`[agent] DENIED unauthenticated request op=${req.op}`);
-      reply({ ok: false, error: 'authentication failed' });
-      return sock.end();
-    }
-    const handler = OPS[req.op];
-    if (!handler) {
-      console.warn(`[agent] DENIED non-allowlisted op=${req.op}`);
-      reply({ ok: false, error: `operation not allowed: ${req.op}` });
-      return sock.end();
-    }
-    console.log(`[agent] op=${req.op} params=${redactParams(req.params)}`);
-    try {
-      // Invoke via OPS so handlers that call this['other.op'] (e.g. removePackage
-      // → removeSimulate guard) have `this` bound to the ops table.
-      const result = await OPS[req.op](req.params || {}, (streamLine) => reply({ stream: streamLine }));
-      reply({ ok: true, result });
-    } catch (err) {
-      reply({ ok: false, error: err.message });
-    }
+    reply(await dispatch(req, (streamLine) => reply({ stream: streamLine })));
     sock.end();
   });
   sock.on('error', () => {});
@@ -3618,4 +3634,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { AGENT_SHA256, redactParams, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { AGENT_SHA256, redactParams, verify, dispatch, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
