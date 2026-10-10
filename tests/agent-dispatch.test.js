@@ -12,7 +12,7 @@ import crypto from 'crypto';
 const require = createRequire(import.meta.url);
 const SECRET = 'test-secret-not-used-for-any-real-hmac';
 process.env.AGENT_SECRET = SECRET;
-const { dispatch, verify, underMountBase, UNIT_NAME_RE, TLS_DIR } = require('../agent/rapisys-agent.cjs');
+const { dispatch, verify, underMountBase, UNIT_NAME_RE, TLS_DIR, onConnection, MAX_REQUEST_BYTES } = require('../agent/rapisys-agent.cjs');
 
 let n = 0;
 function signed(op, params = {}, { ts = Date.now(), secret = SECRET } = {}) {
@@ -65,6 +65,7 @@ describe('agent parameter validation', () => {
     ['inventory.remove', { name: 'curl', confirm: 'wget' }, /confirmation mismatch/],
     ['docker.removeContainer', { name: '--force' }, /invalid container name/],
     ['remote.installSshKey', { username: 'Bad User', pubkey: 'ssh-ed25519 AAAA' }, /invalid username/],
+    ['remote.installSshKey', { username: 'root', pubkey: 'ssh-ed25519 AAAA' }, /does not log in as root/],
     ['remote.installSshKey', { username: 'pi', pubkey: 'ssh-ed25519 AAAA\nssh-rsa EVIL' }, /malformed public key/],
     ['nas.mount', { label: '../x', proto: 'cifs', host: 'nas', share: 's', mountpoint: '/mnt/rapisys/x' }, /invalid label/],
     ['disk.clean', { categories: [] }, /no categories selected/],
@@ -88,5 +89,35 @@ describe('agent parameter validation', () => {
     for (const u of ['ssh', 'docker', 'getty@tty1', 'systemd-resolved', 'mnt-rapisys-my\\x2dbook']) expect(UNIT_NAME_RE.test(u)).toBe(true);
     for (const u of ['-H', '--now', '.hidden', '']) expect(UNIT_NAME_RE.test(u)).toBe(false);
     expect(TLS_DIR).toBe('/var/lib/rapisys/tls');
+  });
+});
+
+describe('agent without a secret', () => {
+  it('refuses to start, so nothing can be signed with an empty key', async () => {
+    const { spawnSync } = await import('child_process');
+    const agentPath = new URL('../agent/rapisys-agent.cjs', import.meta.url).pathname;
+    const r = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(agentPath)})`], {
+      env: { ...process.env, AGENT_SECRET: '' }, encoding: 'utf-8', timeout: 20000,
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/AGENT_SECRET missing/);
+  });
+});
+
+describe('agent socket', () => {
+  it('drops a connection that sends more than the request limit without a newline', async () => {
+    const net = await import('net');
+    const server = net.createServer(onConnection);
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const reply = await new Promise((resolve, reject) => {
+      const c = net.connect(server.address().port, '127.0.0.1');
+      let got = '';
+      c.on('data', (d) => { got += d; });
+      c.on('end', () => resolve(got));
+      c.on('error', reject);
+      c.write('x'.repeat(MAX_REQUEST_BYTES + 10));
+    });
+    server.close();
+    expect(JSON.parse(reply)).toEqual({ ok: false, error: 'request too large' });
   });
 });

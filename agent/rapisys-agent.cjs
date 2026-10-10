@@ -1033,6 +1033,9 @@ const OPS = {
   async 'remote.installSshKey'({ username, pubkey } = {}) {
     assert(typeof username === 'string' && /^[a-z_][a-z0-9_-]{0,31}$/.test(username),
       'invalid username');
+    // The browser terminal logs in as a regular account, never as root: a key
+    // in root's authorized_keys would make the dashboard a root shell.
+    assert(username !== 'root', 'the terminal does not log in as root; use a regular account');
     assert(typeof pubkey === 'string' && pubkey.length > 0, 'missing public key');
     // Reject embedded newlines/NULs/control chars up front so nothing extra can
     // be smuggled onto its own line (or as options) in authorized_keys.
@@ -1048,6 +1051,7 @@ const OPS = {
     assert(ent.code === 0 && ent.stdout.trim(), `user '${username}' not found on this host`);
     const parts = ent.stdout.trim().split(':');
     const uid = parseInt(parts[2], 10), gid = parseInt(parts[3], 10), home = parts[5];
+    assert(uid !== 0, `'${username}' is a root account (uid 0); use a regular account`);
     assert(Number.isInteger(uid) && Number.isInteger(gid) && home && fs.existsSync(home),
       `home directory for '${username}' not found`);
 
@@ -3406,6 +3410,8 @@ function redactParams(params) {
 }
 
 function verify({ id, op, params, ts, hmac }) {
+  // No secret configured: an HMAC keyed with '' is one anyone can compute.
+  if (!SECRET) return false;
   if (!id || !op || typeof ts !== 'number') return false;
   if (Math.abs(Date.now() - ts) > REPLAY_WINDOW_MS) return false;
   const expect = crypto.createHmac('sha256', SECRET)
@@ -3443,12 +3449,23 @@ async function dispatch(req, onStream = () => {}) {
 fs.mkdirSync(SOCKET_DIR, { recursive: true });
 try { fs.unlinkSync(SOCKET_PATH); } catch { /* fresh */ }
 
-const server = net.createServer((sock) => {
+// A request is one JSON line of op params: kilobytes. Anything this long
+// without a newline is not a request; drop it instead of buffering forever.
+const MAX_REQUEST_BYTES = 1024 * 1024;
+
+function onConnection(sock) {
   let buf = '';
   sock.on('data', async (chunk) => {
     buf += chunk.toString('utf-8');
     const nl = buf.indexOf('\n');
-    if (nl === -1) return;
+    if (nl === -1) {
+      if (buf.length > MAX_REQUEST_BYTES) {
+        buf = '';
+        sock.removeAllListeners('data');
+        sock.end(JSON.stringify({ ok: false, error: 'request too large' }) + '\n');
+      }
+      return;
+    }
     const line = buf.slice(0, nl);
     let req;
     try { req = JSON.parse(line); } catch { sock.end(); return; }
@@ -3458,7 +3475,9 @@ const server = net.createServer((sock) => {
     sock.end();
   });
   sock.on('error', () => {});
-});
+}
+
+const server = net.createServer(onConnection);
 
 // ---- Disk cleanup helpers ---------------------------------------------------
 
@@ -3634,4 +3653,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { AGENT_SHA256, redactParams, verify, dispatch, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
