@@ -1,0 +1,35 @@
+# RaPiSys CI: the same checks run before every commit (tests in UTC and in a
+# UTC+ zone, where the date-handling bugs showed up), plus the frontend build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The host agent creates its socket directory when loaded; on the
+      # (non-root) runner it must not be /run/rapisys.
+      AGENT_SOCKET_DIR: ${{ runner.temp }}/rapisys
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tests (UTC)
+        run: npm test
+      - name: Tests (Africa/Cairo)
+        run: npm test
+        env:
+          TZ: Africa/Cairo
+      - name: Frontend build
+        run: npm run build
