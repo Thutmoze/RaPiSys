@@ -129,7 +129,7 @@ async function api(path, opts = {}, retried = false) {
 // App-native confirm dialog (replaces window.confirm's browser chrome)
 // ---------------------------------------------------------------------------
 
-const escNodeName = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const escNodeName = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', cancelLabel = 'Cancel', html = false, confirmIcon = null, cls = '', onMount = null } = {}) {
   return new Promise((resolve) => {
@@ -274,6 +274,10 @@ let loginPromise = null;
 // Once the user dismisses the login modal, background 401s stop auto-popping it
 // (the nav-rail lock icon still opens it on demand). Reset on a successful sign-in.
 let loginSnoozed = false;
+// The legacy dashboard (main.js) polls /api/stats with plain fetch. In full
+// mode a signed-out browser gets 401 there: it asks for the sign-in dialog
+// through this hook, once, unless the visitor already dismissed it.
+window.rapisysRequestLogin = () => (loginSnoozed ? Promise.resolve(false) : showLogin());
 function showLogin() {
   if (loginPromise) return loginPromise;       // one modal at a time
   loginPromise = new Promise((resolve) => {
@@ -409,7 +413,7 @@ function setStatus(el, ok, msg) {
 // guess between overwriting it and switching to its older history). The
 // relocate endpoint refuses (409) unless these answers are sent.
 function wireStorageCheck({ input, box, goBtn }) {
-  const escH = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const escH = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const mb = (b) => (b == null ? '—' : b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1048576).toFixed(1)} MB`);
   const day = (ts) => (ts ? rapisysFmtTime(ts, { dateOnly: true }) : null);
   const span = (f) => (f.from && f.to ? `${day(f.from)} to ${day(f.to)}` : 'unknown');
@@ -1259,7 +1263,7 @@ pageRenderers.sessions = (() => {
     return d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m`;
   };
   const fmtTime = (ts) => rapisysFmtTime(ts);
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   async function refresh(host) {
     let snap;
@@ -1473,7 +1477,7 @@ pageRenderers.sessions = (() => {
 
 pageRenderers.alerts = (() => {
   let timer = null, editingId = null;   // editingId: rule being edited (null = adding new)
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const SEV_CLASS = { info: 'sev-info', warning: 'sev-warning', critical: 'sev-critical' };
   // Container health rule form state (metric 'docker.health').
   let liveContainers = [];
@@ -2014,7 +2018,7 @@ pageRenderers.alerts = (() => {
 // ---------------------------------------------------------------------------
 
 pageRenderers.settings = (() => {
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // edit-mode flags: when a section is already configured we show a read-only
   // summary with an Edit button, and only reveal the form when editing.
   let editSmtp = false, editDb = false, editNas = false, editPw = false, editTg = false, editPihole = false, editBackup = false, editPrefs = false, editTls = false;
@@ -4854,7 +4858,7 @@ pageRenderers.network = (() => {
   const series = {};            // iface -> { rx: TimeSeries, tx: TimeSeries }
   const selected = new Set();   // multi-select focus (empty = show all)
   let nethogsLive = false, nethogsTimer = null;
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // Distinct colors per interface, reused for both the line and its label.
   const PALETTE = ['#00d4ff', '#a855f7', '#10b981', '#f97316', '#eab308', '#ec4899', '#38bdf8', '#84cc16'];
@@ -5255,7 +5259,7 @@ pageRenderers.reports = (() => {
   let FACTOR_ORDER = [];
   let hostRef = null;
 
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const colFor = (s) => (s >= 80 ? '#10b981' : s >= 60 ? '#eab308' : '#ef4444');
   const pillCls = (o) => (o >= 80 ? 'good' : o >= 60 ? 'warn' : 'bad');
   const verdict = (o) => (o >= 80 ? 'Good' : o >= 60 ? 'Fair' : 'Degraded');
@@ -5635,7 +5639,7 @@ pageRenderers.inventory = (() => {
   let facetData = null;
   const LIMIT = 50;
   let searchTimer = null;
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtDate = (ts) => ts ? rapisysFmtDate(ts) : '—';
   const fmtSize = (kb) => kb ? (kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`) : '';
 
@@ -6241,7 +6245,7 @@ pageRenderers.inventory = (() => {
 // ===========================================================================
 pageRenderers.disk = (() => {
   const LOCK_ICON = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmtB = (b) => { b = Number(b) || 0; if (b >= 1073741824) return `${(b / 1073741824).toFixed(2)} GB`; if (b >= 1048576) return `${(b / 1048576).toFixed(1)} MB`; if (b >= 1024) return `${(b / 1024).toFixed(0)} KB`; return `${b} B`; };
   const BROOM = '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M19.0,2.0 L18.7,2.0 L18.1,2.4 L14.1,9.2 L13.8,9.1 L12.7,9.2 L11.7,9.8 L10.6,10.9 L10.0,11.8 L8.3,13.5 L7.5,14.1 L5.9,14.6 L4.5,14.8 L4.2,15.0 L4.3,15.9 L5.2,16.9 L6.0,16.9 L7.0,16.6 L7.2,16.8 L6.2,17.7 L6.8,18.3 L8.7,19.6 L9.7,18.7 L10.7,17.5 L10.9,17.7 L10.2,20.4 L13.1,21.6 L13.1,20.0 L13.3,19.9 L14.1,21.9 L15.5,21.9 L15.8,21.4 L15.0,19.0 L15.0,17.0 L16.4,12.8 L16.4,11.4 L15.7,9.9 L19.7,3.1 L19.7,2.6 Z"/></svg>';
 
@@ -6533,7 +6537,7 @@ pageRenderers.updates = (() => {
   const HIST_LIMIT = 50;
   let streaming = false, expandedLog = null, logCache = {}, editSchedule = false, schedPollHost = null;
   const oldExpanded = new Set();
-  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   // inline glyphs (stroke icons matching the app's Lucide-style set)
   const ICN = {
     refresh: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>',
@@ -8540,7 +8544,7 @@ const containerBells = (() => {
   const BELL_ON = '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>';
   const BELL_OFF = '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>';
   const PILL = { healthy: ['ch-healthy', 'Healthy'], unhealthy: ['ch-unhealthy', 'Unhealthy'], starting: ['ch-starting', 'Starting'] };
-  const escA = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const escA = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   function decorate() {
     if (!grid || !byName.size) return;

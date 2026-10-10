@@ -372,8 +372,8 @@ function showToast(type, title, message, duration = 3000) {
   toast.innerHTML = `
     <div class="toast-icon"><svg><use href="#icon-${type}"/></svg></div>
     <div class="toast-content">
-      <div class="toast-title">${title}</div>
-      <div class="toast-message">${message}</div>
+      <div class="toast-title">${escapeHtml(title)}</div>
+      <div class="toast-message">${escapeHtml(message)}</div>
     </div>
     <button class="toast-close"><svg><use href="#icon-close"/></svg></button>
   `;
@@ -495,7 +495,7 @@ function createDiskCards(disks) {
   elements.disksGrid.innerHTML = disks.map(disk => `
     <div class="disk-card">
       <div class="disk-header">
-        <span class="disk-mount">${disk.mount}</span>
+        <span class="disk-mount">${escapeHtml(disk.mount)}</span>
         <span class="disk-percent">${disk.percent}%</span>
       </div>
       <div class="disk-bar">
@@ -524,10 +524,10 @@ function createContainerCards(containers) {
     return `
       <div class="container-card">
         <div class="container-header">
-          <span class="container-name">${container.name}</span>
-          <span class="container-status ${statusClass}"><span class="status-dot"></span>${container.state}</span>
+          <span class="container-name">${escapeHtml(container.name)}</span>
+          <span class="container-status ${statusClass}"><span class="status-dot"></span>${escapeHtml(container.state)}</span>
         </div>
-        <div class="container-image">${container.image}</div>
+        <div class="container-image">${escapeHtml(container.image)}</div>
         <div class="container-stats">
           <div class="container-stat"><div class="container-stat-label">CPU</div><div class="container-stat-value cpu">${container.cpuPercent}%</div></div>
           <div class="container-stat"><div class="container-stat-label">Memory</div><div class="container-stat-value mem">${container.memPercent}%</div></div>
@@ -553,9 +553,9 @@ function createNetworkCards(network) {
         <div class="network-header">
           <div class="network-iface">
             <div class="network-iface-icon"><svg><use href="#icon-wifi"/></svg></div>
-            <span>${iface.name}</span>
+            <span>${escapeHtml(iface.name)}</span>
           </div>
-          <span class="network-ip">${iface.ip4}</span>
+          <span class="network-ip">${escapeHtml(iface.ip4)}</span>
         </div>
         <div class="network-stats">
           <div class="network-stat">
@@ -589,11 +589,11 @@ function createServicesGrid(services) {
 
   elements.servicesGrid.innerHTML = services.map(service => `
     <div class="service-card">
-      <div class="service-icon"><svg><use href="#icon-${service.icon || 'server'}"/></svg></div>
-      <div class="service-status ${service.status}"></div>
+      <div class="service-icon"><svg><use href="#icon-${escapeHtml(service.icon || 'server')}"/></svg></div>
+      <div class="service-status ${escapeHtml(service.status)}"></div>
       <div class="service-info">
-        <div class="service-name">${service.name}</div>
-        <div class="service-latency">${service.status === 'online' ? `${service.latency}ms` : service.status}</div>
+        <div class="service-name">${escapeHtml(service.name)}</div>
+        <div class="service-latency">${service.status === 'online' ? `${service.latency}ms` : escapeHtml(service.status)}</div>
       </div>
       <div class="service-port">:${service.port}</div>
     </div>
@@ -604,6 +604,10 @@ function createServicesGrid(services) {
 async function updateServices() {
   try {
     const response = await fetch(`${API_URL}/services`);
+    if (response.status === 401) {
+      elements.servicesGrid.innerHTML = '<div class="no-services">Sign in to check services</div>';
+      return;
+    }
     const services = await response.json();
     createServicesGrid(services);
   } catch (error) {
@@ -688,8 +692,8 @@ function createProcessesList(processes) {
       row.dataset.pid = proc.pid;
       const cmdDisplay = proc.cmd || proc.name;
       row.innerHTML = `
-        <span class="process-name" title="${proc.name}">${proc.name}</span>
-        <span class="process-cmd" title="${cmdDisplay}">${cmdDisplay}</span>
+        <span class="process-name" title="${escapeHtml(proc.name)}">${escapeHtml(proc.name)}</span>
+        <span class="process-cmd" title="${escapeHtml(cmdDisplay)}">${escapeHtml(cmdDisplay)}</span>
         <span class="process-cpu">
           <div class="process-bar"><div class="process-bar-fill" style="width: ${Math.min(proc.cpu, 100)}%"></div></div>
           <span class="process-value">${proc.cpu}%</span>
@@ -833,9 +837,20 @@ function getTempColor(temp) {
 // Sparklines handled by Smoothie Charts
 
 // Update dashboard
+let statsSignedOut = false;
 async function updateDashboard() {
   try {
     const response = await fetch(`${API_URL}/stats`);
+    if (response.status === 401) {
+      // Full mode, not signed in: the server is fine, the data needs a session.
+      if (!statsSignedOut) { statsSignedOut = true; window.rapisysRequestLogin?.(); }
+      return;
+    }
+    if (statsSignedOut) {
+      // Just signed in: the display preferences were unreadable until now.
+      statsSignedOut = false;
+      loadSettingsFromServer();
+    }
     const stats = await response.json();
 
     // Update hostname (the element lives in the nav brand, built dynamically)
@@ -1812,11 +1827,11 @@ let servicesConfigLoading = false;
 let servicesRequiresAuth = false;
 let discoveredServices = [];
 
-// XSS Protection - escape HTML entities
+// XSS Protection - escape HTML entities. Covers quotes too, so the result is
+// safe inside attribute values as well as element content.
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text ?? '').replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // Set loading state on save button

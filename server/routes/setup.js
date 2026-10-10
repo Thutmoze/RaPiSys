@@ -11,7 +11,7 @@
  *
  * Until setup is completed these endpoints are open (the dashboard is
  * LAN-facing and there is nothing to protect yet). The moment setup is
- * completed every mutating endpoint here requires the admin token.
+ * completed every mutating endpoint here requires Pi control (see gate()).
  */
 
 import express from 'express';
@@ -74,21 +74,42 @@ export function mountpointFor(label) {
 }
 
 export function setupRouter({ loadSettings, saveSettings, withFileLock,
-  secrets, mailer, telegram, reopenDb, dbMeta, fallbackDbPath, requireAuth, events }) {
+  secrets, mailer, telegram, reopenDb, dbMeta, fallbackDbPath, requireAuth, requireControl = requireAuth, events }) {
   const r = express.Router();
 
-  /** Gate: open until setup completed, admin-token protected afterwards. */
+  /**
+   * Gate: open until setup completed. Afterwards every change here is Pi
+   * control (NAS mounts, database location, operating mode, where alert mail
+   * and Telegram messages go), so it needs requireControl: a signed-in admin
+   * in full mode, and refused outright in monitor mode, where requireConfig
+   * would be open to anyone on the network. Retention is a plain setting.
+   */
   async function gate(req, res, next) {
     if (req.method === 'GET') return next();
     const settings = await loadSettings();
-    if (settings.rapisys?.setupCompleted) return requireAuth(req, res, next);
-    return next();
+    if (!settings.rapisys?.setupCompleted) return next();
+    if (req.path === '/retention') return requireAuth(req, res, next);
+    return requireControl(req, res, next);
   }
   r.use(gate);
+
+  /** Whether an auth middleware would let this request through, without answering it. */
+  function passes(mw, req) {
+    return new Promise((resolve) => {
+      const res = { status: () => res, json: () => resolve(false) };
+      Promise.resolve(mw(req, res, () => resolve(true))).catch(() => resolve(false));
+    });
+  }
 
   // -- status ----------------------------------------------------------------
   r.get('/status', async (req, res) => {
     const settings = await loadSettings();
+    // Once setup is done, only a reader (signed in in full mode) sees where
+    // mail, Telegram, the NAS and the database are. The page load needs no
+    // more than "is the wizard done" before sign-in.
+    if (settings.rapisys?.setupCompleted && !(await passes(requireAuth, req))) {
+      return res.json({ completed: true, mode: settings.rapisys?.mode === 'full' ? 'full' : 'monitor' });
+    }
     res.json({
       completed: !!settings.rapisys?.setupCompleted,
       agent: await agentAvailable(),
@@ -185,7 +206,7 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
   // while the share had already been dropped from settings. The agent now
   // verifies the unmount, settings are only cleared once it has, and the event
   // write cannot affect the outcome.
-  r.post('/nas/unmount', requireAuth, async (req, res) => {
+  r.post('/nas/unmount', requireControl, async (req, res) => {
     const mountpoint = String(req.body?.mountpoint || '');
     if (!mountpoint.startsWith('/mnt/rapisys/')) {
       return res.status(400).json({ error: 'mountpoint must be under /mnt/rapisys' });
@@ -217,7 +238,7 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
   const swapJobs = new Map();
   const SWAP_TTL_MS = 120000;
 
-  r.post('/nas/swap', requireAuth, async (req, res) => {
+  r.post('/nas/swap', requireControl, async (req, res) => {
     const { label, proto, host, share, username, password, smbVersion, nfsVersion, readOnly } = req.body || {};
     if (!label || !host || !share) return res.status(400).json({ error: 'label, host and share are required' });
     const id = crypto.randomUUID();
@@ -236,7 +257,7 @@ export function setupRouter({ loadSettings, saveSettings, withFileLock,
    * where it came from. The worst case leaves the DB on local storage with the
    * old share mounted — degraded but running and writable, never stranded.
    */
-  r.get('/nas/swap/stream', requireAuth, async (req, res) => {
+  r.get('/nas/swap/stream', requireControl, async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.flushHeaders?.();

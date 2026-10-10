@@ -438,7 +438,7 @@ async function persistOrder(ids) {
   } catch { /* order is best-effort; UI already updated */ }
 }
 
-function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 // Modal dialog for creating/editing a dashboard: name field + glyph picker.
 // Returns { name, glyph } on save, or null on cancel.

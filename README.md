@@ -272,14 +272,17 @@ RAPISYS_DEMO=1 node server/index.js
 
 - **Full-control mode** gates Pi-control behind a local admin with optional (default-on) TOTP MFA: passwords are scrypt-hashed, the TOTP secret is AES-256-GCM encrypted at rest, browser sessions are random 256-bit values stored only as SHA-256 hashes (30-day sliding expiry), and logins are rate-limited (10 attempts / 15 min / IP) with every attempt audit-logged.
 - In full-control mode, the **Sessions** page (who is logged in, source IPs, Tailscale devices) requires the admin session; unauthenticated browsers get the sign-in dialog.
-- **Monitor-only mode** disables Pi-control endpoints entirely; there is nothing to log into and nothing a LAN guest can change on the Pi.
+- In full-control mode every data endpoint needs the admin session, including the legacy ones (`/api/stats`, `/api/sysinfo`, `/api/services`, `/api/settings`): a signed-out browser gets the sign-in dialog and no host data (process command lines included). `/api/health` stays open for health checks, and `/api/setup/status` tells a signed-out browser only whether setup is done.
+- Browser requests from another site, or another app on the same Pi (a different port), are refused on `/api` (`Sec-Fetch-Site`), so a link elsewhere cannot start an upgrade or package change in a signed-in admin's browser. Scripts and peers (no such header) are unaffected; origins listed in `CORS_ORIGINS` stay allowed.
+- **Monitor-only mode** disables Pi-control endpoints entirely, setup changes after the wizard included (NAS, database location, mode, SMTP, Telegram); there is nothing to log into and nothing a LAN guest can change on the Pi.
 - Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall).
 - `ADMIN_TOKEN` (deploy.sh generates one) is for API automation.
 - SMTP/NAS credentials are AES-256-GCM-encrypted with `SECRET_KEY`; the API never returns them.
 - NAS credentials additionally live only in root-only files on the host (`/etc/rapisys/creds/*.cred`, 0600).
 - SMB1 (needed by the WD My Book World Edition II) is insecure by nature; the wizard warns and we recommend isolating such devices on a trusted VLAN.
 - **Pi-hole DB backups** never run the live SQLite database off the NAS (SQLite over CIFS/NFS risks corruption and can stop FTL from starting). The live DB stays on the Pi; RaPiSys archives a consistent, gzipped `sqlite3 .backup` snapshot to the NAS on a schedule, pruned to a retention count.
-- The agent socket is `0660 root:rapisys`; every operation is HMAC-verified with a 30 s replay window and audit-logged to journald.
+- The agent socket is `0660 root:rapisys`; every operation is HMAC-verified with a 30 s replay window and audit-logged to journald, with credentials in its parameters (passwords, auth keys, tokens) redacted.
+- `deploy.sh` upgrade snapshots (`/var/lib/rapisys/snapshots`, which hold `.env` and the database) are root-only.
 - **No Docker socket in the container.** `/var/run/docker.sock` is full control of Docker (mounting it `:ro` does not stop API writes), which is root on the host. Instead the agent serves `/run/rapisys/docker-ro.sock` (`0660 root:rapisys`), which forwards only `GET /containers/json` and `GET /containers/<id>/json`, with each container's environment stripped from inspect data. Everything else gets a 403 and a journald entry. Removing a container from Inventory goes through the allowlisted `docker.removeContainer` agent op.
 - **Case controller (Pironman):** the optional SunFounder pm_dashboard listens on port 34001 without authentication. RaPiSys talks to it on localhost; the Case tab warns you to keep that port firewalled or bound to localhost on a shared LAN, and the SunFounder software runs as its own GPL process, isolated from RaPiSys.
 

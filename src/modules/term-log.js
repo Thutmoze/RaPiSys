@@ -9,7 +9,7 @@
  * termLineHtml() is pure (unit-tested); createTermLog() builds the DOM.
  */
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const span = (cls, text) => `<span class="${cls}">${esc(text)}</span>`;
 
 /**

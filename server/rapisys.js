@@ -602,7 +602,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/setup', setupRouter({
     loadSettings, saveSettings, withFileLock,
     secrets: secretsFacade, mailer, telegram, reopenDb, dbMeta,
-    fallbackDbPath: fallbackPath, requireAuth: auth.requireConfig, events: eventsFacade,
+    fallbackDbPath: fallbackPath, requireAuth: auth.requireConfig, requireControl: auth.requireControl,
+    events: eventsFacade,
   }));
 
   console.log(`[rapisys] db=${handle.meta.path} engine=${handle.meta.engine} `

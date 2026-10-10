@@ -235,7 +235,13 @@ prune_build_cache() {
 
 snapshot() {
   log "Taking snapshot…"
+  # Snapshots hold .env (SECRET_KEY, AGENT_SECRET, ADMIN_TOKEN) and the DB:
+  # root-only, including those taken by older versions of this script.
+  local old_umask; old_umask=$(umask)
+  umask 077
   mkdir -p "$SNAP_DIR"
+  chmod 700 "$SNAP_DIR"
+  chmod -R go-rwx "$SNAP_DIR"
   local stamp; stamp=$(date +%Y%m%d-%H%M%S)
   local dir="${SNAP_DIR}/${stamp}"
   mkdir -p "$dir"
@@ -269,6 +275,7 @@ snapshot() {
     docker rmi "$tag" >/dev/null 2>&1 && removed=$((removed+1))
   done
   if [[ $removed -gt 0 ]]; then ok "removed ${removed} orphaned snapshot image(s)"; fi
+  umask "$old_umask"
   ok "snapshot ${stamp} (kept: $(ls -1d "${SNAP_DIR}"/*/ | wc -l))"
 }
 

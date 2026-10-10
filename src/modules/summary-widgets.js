@@ -211,7 +211,7 @@ export const SUMMARY_WIDGETS = [
 
 // --- helpers ---------------------------------------------------------------
 
-function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 function shortResolver(r) {
   if (!r) return '—';

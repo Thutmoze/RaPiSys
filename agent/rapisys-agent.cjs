@@ -2086,7 +2086,9 @@ const OPS = {
       '      - NET_ADMIN',
       '    restart: unless-stopped',
     ].join('\n') + '\n';
-    fs.writeFileSync(path.join(dir, 'docker-compose.yml'), compose, { mode: 0o644 });
+    // Holds the web password: root-only (mode only applies when creating).
+    fs.writeFileSync(path.join(dir, 'docker-compose.yml'), compose, { mode: 0o600 });
+    fs.chmodSync(path.join(dir, 'docker-compose.yml'), 0o600);
     send('Pulling image and starting container…');
     const up = await runStreaming('sh', ['-c', `cd ${shq(dir)} && (docker compose up -d || docker-compose up -d)`], {}, send);
     assert(up.code === 0, `docker compose failed (code ${up.code})`);
@@ -3384,6 +3386,14 @@ WantedBy=multi-user.target
 // Socket server
 // ---------------------------------------------------------------------------
 
+// Op params as they go to the journal: credentials (NAS password, Tailscale
+// auth key, Pi-hole web password, ...) are replaced, everything else kept so
+// the log still says what was asked for.
+const SECRET_PARAM_RE = /pass|secret|token|authkey|apikey/i;
+function redactParams(params) {
+  return JSON.stringify(params || {}, (k, v) => (k && SECRET_PARAM_RE.test(k) && v ? '[redacted]' : v));
+}
+
 function verify({ id, op, params, ts, hmac }) {
   if (!id || !op || typeof ts !== 'number') return false;
   if (Math.abs(Date.now() - ts) > REPLAY_WINDOW_MS) return false;
@@ -3420,7 +3430,7 @@ const server = net.createServer((sock) => {
       reply({ ok: false, error: `operation not allowed: ${req.op}` });
       return sock.end();
     }
-    console.log(`[agent] op=${req.op} params=${JSON.stringify(req.params || {})}`);
+    console.log(`[agent] op=${req.op} params=${redactParams(req.params)}`);
     try {
       // Invoke via OPS so handlers that call this['other.op'] (e.g. removePackage
       // → removeSimulate guard) have `this` bound to the ops table.
@@ -3608,4 +3618,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { AGENT_SHA256, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { AGENT_SHA256, redactParams, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
