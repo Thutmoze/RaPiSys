@@ -38,3 +38,29 @@ export function createEventLoopMonitor({ resolutionMs = 20, windowMs = WINDOW_MS
   function stop() { clearInterval(timer); h.disable(); }
   return { status, stop };
 }
+
+/**
+ * Stall detector: a short timer that notices when it fired late by more than
+ * `thresholdMs`, then asks `attribute(from, to)` what was running in that
+ * span. Keeps the last few stalls for /api/health/deep and logs each one.
+ */
+export function createStallDetector({ thresholdMs = 200, intervalMs = 50, keep = 20, attribute = () => ({}), log = console.warn } = {}) {
+  const stalls = [];
+  let last = Date.now();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    const blockedMs = now - last - intervalMs;
+    if (blockedMs > thresholdMs) {
+      const from = last + intervalMs;
+      let who = {};
+      try { who = attribute(from, now) || {}; } catch { /* attribution is best-effort */ }
+      const stall = { at: new Date(from).toISOString(), blockedMs, ...who };
+      stalls.push(stall);
+      if (stalls.length > keep) stalls.shift();
+      log(`[event-loop] blocked ${blockedMs} ms; ${JSON.stringify(who)}`);
+    }
+    last = now;
+  }, intervalMs);
+  timer.unref?.();
+  return { stalls: () => [...stalls], stop: () => clearInterval(timer) };
+}

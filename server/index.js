@@ -11,6 +11,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createFetchSiteGuard } from './core/fetch-site-guard.js';
+import { trackRequests } from './core/request-log.js';
 
 const execAsync = promisify(exec);
 
@@ -388,6 +389,7 @@ export function checkService(service) {
 // Middleware
 // ===================
 
+app.use(trackRequests); // recent request paths, for event-loop stall attribution
 app.use(express.json({ limit: '10kb' })); // Limit payload size
 
 // HTTP→HTTPS redirect (opt-in, only when HTTPS is listening). Skips the health

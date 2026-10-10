@@ -6,6 +6,7 @@
  *  - jitter: spreads job start times so collectors don't all fire together
  *  - error backoff: a repeatedly failing job slows down instead of log-spamming
  *  - introspection: job list + last run/err surfaced by /api/health/deep
+ *  - activity(from, to): which jobs ran in a time span (stall attribution)
  */
 
 export function createScheduler() {
@@ -17,12 +18,14 @@ export function createScheduler() {
       name, intervalMs, fn,
       running: false, timer: null, failures: 0,
       lastRun: null, lastError: null, lastDurationMs: null,
+      startedAt: null, lastEnd: null,
     };
 
     const tick = async () => {
       if (job.running) return;        // overlap guard
       job.running = true;
       const t0 = Date.now();
+      job.startedAt = t0;
       try {
         await fn();
         job.failures = 0;
@@ -36,6 +39,7 @@ export function createScheduler() {
       } finally {
         job.lastRun = t0;
         job.lastDurationMs = Date.now() - t0;
+        job.lastEnd = Date.now();
         job.running = false;
         // Exponential backoff capped at 8x the normal interval.
         const backoff = Math.min(2 ** Math.min(job.failures, 3), 8);
@@ -61,5 +65,16 @@ export function createScheduler() {
       ({ name, intervalMs, lastRun, lastError, lastDurationMs, failures }));
   }
 
-  return { register, stop, status };
+  /** Names of jobs running at any point in [fromTs, toTs]. */
+  function activity(fromTs, toTs) {
+    const out = [];
+    for (const j of jobs.values()) {
+      const running = j.running && j.startedAt <= toTs;
+      const ranInSpan = j.lastRun != null && j.lastRun <= toTs && j.lastEnd >= fromTs;
+      if (running || ranInSpan) out.push(j.name);
+    }
+    return out;
+  }
+
+  return { register, stop, status, activity };
 }
