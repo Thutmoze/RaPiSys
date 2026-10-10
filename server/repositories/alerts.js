@@ -98,6 +98,10 @@ export function createAlertsRepo(db) {
       `UPDATE alert_history SET resolved_at = ? WHERE rule_id = ? AND target = ? AND resolved_at IS NULL`
     ).run(resolvedAt, ruleId, target);
   }
+  /** Drop resolved incidents fired before `ts` (retention). Open ones stay. */
+  function purgeHistoryOlderThan(ts) {
+    return db.prepare(`DELETE FROM alert_history WHERE fired_at < ? AND resolved_at IS NOT NULL`).run(ts);
+  }
   function history(limit = 100) {
     return db.prepare(
       `SELECT h.*, r.name, r.metric, r.severity FROM alert_history h
@@ -126,5 +130,5 @@ export function createAlertsRepo(db) {
     getState, setState, openIncident, updateIncidentPeak, markNotified,
     resolveIncident, history, active,
     getTargetState, listTargetStates, setTargetState, deleteTargetState,
-    openTargetIncident, resolveTargetIncident };
+    openTargetIncident, resolveTargetIncident, purgeHistoryOlderThan };
 }

@@ -107,8 +107,7 @@ export function createNetTraffic({
       });
       nextState.push({ iface, bootId, rx: c.rx, tx: c.tx, ts });
     }
-    repo.add(deltas);
-    repo.saveCounterState(nextState);
+    repo.record(deltas, nextState);
 
     if (ts - lastPrune > 3600e3) { lastPrune = ts; repo.prune(ts); }
   }

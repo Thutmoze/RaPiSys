@@ -209,5 +209,10 @@ export function createUpdatesRepo(db) {
     }
     return { rows, total };
   }
-  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, saveReleaseDate, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog, markNoChangelog };
+  /** Drop Update History rows older than `ts` (retention). */
+  function purgeHistoryOlderThan(ts) {
+    return db.prepare(`DELETE FROM update_history WHERE ts < ?`).run(ts);
+  }
+
+  return { record, recordBatch, recent, saveCache, getCache, saveSecurityTag, saveReleaseDate, getSecurityTags, getCachedChangelog, saveChangelog, getChangelog, markNoChangelog, purgeHistoryOlderThan };
 }

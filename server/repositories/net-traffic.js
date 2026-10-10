@@ -11,12 +11,13 @@ export function createNetTrafficRepo(db) {
   const insertIgnore = db.prepare(`INSERT OR IGNORE INTO net_traffic (iface, period, ts, rx, tx) VALUES (?, ?, ?, ?, ?)`);
 
   /** Add byte deltas: `rows` = [{ iface, rx, tx, buckets: { hour, day, month } }]. */
-  const add = db.transaction((rows) => {
+  function addRows(rows) {
     for (const r of rows) {
       if (!r.rx && !r.tx) continue;
       for (const p of TRAFFIC_PERIODS) upsert.run(r.iface, p, r.buckets[p], r.rx, r.tx);
     }
-  });
+  }
+  const add = db.transaction(addRows);
 
   /** One-time history import: [{ iface, period, ts, rx, tx }]; existing buckets win. */
   const importRows = db.transaction((rows) => {
@@ -51,10 +52,20 @@ export function createNetTrafficRepo(db) {
       .map((r) => [r.iface, { bootId: r.boot_id, rx: r.rx, tx: r.tx, ts: r.ts }]));
   }
 
-  const saveCounterState = db.transaction((rows) => {
-    const st = db.prepare(`INSERT INTO net_counter_state (iface, boot_id, rx, tx, ts) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(iface) DO UPDATE SET boot_id = excluded.boot_id, rx = excluded.rx, tx = excluded.tx, ts = excluded.ts`);
-    for (const r of rows) st.run(r.iface, r.bootId, r.rx, r.tx, r.ts);
+  const stateStmt = db.prepare(`INSERT INTO net_counter_state (iface, boot_id, rx, tx, ts) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(iface) DO UPDATE SET boot_id = excluded.boot_id, rx = excluded.rx, tx = excluded.tx, ts = excluded.ts`);
+  function saveStateRows(rows) {
+    for (const r of rows) stateStmt.run(r.iface, r.bootId, r.rx, r.tx, r.ts);
+  }
+  const saveCounterState = db.transaction(saveStateRows);
+
+  /**
+   * Add a minute's deltas AND move the counter baseline in one transaction:
+   * a crash between the two used to count that minute's traffic twice.
+   */
+  const record = db.transaction((rows, stateRows) => {
+    addRows(rows);
+    saveStateRows(stateRows);
   });
 
   function prune(now = Date.now()) {
@@ -64,5 +75,5 @@ export function createNetTrafficRepo(db) {
     return n;
   }
 
-  return { add, importRows, isEmpty, series, totals, counterState, saveCounterState, prune };
+  return { add, record, importRows, isEmpty, series, totals, counterState, saveCounterState, prune };
 }

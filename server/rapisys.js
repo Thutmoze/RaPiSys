@@ -198,6 +198,10 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   const retention = createRetention({
     metricsRepo: metricsFacade,
     eventsRepo: eventsFacade,
+    sessionsRepo: sessionsRepoFacade,
+    alertsRepo: alertsFacade,
+    // updatesRepoFacade is declared further down: resolve it when retention runs.
+    updatesRepo: { purgeHistoryOlderThan: (ts) => updatesRepoFacade.purgeHistoryOlderThan(ts) },
     getRetentionDays: async () => (await loadSettings()).rapisys?.retention?.days || 90,
   });
   // One resolver for this node's display name, shared by both notification
