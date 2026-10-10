@@ -44,15 +44,24 @@ export function totpCode(secretB32, t = Date.now(), step = 30, digits = 6) {
   return String(bin % 10 ** digits).padStart(digits, '0');
 }
 
-/** Verify with a ±1 step window for clock drift. */
-export function verifyTotp(secretB32, code, t = Date.now()) {
+/**
+ * The 30 s time step a code belongs to, within a ±1 step window for clock
+ * drift, or null when it matches none. Callers that must not accept the same
+ * code twice compare the step with the last one they accepted.
+ */
+export function totpStep(secretB32, code, t = Date.now()) {
   const c = String(code || '').trim();
-  if (!/^\d{6}$/.test(c)) return false;
+  if (!/^\d{6}$/.test(c)) return null;
   for (const dt of [-30000, 0, 30000]) {
     const expect = totpCode(secretB32, t + dt);
-    if (crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(c))) return true;
+    if (crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(c))) return Math.floor((t + dt) / 30000);
   }
-  return false;
+  return null;
+}
+
+/** Verify with a ±1 step window for clock drift. */
+export function verifyTotp(secretB32, code, t = Date.now()) {
+  return totpStep(secretB32, code, t) !== null;
 }
 
 export function otpauthUri(secretB32, username, issuer = 'RaPiSys') {

@@ -278,6 +278,8 @@ RAPISYS_DEMO=1 node server/index.js
 - Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall). Within setup, once an admin account is active only that admin's signed-in browser can replace it.
 - Every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `X-Content-Type-Options: nosniff` (no framing of the admin UI, no content sniffing).
 - The SSH terminal and VNC WebSockets only accept the dashboard's own origin (or one listed in `CORS_ORIGINS`), so another web app on the same Pi cannot open them with the admin's cookie.
+- Each authenticator code is accepted once; a password change signs out every other session (the browser that made the change stays signed in).
+- The browser terminal never logs in as root: the agent refuses to install its SSH key for `root` or any uid-0 account.
 - `ADMIN_TOKEN` (deploy.sh generates one) is for API automation.
 - SMTP/NAS credentials are AES-256-GCM-encrypted with `SECRET_KEY`; the API never returns them.
 - NAS credentials additionally live only in root-only files on the host (`/etc/rapisys/creds/*.cred`, 0600).

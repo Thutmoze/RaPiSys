@@ -126,7 +126,7 @@ export function authRouter({ auth, loadSettings }) {
     }
     try {
       const { currentPassword, newPassword } = req.body || {};
-      auth.changePassword(currentPassword, newPassword);
+      auth.changePassword(currentPassword, newPassword, auth.cookieToken(req));
       res.json({ ok: true });
     } catch (err) { res.status(400).json({ error: err.message }); }
   });

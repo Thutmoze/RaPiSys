@@ -46,7 +46,7 @@ describe('auth service', () => {
     expect(auth.getAdmin().mfa_confirmed).toBe(0);
     expect(auth.confirmMfa('000000')).toBe(false);
     expect(auth.confirmMfa(totpCode(secret))).toBe(true);
-    const token = auth.login('akhenaten', 'longpassword', totpCode(secret), '1.2.3.4', 'vitest');
+    const token = auth.login('akhenaten', 'longpassword', totpCode(secret, Date.now() + 30000), '1.2.3.4', 'vitest');
     expect(auth.validateSession(token)).toBe(true);
     auth.destroySession(token);
     expect(auth.validateSession(token)).toBe(false);
@@ -78,7 +78,7 @@ describe('auth service', () => {
     for (let i = 0; i < 10; i++) {
       try { auth.login('limituser', 'WRONG', '111111', '9.9.9.9', ''); } catch { /* expected */ }
     }
-    expect(() => auth.login('limituser', 'longpassword', totpCode(secret), '9.9.9.9', ''))
+    expect(() => auth.login('limituser', 'longpassword', totpCode(secret, Date.now() + 30000), '9.9.9.9', ''))
       .toThrow(/too many attempts/);
   });
   it('requireControl: 403 in monitor mode, 401 unauthenticated in full mode', async () => {
@@ -99,7 +99,7 @@ describe('auth service', () => {
     // with a valid session cookie it passes
     const { secret } = full.auth.register('ctl', 'longpassword');
     full.auth.confirmMfa(totpCode(secret));
-    const token = full.auth.login('ctl', 'longpassword', totpCode(secret), 'ip', '');
+    const token = full.auth.login('ctl', 'longpassword', totpCode(secret, Date.now() + 30000), 'ip', '');
     res = mk(); called = false;
     await full.auth.requireControl({ headers: { cookie: `rapisys_session=${token}` } }, res, () => { called = true; });
     expect(called).toBe(true);
@@ -126,7 +126,7 @@ describe('auth service', () => {
     // full mode with a valid session: passes
     const { secret } = full.auth.register('cfg', 'longpassword');
     full.auth.confirmMfa(totpCode(secret));
-    const token = full.auth.login('cfg', 'longpassword', totpCode(secret), 'ip', '');
+    const token = full.auth.login('cfg', 'longpassword', totpCode(secret, Date.now() + 30000), 'ip', '');
     res = mk(); called = false;
     await full.auth.requireConfig({ headers: { cookie: `rapisys_session=${token}` } }, res, () => { called = true; });
     expect(called).toBe(true);
@@ -160,11 +160,47 @@ describe('account management', () => {
     const { secret } = auth.register('mfauser2', 'longpassword');
     auth.confirmMfa(totpCode(secret));
     expect(() => auth.disableMfa('000000')).toThrow(/invalid/);
-    expect(auth.disableMfa(totpCode(secret)).mfaEnabled).toBe(false);
+    expect(auth.disableMfa(totpCode(secret, Date.now() + 30000)).mfaEnabled).toBe(false);
     expect(auth.getAdmin().mfa_enabled).toBe(0);
     expect(auth.getAdmin().totp_secret_enc).toBe(null);
     // login no longer needs a code
     const token = auth.login('mfauser2', 'longpassword', null, 'ip', '');
     expect(auth.validateSession(token)).toBe(true);
+  });
+});
+
+describe('authenticator codes and sessions', () => {
+  it('accepts each authenticator code once', () => {
+    const { auth } = fixture();
+    const { secret } = auth.register('once', 'longpassword');
+    const now = totpCode(secret);
+    expect(auth.confirmMfa(now)).toBe(true);
+    // The code that confirmed MFA cannot be replayed to sign in.
+    expect(() => auth.login('once', 'longpassword', now, 'ip', '')).toThrow(/invalid authentication code/);
+    // The next code works, once.
+    const next = totpCode(secret, Date.now() + 30000);
+    expect(auth.validateSession(auth.login('once', 'longpassword', next, 'ip2', ''))).toBe(true);
+    expect(() => auth.login('once', 'longpassword', next, 'ip3', '')).toThrow(/invalid authentication code/);
+  });
+
+  it('a password change signs out every other session and keeps the current one', () => {
+    const { auth } = fixture();
+    auth.register('pwuser', 'longpassword', { mfa: false });
+    const mine = auth.login('pwuser', 'longpassword', null, 'ip', '');
+    const other = auth.login('pwuser', 'longpassword', null, 'ip', '');
+    auth.changePassword('longpassword', 'evenlongerpassword', mine);
+    expect(auth.validateSession(mine)).toBe(true);
+    expect(auth.validateSession(other)).toBe(false);
+    expect(() => auth.login('pwuser', 'longpassword', null, 'ip', '')).toThrow();
+  });
+
+  it('checks the password even when the username is wrong (no timing hint)', () => {
+    const { auth } = fixture();
+    auth.register('real', 'longpassword', { mfa: false });
+    const t0 = process.hrtime.bigint();
+    expect(() => auth.login('nobody', 'longpassword', null, 'ipA', '')).toThrow(/invalid username or password/);
+    const wrongUser = Number(process.hrtime.bigint() - t0) / 1e6;
+    // scrypt (N=16384) takes milliseconds; a short-circuit would take microseconds.
+    expect(wrongUser).toBeGreaterThan(5);
   });
 });

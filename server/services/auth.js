@@ -22,7 +22,7 @@
 
 import crypto from 'crypto';
 import { encrypt, decrypt, hasSecretKey } from '../core/crypto.js';
-import { generateSecret, verifyTotp, otpauthUri } from '../core/totp.js';
+import { generateSecret, totpStep, otpauthUri } from '../core/totp.js';
 
 const SESSION_TTL_MS = 30 * 86400e3;
 const COOKIE_NAME = 'rapisys_session';
@@ -42,6 +42,17 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     return list.length >= 10;
   }
   const noteAttempt = (ip) => attempts.get(ip)?.push(Date.now()) ?? attempts.set(ip, [Date.now()]);
+
+  // A code is good for one use: the step of the last accepted code is kept,
+  // and a code from the same or an earlier step is refused. (In memory: after
+  // a restart, at most one more use inside the ~90 s window.)
+  let lastTotpStep = -1;
+  function acceptTotp(admin, code) {
+    const step = totpStep(decryptSecret(admin), code);
+    if (step === null || step <= lastTotpStep) return false;
+    lastTotpStep = step;
+    return true;
+  }
 
   // ---- account lifecycle ----------------------------------------------------
   function getAdmin() {
@@ -91,7 +102,7 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
   function confirmMfa(code) {
     const admin = getAdmin();
     if (!admin) throw new Error('no admin registered');
-    if (!verifyTotp(decryptSecret(admin), code)) return false;
+    if (!acceptTotp(admin, code)) return false;
     getDb().prepare(`UPDATE admin_user SET mfa_confirmed = 1 WHERE id = 1`).run();
     return true;
   }
@@ -101,8 +112,12 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     return crypto.timingSafeEqual(hash, Buffer.from(admin.pass_hash));
   }
 
-  /** Change the admin password — requires the current password. */
-  function changePassword(currentPassword, newPassword) {
+  /**
+   * Change the admin password — requires the current password. Every other
+   * session is signed out (a stolen cookie stops working); the session
+   * `keepToken` that made the change stays signed in.
+   */
+  function changePassword(currentPassword, newPassword, keepToken = null) {
     const admin = getAdmin();
     if (!admin) throw new Error('no admin registered');
     if (!checkPassword(admin, currentPassword)) throw new Error('current password is incorrect');
@@ -110,6 +125,7 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     const salt = crypto.randomBytes(32);
     const hash = scryptHash(newPassword, salt);
     getDb().prepare(`UPDATE admin_user SET pass_salt = ?, pass_hash = ? WHERE id = 1`).run(salt, hash);
+    getDb().prepare(`DELETE FROM auth_sessions WHERE token_hash <> ?`).run(keepToken ? sha256(keepToken) : '');
     return { ok: true };
   }
 
@@ -118,7 +134,7 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     const admin = getAdmin();
     if (!admin) throw new Error('no admin registered');
     if (!admin.mfa_enabled) return { ok: true, mfaEnabled: false };
-    if (!verifyTotp(decryptSecret(admin), code)) throw new Error('invalid authenticator code');
+    if (!acceptTotp(admin, code)) throw new Error('invalid authenticator code');
     getDb().prepare(`UPDATE admin_user SET mfa_enabled = 0, mfa_confirmed = 0, totp_secret_enc = NULL WHERE id = 1`).run();
     return { ok: true, mfaEnabled: false };
   }
@@ -181,12 +197,15 @@ export function createAuth({ getDb, loadSettings, eventsRepo }) {
     const userOk = crypto.timingSafeEqual(
       crypto.createHash('sha256').update(String(username || '')).digest(),
       crypto.createHash('sha256').update(admin.username).digest());
-    if (!userOk || !checkPassword(admin, password)) {
+    // Always hash the password, so a wrong username takes as long as a wrong
+    // password (no timing hint about which one was wrong).
+    const passOk = checkPassword(admin, password);
+    if (!userOk || !passOk) {
       eventsRepo.add('auth.login_failed', 'warning', { ip, reason: 'credentials' });
       throw new Error('invalid username or password');
     }
     if (admin.mfa_enabled) {
-      if (!verifyTotp(decryptSecret(admin), code)) {
+      if (!acceptTotp(admin, code)) {
         eventsRepo.add('auth.login_failed', 'warning', { ip, reason: 'mfa' });
         throw new Error('invalid authentication code');
       }
