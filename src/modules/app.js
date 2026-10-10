@@ -15,6 +15,7 @@ import { initNodeSwitcher } from './node-switcher.js';
 import { currentNode, isRemoteNode } from './node-context.js';
 import { createTermLog } from './term-log.js';
 import { poll } from './poll.js';
+import { openModal, modalId } from './modal.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -135,9 +136,10 @@ const escNodeName = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&
 function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', cancelLabel = 'Cancel', html = false, confirmIcon = null, cls = '', onMount = null } = {}) {
   return new Promise((resolve) => {
     const ov = el('div', 'wizard-overlay rconfirm-overlay');
+    const msgId = modalId('rconfirm-msg');
     ov.innerHTML = `
       <div class="wizard card rconfirm ${cls}">
-        <div class="rconfirm-msg"></div>
+        <div class="rconfirm-msg" id="${msgId}"></div>
         <div class="wz-row rconfirm-row">
           <button class="action-btn ${danger ? 'rconfirm-danger' : 'wz-primary'}" data-rc="ok"></button>
           <button class="action-btn set-btn-cancel" data-rc="cancel">${CANCEL_ICON}<span>${cancelLabel}</span></button>
@@ -154,10 +156,10 @@ function rapisysConfirm(message, { danger = false, confirmLabel = 'Confirm', can
         `<p class="rconfirm-node">Runs on <span class="node-chip"><span class="ns-dot"></span>${escNodeName(viewing.name)}</span>, not on the node serving this page.</p>`);
     }
     ov.querySelector('[data-rc=ok]').innerHTML = (confirmIcon || (danger ? TRASH_ICON : CHECK_ICON)) + '<span>' + confirmLabel + '</span>';
-    document.body.appendChild(ov);
+    const close = openModal(ov, ov.querySelector('.rconfirm'), { labelledBy: msgId });
     // Interactive content (e.g. expandable rows) wires itself up here.
     if (onMount) onMount(ov.querySelector('.rconfirm-msg'));
-    const done = (v) => { ov.remove(); resolve(v); };
+    const done = (v) => { close(); resolve(v); };
     ov.querySelector('[data-rc=ok]').onclick = () => done(true);
     ov.querySelector('[data-rc=cancel]').onclick = () => done(false);
     ov.addEventListener('keydown', (e) => { if (e.key === 'Escape') done(false); });
@@ -295,10 +297,11 @@ function showLogin() {
     const ov = el('div', 'wizard-overlay');
     const insecure = location.protocol !== 'https:'
       && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1';
+    const titleId = modalId('login-title'), leadId = modalId('login-lead');
     ov.innerHTML = `
       <div class="wizard card login-card">
-        <h2><span class="wz-cyan">Ra</span><span class="wz-purple">Pi</span>Sys admin</h2>
-        <p class="wz-lead">This action requires the administrator account.</p>
+        <h2 id="${titleId}"><span class="wz-cyan">Ra</span><span class="wz-purple">Pi</span>Sys admin</h2>
+        <p class="wz-lead" id="${leadId}">This action requires the administrator account.</p>
         ${insecure ? `
         <div class="wz-https-gate" data-lg="gate">
           <p class="wz-hint">⚠ This connection is <b>not encrypted</b>. Signing in here would send your password in clear text, so login is disabled over plain HTTP.</p>
@@ -330,8 +333,8 @@ function showLogin() {
           </div>
         </div>
       </div>`;
-    document.body.appendChild(ov);
-    const done = (ok) => { ov.remove(); loginPromise = null; loginSnoozed = !ok; resolve(ok); };
+    const close = openModal(ov, ov.querySelector('.login-card'), { labelledBy: titleId, describedBy: leadId });
+    const done = (ok) => { close(); loginPromise = null; loginSnoozed = !ok; resolve(ok); };
 
     // Over plain HTTP: figure out whether HTTPS is available and guide the user
     // to the secure URL (or to enabling HTTPS) instead of accepting a password.

@@ -367,26 +367,65 @@ const elements = {
 // Toast notification system
 const toastContainer = document.getElementById('toast-container');
 
-function showToast(type, title, message, duration = 3000) {
+// Errors stay until dismissed so they can be read; warnings get longer than
+// the 3 s default. A toast pauses while it is hovered or focused. The
+// container is a polite live region; errors are role="alert" (announced at once).
+function showToast(type, title, message, duration) {
+  const sticky = type === 'error';
+  const ms = duration ?? (type === 'warning' ? 6000 : 3000);
+  const key = `${title}\u0000${message}`;
+  if (sticky) {
+    // A failing poll would otherwise stack the same error every few seconds:
+    // one copy of each error, and at most three errors on screen.
+    if ([...toastContainer.querySelectorAll('.toast.error:not(.hiding)')].some((t) => t.dataset.key === key)) return;
+    const errors = toastContainer.querySelectorAll('.toast.error:not(.hiding)');
+    if (errors.length >= 3) errors[0].querySelector('.toast-close').click();
+  }
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
+  toast.dataset.key = key;
+  if (sticky) toast.setAttribute('role', 'alert');
   toast.innerHTML = `
-    <div class="toast-icon"><svg><use href="#icon-${type}"/></svg></div>
+    <div class="toast-icon" aria-hidden="true"><svg><use href="#icon-${type}"/></svg></div>
     <div class="toast-content">
       <div class="toast-title">${escapeHtml(title)}</div>
       <div class="toast-message">${escapeHtml(message)}</div>
+      ${sticky ? '<div class="toast-hint">Stays until you dismiss it.</div>' : ''}
     </div>
-    <button class="toast-close"><svg><use href="#icon-close"/></svg></button>
+    <button class="toast-close" aria-label="Dismiss notification"><svg aria-hidden="true"><use href="#icon-close"/></svg></button>
   `;
   toastContainer.appendChild(toast);
 
+  let removed = false;
   const removeToast = () => {
+    if (removed) return;
+    removed = true;
     toast.classList.add('hiding');
     setTimeout(() => toast.remove(), 300);
   };
-
   toast.querySelector('.toast-close').addEventListener('click', removeToast);
-  setTimeout(removeToast, duration);
+  if (sticky) return;
+
+  let left = ms;
+  let started = Date.now();
+  let paused = false;
+  let timer = setTimeout(removeToast, left);
+  const pause = () => {
+    if (paused) return;
+    paused = true;
+    clearTimeout(timer);
+    left -= Date.now() - started;
+  };
+  const resume = () => {
+    if (!paused || toast.matches(':hover') || toast.contains(document.activeElement)) return;
+    paused = false;
+    started = Date.now();
+    timer = setTimeout(removeToast, Math.max(left, 1000));
+  };
+  toast.addEventListener('mouseenter', pause);
+  toast.addEventListener('mouseleave', resume);
+  toast.addEventListener('focusin', pause);
+  toast.addEventListener('focusout', () => setTimeout(resume, 0));
 }
 
 // Animate number change

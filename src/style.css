@@ -15,7 +15,8 @@
   --border-color: rgba(255, 255, 255, 0.08);
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.6);
-  --text-muted: rgba(255, 255, 255, 0.4);
+  /* 0.5, not 0.4: muted text must reach 4.5:1 on the dark background (WCAG AA). */
+  --text-muted: rgba(255, 255, 255, 0.5);
 
   --accent-cyan: #00d4ff;
   --accent-purple: #a855f7;
@@ -2675,6 +2676,20 @@ footer {
   width: 16px;
   height: 16px;
 }
+
+/* An error toast stays until dismissed: say so, quietly. */
+.toast-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+body.compact .toast { padding: 10px 14px; gap: 10px; min-width: 240px; }
+body.compact .toast-title { font-size: 13px; }
+body.ultra .toast { padding: 7px 10px; gap: 8px; min-width: 220px; }
+body.ultra .toast-icon { width: 20px; height: 20px; }
+body.ultra .toast-title { font-size: 12px; }
+body.ultra .toast-message { font-size: 11px; }
+body.ultra .toast-hint { font-size: 10.5px; margin-top: 2px; }
 
 /* Responsive */
 @media (max-width: 1200px) {
@@ -7252,3 +7267,31 @@ body.compact .wz-form label.st-choice { padding: 6px 9px; }
 body.ultra .st-warn { padding: 6px 8px; font-size: 11px; }
 body.ultra .st-facts { font-size: 10.5px; }
 body.ultra .wz-form label.st-choice { padding: 5px 8px; }
+
+/* ===========================================================================
+   Accessibility: keyboard focus ring and reduced motion (Phase 5, C-22)
+   =========================================================================== */
+/* One ring for every control, on keyboard focus only (mouse clicks show
+   nothing new). Later than the per-component `outline: none` rules, so it
+   wins over them; components with their own :focus-visible keep theirs. */
+:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 2px; }
+.action-btn:focus-visible,
+.setting-control input[type="range"]:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 2px; }
+.toast-close:focus-visible { outline-offset: 0; }
+body.compact :focus-visible, body.ultra :focus-visible { outline-offset: 1px; }
+
+/* When the OS asks for less motion: glows, pulses, slides and transitions
+   stop. Spinners and indeterminate progress bars keep moving, because they
+   mean "still working". */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .wz-busy::after { animation-duration: 0.7s !important; animation-iteration-count: infinite !important; }
+  .inv-spinner, .up-spinner, .up-spinner-sm { animation-duration: 0.6s !important; animation-iteration-count: infinite !important; }
+  .rec-progress-bar { animation-duration: 1.25s !important; animation-iteration-count: infinite !important; }
+  .up-scanbar-active span { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; }
+}

@@ -14,6 +14,7 @@
 import { GridStack } from 'gridstack';
 import 'gridstack/dist/gridstack.min.css';
 import { SUMMARY_WIDGETS, buildSummaryCard } from './summary-widgets.js';
+import { openModal, modalId } from './modal.js';
 
 export const OVERVIEW_WIDGETS = [
   { id: 'cpu',        sel: '.cpu-card',          title: 'CPU Usage',     group: 'stats',   home: '.stats-grid',    fit: 'scale' },
@@ -451,9 +452,10 @@ function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save'
       <button type="button" class="dash-glyph-opt ${k === glyph ? 'sel' : ''}" data-glyph="${k}" title="${k}">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${GLYPHS[k]}</svg>
       </button>`).join('');
+    const titleId = modalId('dash-dlg-title');
     ov.innerHTML = `
       <div class="wizard card dash-dialog">
-        <h2>${escHtml(title)}</h2>
+        <h2 id="${titleId}">${escHtml(title)}</h2>
         <div class="wz-form">
           <label>Name <input class="dash-dlg-name" maxlength="40" value="${escHtml(name)}"></label>
           <div class="dash-dlg-glyphlabel">Icon</div>
@@ -467,14 +469,14 @@ function dashboardDialog({ title, name = '', glyph = null, confirmLabel = 'Save'
           </div>
         </div>
       </div>`;
-    document.body.appendChild(ov);
+    const close = openModal(ov, ov.querySelector('.dash-dialog'), { labelledBy: titleId });
     let sel = glyph || '';
     const nameInput = ov.querySelector('.dash-dlg-name');
     ov.querySelectorAll('[data-glyph]').forEach((b) => b.onclick = () => {
       sel = b.dataset.glyph;
       ov.querySelectorAll('[data-glyph]').forEach((x) => x.classList.toggle('sel', x === b));
     });
-    const done = (val) => { ov.remove(); resolve(val); };
+    const done = (val) => { close(); resolve(val); };
     ov.querySelector('[data-dlg=cancel]').onclick = () => done(null);
     ov.querySelector('[data-dlg=ok]').onclick = () => {
       const n = nameInput.value.trim();
