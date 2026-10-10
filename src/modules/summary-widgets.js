@@ -10,6 +10,8 @@
  * editor — so they never alter the default dashboard.
  */
 
+import { poll } from './poll.js';
+
 const NAV = (hash) => () => { window.location.hash = hash; };
 
 // Each summary widget: id, title, the card element factory, and a refresh fn.
@@ -263,7 +265,14 @@ export function buildSummaryCard(def) {
   // initial + periodic refresh while present
   const refresh = () => def.load(card).catch(() => setBig(card, '—', 'unavailable'));
   refresh();
-  card._swTimer = setInterval(refresh, 15000);
+  // Stops itself once the card has been on the page and was then removed
+  // (widget deleted, layout reloaded): the interval used to poll forever.
+  let shown = false;
+  card._swTimer = poll(() => {
+    if (card.isConnected) shown = true;
+    else if (shown) { clearInterval(card._swTimer); return; }
+    return refresh();
+  }, 15000);
   return card;
 }
 

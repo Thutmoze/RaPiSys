@@ -14,6 +14,7 @@ import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
 import { currentNode, isRemoteNode } from './node-context.js';
 import { createTermLog } from './term-log.js';
+import { poll } from './poll.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
 
@@ -249,19 +250,29 @@ function enhanceSelects(root) {
       if (below < 260 && r.top > 260) { list.style.top = 'auto'; list.style.bottom = `${window.innerHeight - r.top + 4}px`; }
       else { list.style.bottom = 'auto'; list.style.top = `${r.bottom + 4}px`; }
     }
-    const close = () => { list.hidden = true; btn.classList.remove('open'); filter.value = ''; };
+    // Page-wide listeners exist only while this list is open. Pages rebuild
+    // their selects on every render; listeners added per select and never
+    // removed piled up, each running on every click, key and scroll.
+    const onDocClick = (e) => { if (!wrap.contains(e.target) && !list.contains(e.target)) close(); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    const onMove = () => position();
+    const listen = (on) => {
+      const m = on ? 'addEventListener' : 'removeEventListener';
+      document[m]('click', onDocClick);
+      document[m]('keydown', onKey);
+      window[m]('scroll', onMove, true);
+      window[m]('resize', onMove);
+    };
+    const close = () => { list.hidden = true; btn.classList.remove('open'); filter.value = ''; listen(false); };
     btn.onclick = () => {
       if (list.hidden) {
         renderItems(); position(); list.hidden = false; btn.classList.add('open');
+        listen(true);
         filter.style.display = sel.options.length > 8 ? '' : 'none';
         if (sel.options.length > 8) setTimeout(() => filter.focus(), 30);
       } else close();
     };
     filter.addEventListener('input', () => renderItems(filter.value));
-    document.addEventListener('click', (e) => { if (!wrap.contains(e.target) && !list.contains(e.target)) close(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
-    window.addEventListener('scroll', () => { if (!list.hidden) position(); }, true);
-    window.addEventListener('resize', () => { if (!list.hidden) position(); });
     sel.addEventListener('change', () => { labEl.textContent = labelOf(); });
   });
 }
@@ -733,7 +744,7 @@ function startGlobalCheckPoll(indEl) {
     if (n++ % 4 === 0) api('/updates/reboot-status').then(setNavRebootDot).catch(() => {});
   };
   tick();
-  _globalCheckTimer = setInterval(tick, 15000);
+  _globalCheckTimer = poll(tick, 15000);
 }
 
 // Orange dot on the Updates nav item while a reboot is needed to finish
@@ -813,7 +824,7 @@ const agentBanner = (() => {
   function start() {
     check();
     clearInterval(timer);
-    timer = setInterval(check, 300e3);
+    timer = poll(check, 300e3);
   }
 
   return { start, check, place };
@@ -1097,8 +1108,8 @@ pageRenderers.hardware = (() => {
 
       refreshLive(host); refreshHistory(host);
       refreshPironmanCard(host);
-      timer = setInterval(() => { refreshLive(host); refreshPironmanCard(host); }, 3000);
-      this._histTimer = setInterval(() => refreshHistory(host), 30000);
+      timer = poll(() => Promise.all([refreshLive(host), refreshPironmanCard(host)]), 3000);
+      this._histTimer = poll(() => refreshHistory(host), 30000);
     },
     unmount() {
       clearInterval(timer);
@@ -1457,7 +1468,7 @@ pageRenderers.sessions = (() => {
         if (inp) inp.addEventListener('change', () => refreshHistory(host, true));
       });
       refresh(host); refreshHistory(host, true);
-      timer = setInterval(() => { refresh(host); refreshHistory(host); }, 10000);
+      timer = poll(() => Promise.all([refresh(host), refreshHistory(host)]), 10000);
       // popout window: ?pop=terminal|desktop → jump straight to that tab and
       // strip the nav rail/header for a clean standalone window.
       const popMatch = location.hash.match(/pop=(terminal|desktop)/);
@@ -2007,7 +2018,7 @@ pageRenderers.alerts = (() => {
       $('[data-new=cancel]', host).onclick = () => { editingId = null; resetForm(host); setFormVisible(host, false); };
 
       refresh(host);
-      timer = setInterval(() => refresh(host), 15000);
+      timer = poll(() => refresh(host), 15000);
     },
     unmount() { clearInterval(timer); },
   };
@@ -5041,7 +5052,7 @@ pageRenderers.network = (() => {
     globalThis.__netPageActive = true;
     refreshProcsLive(host);
     clearInterval(nethogsTimer);
-    nethogsTimer = setInterval(() => refreshProcsLive(host), 4000);
+    nethogsTimer = poll(() => refreshProcsLive(host), 4000);
   }
 
   // ---- DNS: Pi-hole analytics, dnsmasq logs, or the Pi's own queries ----
@@ -5229,8 +5240,8 @@ pageRenderers.network = (() => {
       const cog = $('[data-net=picfg]', host);
       if (cog) cog.onclick = () => goToPiholeSettings();
       startProcs(host);
-      liveTimer = setInterval(() => refreshLive(host), 1000);
-      slowTimer = setInterval(() => { refreshProtocols(host); refreshHistory(host); refreshDns(host); }, 15000);
+      liveTimer = poll(() => refreshLive(host), 1000);
+      slowTimer = poll(() => Promise.all([refreshProtocols(host), refreshHistory(host), refreshDns(host)]), 15000);
     },
     unmount() {
       clearInterval(liveTimer); clearInterval(slowTimer); clearInterval(nethogsTimer);
@@ -7915,7 +7926,7 @@ pageRenderers.updates = (() => {
       if (!host._schedPoll) {
         schedPollHost = host;
         let wasRunning = running;
-        host._schedPoll = setInterval(async () => {
+        host._schedPoll = poll(async () => {
           try {
             const c = await api('/updates/schedule');
             const now = !!c?._running?.running;
@@ -8623,7 +8634,7 @@ const containerBells = (() => {
     grid.addEventListener('pointerdown', onBell);
     grid.addEventListener('click', onBell);
     load();
-    setInterval(load, 15000);
+    poll(load, 15000);
   }
   return { init, load };
 })();

@@ -8,6 +8,7 @@ import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 // RaPiSys: must load before any request so /api calls follow the node switcher.
 import './modules/node-context.js';
+import { poll } from './modules/poll.js';
 window.SmoothieChart = SmoothieChart;
 window.TimeSeries = TimeSeries;
 
@@ -1046,8 +1047,8 @@ async function initApp() {
   updateServices();
   
   // Start update loops
-  updateIntervalId = setInterval(updateDashboard, UPDATE_INTERVAL);
-  setInterval(updateServices, 10000); // Check services every 10 seconds
+  updateIntervalId = poll(updateDashboard, UPDATE_INTERVAL);
+  poll(updateServices, 10000); // Check services every 10 seconds
 }
 
 initApp();
@@ -1077,7 +1078,7 @@ document.addEventListener('visibilitychange', () => {
     if (memoryChart) memoryChart.start();
     if (tempChart) tempChart.start();
     updateDashboard(); // Immediate refresh
-    updateIntervalId = setInterval(updateDashboard, UPDATE_INTERVAL);
+    updateIntervalId = poll(updateDashboard, UPDATE_INTERVAL);
   }
 });
 
@@ -1201,7 +1202,7 @@ function applySettings() {
   if (intervalChanged) {
     UPDATE_INTERVAL = settings.interval * 1000;
     clearInterval(updateIntervalId);
-    updateIntervalId = setInterval(updateDashboard, UPDATE_INTERVAL);
+    updateIntervalId = poll(updateDashboard, UPDATE_INTERVAL);
     // Reinitialize charts with new stream delay
     initSmoothieCharts();
   }
@@ -1758,7 +1759,7 @@ function togglePause() {
     if (statusText) statusText.textContent = 'Paused';
     showToast('info', 'Paused', 'Auto-refresh paused. Press P to resume.');
   } else {
-    updateIntervalId = setInterval(updateDashboard, UPDATE_INTERVAL);
+    updateIntervalId = poll(updateDashboard, UPDATE_INTERVAL);
     if (statusIndicator) statusIndicator.classList.remove('paused');
     if (statusText) statusText.textContent = 'Live';
     updateDashboard(); // Immediate refresh when resuming
@@ -2254,9 +2255,9 @@ if (wireguardInterfaceInput) {
 loadWireguardSettings();
 
 // Update WireGuard every 10 seconds (same as services)
-setInterval(() => {
+poll(() => {
   if (wireguardEnabled && !wireguardUpdating) {
-    updateWireguard();
+    return updateWireguard();
   }
 }, 10000);
 

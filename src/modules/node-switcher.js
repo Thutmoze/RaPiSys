@@ -16,6 +16,7 @@
  */
 
 import { currentNode, setNode, localFetch } from './node-context.js';
+import { poll } from './poll.js';
 
 const REFRESH_MS = 30000;
 const INLINE_MAX = 4;
@@ -245,6 +246,6 @@ export function initNodeSwitcher({ onManage } = {}) {
 
   place();
   refresh();
-  setInterval(refresh, REFRESH_MS);
+  poll(refresh, REFRESH_MS);
   return { refresh, place };
 }
