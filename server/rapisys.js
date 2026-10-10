@@ -71,6 +71,7 @@ import { diskRouter } from './routes/disk.js';
 import { nightAction } from './services/night-schedule.js';
 import { createEventLoopMonitor, createStallDetector } from './core/event-loop.js';
 import { requestsBetween } from './core/request-log.js';
+import { cspReportRouter } from './core/csp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -444,6 +445,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/health/deep', deepHealthRouter({ dbMeta, scheduler, getDb, eventLoop: createEventLoopMonitor(), stalls: stallDetector.stalls }));
   app.use('/api/health/agent', agentHealthRouter({ getNodeName }));
   app.use('/api/auth', authRouter({ auth, loadSettings }));
+  // CSP violation reports from browsers (no session; deduplicated, rate-limited).
+  app.use('/api/csp-report', cspReportRouter({ events: eventsFacade }));
   // Mount-level auth on every data router: requireConfig is open in monitor mode
   // (upstream read-only behavior) but requires a session/admin token in full
   // mode — for reads AND writes. This closes the gap where individual GET routes

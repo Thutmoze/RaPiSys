@@ -12,6 +12,7 @@ import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { createFetchSiteGuard } from './core/fetch-site-guard.js';
 import { trackRequests } from './core/request-log.js';
+import { cspHeader } from './core/csp.js';
 
 const execAsync = promisify(exec);
 
@@ -390,13 +391,14 @@ export function checkService(service) {
 // ===================
 
 // Security headers on every response: the admin UI (terminal included) can
-// not be framed by another site (clickjacking), and responses are never
-// content-sniffed into another type. Express's X-Powered-By is dropped.
+// not be framed by another site (clickjacking), responses are never
+// content-sniffed into another type, and the Content Security Policy runs
+// only the dashboard's own scripts (core/csp.js). X-Powered-By is dropped.
 app.disable('x-powered-by');
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', cspHeader(req.headers.host));
   next();
 });
 app.use(trackRequests); // recent request paths, for event-loop stall attribution
