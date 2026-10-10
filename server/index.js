@@ -389,6 +389,16 @@ export function checkService(service) {
 // Middleware
 // ===================
 
+// Security headers on every response: the admin UI (terminal included) can
+// not be framed by another site (clickjacking), and responses are never
+// content-sniffed into another type. Express's X-Powered-By is dropped.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  next();
+});
 app.use(trackRequests); // recent request paths, for event-loop stall attribution
 app.use(express.json({ limit: '10kb' })); // Limit payload size
 

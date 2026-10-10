@@ -22,6 +22,21 @@ import crypto from 'crypto';
 import net from 'net';
 import { agentCall } from '../core/agent-client.js';
 
+/**
+ * Whether a WebSocket upgrade comes from this dashboard. Browsers always send
+ * Origin on WebSocket requests: it must be this host and port, or an origin
+ * listed in CORS_ORIGINS (e.g. the Vite dev server). No Origin means a
+ * non-browser client, which the session check alone governs.
+ */
+export function wsOriginAllowed(headers, allowed = (process.env.CORS_ORIGINS || '').split(',')) {
+  const origin = headers?.origin;
+  if (!origin) return true;
+  let host;
+  try { host = new URL(origin).host; } catch { return false; }
+  if (host && host === String(headers.host || '')) return true;
+  return allowed.filter((o) => o && o !== '*').includes(origin);
+}
+
 export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, secrets, auth, events, sessionsRepo }) {
   const SSH_KEY_SECRET = 'remote.ssh.privkey';
   const VNC_PW_SECRET = 'remote.vnc.password';
@@ -148,10 +163,13 @@ export function createRemoteAccess({ loadSettings, saveSettings, withFileLock, s
   }
 
   // ---- auth on WS upgrade ----------------------------------------------------
+  // The session cookie is scoped to the host, not the port, so any other web
+  // app on this Pi could otherwise open the shell with the admin's cookie.
   // Reuse the same admin session cookie that protects the REST API. Control-mode
   // is required (read-only/monitor sessions cannot open a shell or desktop).
   async function upgradeAuthorized(req) {
     try {
+      if (!wsOriginAllowed(req.headers)) return false;
       const token = auth.cookieToken({ headers: req.headers });
       if (!auth.validateSession(token)) return false;
       // monitor-only deployments must not get interactive control. getMode() is

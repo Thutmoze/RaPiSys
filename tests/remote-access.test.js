@@ -77,3 +77,18 @@ describe('remote access', () => {
     expect(Array.isArray(sample)).toBe(true);
   });
 });
+
+describe('remote access WebSocket origin', () => {
+  it('accepts the dashboard itself and non-browser clients only', async () => {
+    const { wsOriginAllowed } = await import('../server/services/remote-access.js');
+    expect(wsOriginAllowed({ origin: 'https://192.168.1.5:3443', host: '192.168.1.5:3443' }, [])).toBe(true);
+    expect(wsOriginAllowed({ host: '192.168.1.5:3443' }, [])).toBe(true);
+    // Another app on the same Pi (other port) or another site: refused.
+    expect(wsOriginAllowed({ origin: 'http://192.168.1.5', host: '192.168.1.5:3443' }, [])).toBe(false);
+    expect(wsOriginAllowed({ origin: 'https://evil.example', host: '192.168.1.5:3443' }, [])).toBe(false);
+    expect(wsOriginAllowed({ origin: 'null', host: '192.168.1.5:3443' }, [])).toBe(false);
+    // Listed dev origin allowed; a wildcard list does not open it up.
+    expect(wsOriginAllowed({ origin: 'http://localhost:5173', host: 'localhost:3001' }, ['http://localhost:5173'])).toBe(true);
+    expect(wsOriginAllowed({ origin: 'https://evil.example', host: 'localhost:3001' }, ['*'])).toBe(false);
+  });
+});

@@ -106,7 +106,7 @@ Then open **`http://<your-pi>:3001`**. The **setup wizard** appears on first vis
    - **Monitor only**: read-only, exactly like the original Pi-Dashboard. No account needed; Pi-control endpoints are disabled server-side.
    - **Full control**: enables fan control, NAS management, updates and reboot. You register a **local administrator** (username + password) and (recommended, on by default but your choice) enrol **two-factor authentication** by scanning a QR code with any TOTP app. Verification happens on the spot, and the wizard browser is signed in automatically.
 3. **Storage**: optionally mount your NAS (WD My Cloud EX2 Ultra → SMB 3.0; WD My Book World Edition II → SMB 1.0, with a security warning). Keep the database on the Pi's local storage and let the NAS hold **compressed backups** of it (Settings → Storage → *Back up database to NAS*). Running the database directly from a share is possible but not recommended: SQLite reads are synchronous, and a slow share freezes the whole dashboard. Choosing another directory (wizard → Advanced, or Settings → Storage → Edit) checks it first: a network share must be confirmed explicitly, and if the folder already holds a database you choose between copying the current one over (the old file is kept as `rapisys.db.replaced-<date>`) and switching to that file's history. Swapping the NAS share never moves a local database onto it.
-4. **Retention**: 7 / 30 / 90 / 180 / 365 days or custom
+4. **Retention**: 7 / 30 / 90 / 180 / 365 days or custom. The same period prunes events, closed login sessions, resolved alert incidents and Update History.
 5. **Email**: SMTP for alerts, with a *Send test email* button
 6. **Done**: history is already recording in the background
 
@@ -275,7 +275,9 @@ RAPISYS_DEMO=1 node server/index.js
 - In full-control mode every data endpoint needs the admin session, including the legacy ones (`/api/stats`, `/api/sysinfo`, `/api/services`, `/api/settings`): a signed-out browser gets the sign-in dialog and no host data (process command lines included). `/api/health` stays open for health checks, and `/api/setup/status` tells a signed-out browser only whether setup is done.
 - Browser requests from another site, or another app on the same Pi (a different port), are refused on `/api` (`Sec-Fetch-Site`), so a link elsewhere cannot start an upgrade or package change in a signed-in admin's browser. Scripts and peers (no such header) are unaffected; origins listed in `CORS_ORIGINS` stay allowed.
 - **Monitor-only mode** disables Pi-control endpoints entirely, setup changes after the wizard included (NAS, database location, mode, SMTP, Telegram); there is nothing to log into and nothing a LAN guest can change on the Pi.
-- Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall).
+- Registration and MFA enrolment are only possible during first-run setup; afterwards those endpoints return 403 forever (reset via a clean reinstall). Within setup, once an admin account is active only that admin's signed-in browser can replace it.
+- Every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `X-Content-Type-Options: nosniff` (no framing of the admin UI, no content sniffing).
+- The SSH terminal and VNC WebSockets only accept the dashboard's own origin (or one listed in `CORS_ORIGINS`), so another web app on the same Pi cannot open them with the admin's cookie.
 - `ADMIN_TOKEN` (deploy.sh generates one) is for API automation.
 - SMTP/NAS credentials are AES-256-GCM-encrypted with `SECRET_KEY`; the API never returns them.
 - NAS credentials additionally live only in root-only files on the host (`/etc/rapisys/creds/*.cred`, 0600).

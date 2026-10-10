@@ -43,6 +43,14 @@ export function authRouter({ auth, loadSettings }) {
       return res.status(426).json({ error: 'HTTPS required', code: 'https_required',
         detail: 'Enable HTTPS before creating an administrator account so the password is sent encrypted.' });
     }
+    // Until setup completes the wizard is open to the LAN. Once an active
+    // admin exists (MFA confirmed, or MFA off), only that admin's signed-in
+    // browser may replace it: the wizard's own Back button, never a stranger.
+    const admin = auth.getAdmin();
+    const active = !!admin && (admin.mfa_enabled ? !!admin.mfa_confirmed : true);
+    if (active && !auth.isAuthenticated(req)) {
+      return res.status(403).json({ error: 'an administrator already exists; sign in as that administrator to change it' });
+    }
     try {
       const { username, password, mfa } = req.body || {};
       const r = auth.register(username, password, { mfa: mfa !== false });
