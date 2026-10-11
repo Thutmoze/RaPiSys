@@ -1,7 +1,6 @@
 import express from 'express';
 import { getSystemStats, getSystemInfo, discoverServices } from './stats.js';
 import { VALID_CHECK_TYPES, inferCheckType, inferIcon } from './services-config.js';
-import http from 'http';
 import net from 'net';
 import dns from 'dns';
 import fs from 'fs';
@@ -10,6 +9,7 @@ import crypto from 'crypto';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
+import { checkHttpService } from './services/http-check.js';
 import { createFetchSiteGuard } from './core/fetch-site-guard.js';
 import { trackRequests } from './core/request-log.js';
 import { cspHeader } from './core/csp.js';
@@ -213,48 +213,8 @@ function hashApiKey(key) {
 }
 
 // ===================
-// Service Health Check (supports HTTP, TCP, Redis, DNS)
+// Service Health Check (supports HTTP(S), TCP, Redis, DNS)
 // ===================
-
-// HTTP health check
-function checkHttpService(service) {
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      resolve({ ...service, status: 'offline', latency: null });
-    }, 3000);
-
-    const start = Date.now();
-    const req = http.request({
-      hostname: service.host || 'localhost',
-      port: service.port,
-      path: service.path || '/',
-      method: 'HEAD',
-      timeout: 3000
-    }, (res) => {
-      clearTimeout(timeout);
-      const latency = Date.now() - start;
-      resolve({
-        ...service,
-        status: res.statusCode < 500 ? 'online' : 'error',
-        latency,
-        statusCode: res.statusCode
-      });
-    });
-
-    req.on('error', () => {
-      clearTimeout(timeout);
-      resolve({ ...service, status: 'offline', latency: null });
-    });
-
-    req.on('timeout', () => {
-      req.destroy();
-      clearTimeout(timeout);
-      resolve({ ...service, status: 'offline', latency: null });
-    });
-
-    req.end();
-  });
-}
 
 // TCP health check (just connect)
 function checkTcpService(service) {
@@ -381,6 +341,7 @@ export function checkService(service) {
     case 'interface':
       return checkInterfaceService(service);
     case 'http':
+    case 'https':
     default:
       return checkHttpService(service);
   }

@@ -11,7 +11,7 @@ export const KNOWN_SERVICES = {
   110:   { name: 'POP3', icon: 'mail', checkType: 'tcp' },
   111:   { name: 'RPC', icon: 'cpu', checkType: 'tcp' },
   143:   { name: 'IMAP', icon: 'mail', checkType: 'tcp' },
-  443:   { name: 'HTTPS', icon: 'lock', checkType: 'http', path: '/' },
+  443:   { name: 'HTTPS', icon: 'lock', checkType: 'https', path: '/' },
   500:   { name: 'IKEv2/IPSec', icon: 'shield', checkType: 'interface', interface: 'ipsec0' },
   631:   { name: 'CUPS', icon: 'printer', checkType: 'http', path: '/' },
   1194:  { name: 'OpenVPN', icon: 'shield', checkType: 'interface', interface: 'tun0' },
@@ -35,7 +35,7 @@ export const KNOWN_SERVICES = {
   8112:  { name: 'Deluge', icon: 'download', checkType: 'http', path: '/' },
   8123:  { name: 'Home Assistant', icon: 'home', checkType: 'http', path: '/' },
   8384:  { name: 'Syncthing', icon: 'refresh-cw', checkType: 'http', path: '/' },
-  8443:  { name: 'HTTPS Alt', icon: 'lock', checkType: 'http', path: '/' },
+  8443:  { name: 'HTTPS Alt', icon: 'lock', checkType: 'https', path: '/' },
   8686:  { name: 'Lidarr', icon: 'music', checkType: 'http', path: '/' },
   8787:  { name: 'Readarr', icon: 'book', checkType: 'http', path: '/' },
   8989:  { name: 'Sonarr', icon: 'tv', checkType: 'http', path: '/' },
@@ -84,7 +84,7 @@ export const KNOWN_PROCESSES = {
   'unbound': { name: 'Unbound DNS', icon: 'globe', checkType: 'dns' },
 };
 
-export const VALID_CHECK_TYPES = ['http', 'tcp', 'redis', 'dns', 'interface'];
+export const VALID_CHECK_TYPES = ['http', 'https', 'tcp', 'redis', 'dns', 'interface'];
 
 // Infer checkType from port if not explicitly set
 export function inferCheckType(port, explicitCheckType) {
