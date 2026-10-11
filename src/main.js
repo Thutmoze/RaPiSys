@@ -1891,6 +1891,7 @@ async function loadDiscoveredServices() {
     
     const data = await response.json();
     discoveredServices = data.discovered || [];
+    renderServicesConfig();
     
     // Filter to only show services not already configured
     const configuredPorts = new Set(servicesConfig.map(s => s.port));
@@ -1914,10 +1915,10 @@ function renderDiscoveredServices(services) {
   servicesDiscoveredCount.textContent = `${services.length} available`;
   servicesDiscoveredList.innerHTML = services.map(service => `
     <div class="discovered-service-item">
-      <div class="discovered-service-icon"><svg><use href="#icon-${service.icon || 'server'}"/></svg></div>
+      <div class="discovered-service-icon"><svg><use href="#icon-${iconName(service.icon)}"/></svg></div>
       <div class="discovered-service-info">
         <div class="discovered-service-name">${escapeHtml(service.name)}</div>
-        <div class="discovered-service-port">:${service.port}</div>
+        <div class="discovered-service-port">:${service.port}${service.owner ? ` · ${escapeHtml(service.owner)}` : ''}</div>
       </div>
       <button class="discovered-service-add" data-port="${service.port}">+ Add</button>
     </div>
@@ -1973,30 +1974,77 @@ async function loadServicesConfig() {
   }
 }
 
+// Icons offered by the service icon picker (symbols in index.html).
+const SERVICE_ICONS = ['server', 'globe', 'lock', 'shield', 'activity', 'heart', 'database', 'hard-drive',
+  'cpu', 'terminal', 'monitor', 'hexagon', 'box', 'file-text', 'folder', 'book', 'film', 'tv', 'play-circle',
+  'music', 'download', 'refresh-cw', 'search', 'bar-chart', 'home', 'mail', 'printer', 'radio', 'wifi',
+  'code', 'coffee', 'settings'];
+let servicesIconPickerIndex = -1;
+
+// What discovery found owning a configured service's port, when that differs
+// from the service's current name or icon and was not dismissed with Keep.
+function detectedSuggestion(service) {
+  const host = service.host || 'localhost';
+  if (host !== 'localhost' && host !== '127.0.0.1') return null;
+  const d = discoveredServices.find(x => x.port === service.port && x.identified && x.protocol !== 'udp');
+  if (!d) return null;
+  if (d.name === service.name && d.icon === service.icon) return null;
+  if (service.ignoreDetected === `${d.name}|${d.icon}`) return null;
+  return d;
+}
+
+function iconName(icon) {
+  return /^[a-z0-9-]{1,40}$/.test(icon || '') ? icon : 'server';
+}
+
 // Render services config list
 function renderServicesConfig() {
+  const useAll = document.getElementById('services-use-detected');
+  const pendingCount = servicesConfig.filter(detectedSuggestion).length;
+  if (useAll) {
+    useAll.hidden = pendingCount === 0;
+    useAll.textContent = `Use all detected (${pendingCount})`;
+  }
+
   if (servicesConfig.length === 0) {
     servicesConfigList.innerHTML = '<div class="no-services-config">No services configured. Add one below!</div>';
     return;
   }
 
-  servicesConfigList.innerHTML = servicesConfig.map((service, index) => `
+  servicesConfigList.innerHTML = servicesConfig.map((service, index) => {
+    const det = detectedSuggestion(service);
+    const icon = iconName(service.icon);
+    return `
     <div class="service-config-item ${service.enabled === false ? 'disabled' : ''}" data-index="${index}">
-      <label class="service-config-toggle">
-        <input type="checkbox" ${service.enabled !== false ? 'checked' : ''} data-index="${index}">
-        <span class="toggle-slider"></span>
-      </label>
-      <div class="service-config-info">
-        <div class="service-config-name" data-index="${index}">
-          <span class="service-name-text">${escapeHtml(service.name)}</span>
-          <input type="text" class="service-name-input" value="${escapeHtml(service.name)}" data-index="${index}" style="display:none">
+      <div class="service-config-row">
+        <label class="service-config-toggle">
+          <input type="checkbox" ${service.enabled !== false ? 'checked' : ''} data-index="${index}">
+          <span class="toggle-slider"></span>
+        </label>
+        <button type="button" class="service-config-icon ${servicesIconPickerIndex === index ? 'open' : ''}" data-index="${index}" title="Change icon" aria-label="Change icon"><svg><use href="#icon-${icon}"/></svg></button>
+        <div class="service-config-info">
+          <div class="service-config-name" data-index="${index}">
+            <span class="service-name-text">${escapeHtml(service.name)}</span>
+            <input type="text" class="service-name-input" value="${escapeHtml(service.name)}" data-index="${index}" style="display:none">
+          </div>
+          <div class="service-config-details">${escapeHtml(service.host || 'localhost')}:${service.port}${service.path && service.path !== '/' && !service.path.includes('/api/') ? escapeHtml(service.path) : ''} · ${escapeHtml(service.checkType || 'http')}</div>
         </div>
-        <div class="service-config-details">${escapeHtml(service.host || 'localhost')}:${service.port}${service.path && service.path !== '/' && !service.path.includes('/api/') ? escapeHtml(service.path) : ''}</div>
+        <button class="service-config-edit" data-index="${index}" title="Rename service"><svg><use href="#icon-edit"/></svg></button>
+        <button class="service-config-delete" data-index="${index}" title="Delete service"><svg><use href="#icon-trash"/></svg></button>
       </div>
-      <button class="service-config-edit" data-index="${index}" title="Rename service"><svg><use href="#icon-edit"/></svg></button>
-      <button class="service-config-delete" data-index="${index}" title="Delete service"><svg><use href="#icon-trash"/></svg></button>
-    </div>
-  `).join('');
+      ${det ? `
+      <div class="service-detected">
+        <span class="service-detected-icon"><svg><use href="#icon-${iconName(det.icon)}"/></svg></span>
+        <span class="service-detected-text">Detected: <b>${escapeHtml(det.name)}</b>${det.owner ? `<span class="service-detected-owner">${escapeHtml(det.owner)}</span>` : ''}</span>
+        <button type="button" class="set-btn set-btn-edit service-detected-use" data-index="${index}">Use</button>
+        <button type="button" class="set-btn set-btn-cancel service-detected-keep" data-index="${index}">Keep</button>
+      </div>` : ''}
+      ${servicesIconPickerIndex === index ? `
+      <div class="service-icon-picker" role="listbox" aria-label="Service icon">
+        ${SERVICE_ICONS.map(ic => `<button type="button" class="${ic === icon ? 'selected' : ''}" data-index="${index}" data-icon="${ic}" title="${ic}" aria-label="${ic}"><svg><use href="#icon-${ic}"/></svg></button>`).join('')}
+      </div>` : ''}
+    </div>`;
+  }).join('');
 
   // Add event listeners for toggles
   servicesConfigList.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
@@ -2012,6 +2060,42 @@ function renderServicesConfig() {
     btn.addEventListener('click', (e) => {
       const index = parseInt(e.currentTarget.dataset.index, 10);
       servicesConfig.splice(index, 1);
+      servicesIconPickerIndex = -1;
+      renderServicesConfig();
+    });
+  });
+
+  // Icon tile opens / closes the picker; a picked icon applies and closes it
+  servicesConfigList.querySelectorAll('.service-config-icon').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const index = parseInt(e.currentTarget.dataset.index, 10);
+      servicesIconPickerIndex = servicesIconPickerIndex === index ? -1 : index;
+      renderServicesConfig();
+    });
+  });
+  servicesConfigList.querySelectorAll('.service-icon-picker button').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const index = parseInt(e.currentTarget.dataset.index, 10);
+      servicesConfig[index].icon = e.currentTarget.dataset.icon;
+      servicesIconPickerIndex = -1;
+      renderServicesConfig();
+    });
+  });
+
+  // Detected-owner suggestions: Use applies name and icon, Keep dismisses it
+  servicesConfigList.querySelectorAll('.service-detected-use').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const index = parseInt(e.currentTarget.dataset.index, 10);
+      const det = detectedSuggestion(servicesConfig[index]);
+      if (det) Object.assign(servicesConfig[index], { name: det.name, icon: det.icon });
+      renderServicesConfig();
+    });
+  });
+  servicesConfigList.querySelectorAll('.service-detected-keep').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const index = parseInt(e.currentTarget.dataset.index, 10);
+      const det = detectedSuggestion(servicesConfig[index]);
+      if (det) servicesConfig[index].ignoreDetected = `${det.name}|${det.icon}`;
       renderServicesConfig();
     });
   });
@@ -2060,6 +2144,7 @@ function renderServicesConfig() {
 // Open services config panel
 async function openServicesConfig() {
   servicesConfigOverlay.classList.add('active');
+  servicesIconPickerIndex = -1;
   await loadServicesConfig();
   loadDiscoveredServices();
 }
@@ -2106,6 +2191,13 @@ servicesEditBtn.addEventListener('click', openServicesConfig);
 servicesConfigClose.addEventListener('click', closeServicesConfig);
 servicesConfigCancel.addEventListener('click', closeServicesConfig);
 servicesConfigSave.addEventListener('click', saveServicesConfig);
+document.getElementById('services-use-detected')?.addEventListener('click', () => {
+  for (const service of servicesConfig) {
+    const det = detectedSuggestion(service);
+    if (det) Object.assign(service, { name: det.name, icon: det.icon });
+  }
+  renderServicesConfig();
+});
 
 // Close on overlay click
 servicesConfigOverlay.addEventListener('click', (e) => {

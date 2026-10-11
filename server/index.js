@@ -101,8 +101,12 @@ function validateService(service) {
       path: sanitizeString(service.path || '/', CONFIG.maxPathLength),
       host: sanitizeString(service.host || 'localhost', CONFIG.maxNameLength),
       checkType: inferCheckType(port, service.checkType),
-      icon: inferIcon(port, sanitizeString(service.icon || '', 50)),
+      icon: inferIcon(port, /^[a-z0-9-]{1,40}$/.test(service.icon || '') ? service.icon : ''),
       enabled: service.enabled !== false,
+      // "Keep" on a detected-name suggestion: the dismissed suggestion as
+      // "name|icon", so it stays hidden until detection says something else.
+      ...(typeof service.ignoreDetected === 'string' && service.ignoreDetected
+        ? { ignoreDetected: sanitizeString(service.ignoreDetected, 160) } : {}),
     }
   };
 }
@@ -144,7 +148,9 @@ async function saveSettings(settings) {
 
 export async function loadServices() {
   const settings = await loadSettings();
-  return (settings.services || []).filter(s => s.enabled !== false);
+  // ignoreDetected is editor state, not part of a service's status shape.
+  return (settings.services || []).filter(s => s.enabled !== false)
+    .map(({ ignoreDetected, ...s }) => s);
 }
 
 async function loadAllServices() {

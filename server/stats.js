@@ -4,6 +4,8 @@ import fs from 'fs';
 import http from 'http';
 import { execSync } from 'child_process';
 import { KNOWN_SERVICES, KNOWN_PROCESSES } from './services-config.js';
+import { agentCall, agentConfigured } from './core/agent-client.js';
+import { identifyPorts } from './services/port-owners.js';
 
 // Get Raspberry Pi throttle status via vcgencmd
 // Returns: { throttled: boolean, flags: number, reasons: string[] }
@@ -122,11 +124,26 @@ const KNOWN_UDP_SERVICES = {
   51820: { name: 'WireGuard', icon: 'shield', checkType: 'interface', interface: 'wg0' },
 };
 
+// Who owns each port: the agent sees every process (the container cannot),
+// Docker knows which container publishes a port. Either may be unavailable.
+async function portOwners() {
+  const [agent, containers] = await Promise.all([
+    agentConfigured() ? agentCall('ports.owners', {}, null, 6000).catch(() => null) : null,
+    dockerApiGet('/containers/json').catch(() => []),
+  ]);
+  return identifyPorts({
+    listeners: Array.isArray(agent?.listeners) ? agent.listeners : [],
+    containers: Array.isArray(containers) ? containers : [],
+  });
+}
+
 export async function discoverServices() {
   const discovered = [];
   const seen = new Set();
   
   try {
+    const owners = await portOwners().catch(() => new Map());
+
     // Get TCP listening ports
     const tcpOutput = execSync(
       'ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null',
@@ -159,13 +176,17 @@ export async function discoverServices() {
       if (isLocalhost) continue;
       
       const processMatch = line.match(/users:\(\("([^"]+)"/);
-      const processName = processMatch ? processMatch[1] : null;
+      const owned = owners.get(port);
+      const processName = processMatch ? processMatch[1] : (owned?.process || null);
       
       let service = null;
-      // A specific well-known port beats a generic process name: many
+      // The application that owns the port names it best. Without one, a
+      // specific well-known port beats a generic process name: many
       // unrelated services run under 'node' or 'python', but :3001 is
       // unambiguously RaPiSys, :5900 VNC, etc.
-      if (KNOWN_SERVICES[port]) {
+      if (owned) {
+        service = { ...owned, port };
+      } else if (KNOWN_SERVICES[port]) {
         service = { ...KNOWN_SERVICES[port], port };
       } else if (processName && KNOWN_PROCESSES[processName]) {
         service = { ...KNOWN_PROCESSES[processName], port };
@@ -189,7 +210,9 @@ export async function discoverServices() {
           checkType: service.checkType || 'tcp',
           enabled: true,
           discovered: true,
-          process: processName || null
+          process: processName || null,
+          owner: service.owner || (processName ? `process ${processName}` : null),
+          identified: !!owned
         });
       }
     }

@@ -724,6 +724,33 @@ function classifyCgroup(cgroupText) {
   return { kind: 'process', unit: null };
 }
 
+/**
+ * Listening TCP sockets from `ss -tlnpH` as [{ port, address, process, pid }].
+ * Only root sees the owning process of every socket; the web container runs
+ * unprivileged, which is why it asks here instead of running ss itself.
+ */
+function parseListeners(ssText) {
+  const out = [];
+  for (const line of String(ssText || '').split('\n')) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 4 || cols[0] !== 'LISTEN') continue;
+    const local = cols[3];
+    const i = local.lastIndexOf(':');
+    const port = Number(local.slice(i + 1));
+    if (i < 0 || !Number.isInteger(port) || port <= 0 || port > 65535) continue;
+    const m = line.match(/users:\(\("([^"]+)",pid=(\d+)/);
+    out.push({ port, address: local.slice(0, i), process: m ? m[1] : null, pid: m ? Number(m[2]) : null });
+  }
+  return out;
+}
+
+/** The Docker container id a process runs in, from /proc/<pid>/cgroup (cgroup v2). */
+function containerIdFromCgroup(cgroupText) {
+  const line = String(cgroupText || '').split('\n').find((l) => l.startsWith('0::')) || '';
+  const m = line.match(/\/docker-([0-9a-f]{64})\.scope$/) || line.match(/\/docker\/([0-9a-f]{64})$/);
+  return m ? m[1] : null;
+}
+
 // ---- This Pi's own resolver -> Pi-hole ---------------------------------------
 // On NetworkManager hosts /etc/resolv.conf is NM's output: writing it directly
 // only lasts until the next DHCP renewal or link change. The DNS servers are
@@ -1337,6 +1364,18 @@ const OPS = {
     const r = await run('docker', ['rm', name], 20000);
     if (r.code !== 0) throw new Error((r.stderr || r.stdout || `docker rm exited ${r.code}`).trim());
     return { ok: true };
+  },
+  // Which process (and, for a containerised one, which container) owns each
+  // listening TCP port. Read-only: one fixed ss call plus /proc reads.
+  async 'ports.owners'() {
+    const r = await run('ss', ['-tlnpH'], 5000).catch(() => ({ code: 1, stdout: '' }));
+    const listeners = parseListeners(r.stdout);
+    for (const l of listeners) {
+      l.containerId = null;
+      if (!l.pid) continue;
+      try { l.containerId = containerIdFromCgroup(fs.readFileSync(`/proc/${l.pid}/cgroup`, 'utf8')); } catch { /* exited */ }
+    }
+    return { listeners };
   },
   async 'inventory.services'() {
     // systemd units: load/active/sub state + since-timestamp.
@@ -3653,4 +3692,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
