@@ -37,6 +37,7 @@ export const OVERVIEW_WIDGETS = [
 const WById = Object.fromEntries(OVERVIEW_WIDGETS.map((w) => [w.id, w]));
 
 const CELL = 10, MARGIN = 8, COLS = 12;
+const MAX_H = 96;   // matches the server's cap in server/routes/layouts.js
 
 let savedLayout = null;
 let grid = null;            // active GridStack instance (locked view OR editor)
@@ -98,6 +99,7 @@ function makeItem(widget, placement, { editable }) {
   if (placement.y != null) item.setAttribute('gs-y', placement.y);
   item.setAttribute('gs-w', placement.w);
   item.setAttribute('gs-h', placement.h);
+  item.setAttribute('gs-max-h', MAX_H);
 
   const content = document.createElement('div');
   content.className = 'grid-stack-item-content';
@@ -109,7 +111,7 @@ function makeItem(widget, placement, { editable }) {
       <span class="gs-size-ctrl">
         <input type="number" class="gs-size-w" min="1" max="12" value="${placement.w}" title="Width (columns)">
         <span class="gs-size-x">×</span>
-        <input type="number" class="gs-size-h" min="2" max="60" value="${placement.h}" title="Height (rows)">
+        <input type="number" class="gs-size-h" min="2" max="${MAX_H}" value="${placement.h}" title="Height (rows)">
       </span>
       <button class="gs-hide-btn" data-hide="${widget.id}" title="Hide widget">✕</button>`;
     content.appendChild(bar);
@@ -629,7 +631,7 @@ function wireSizeInputs() {
     const hi = ctrl.querySelector('.gs-size-h');
     const apply = () => {
       const w = Math.min(12, Math.max(1, Number(wi.value) || 1));
-      const h = Math.min(60, Math.max(2, Number(hi.value) || 2));
+      const h = Math.min(MAX_H, Math.max(2, Number(hi.value) || 2));
       if (grid && item) grid.update(item, { w, h });
     };
     wi.onchange = apply; hi.onchange = apply;
