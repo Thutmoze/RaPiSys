@@ -6688,6 +6688,9 @@ body.ultra .set-kv-toggle .set-sysdns-l { flex-direction: row; align-items: base
   transition: width 0.4s ease;
   background-size: 200% 100%; animation: up-bar-shimmer 1.6s linear infinite; }
 @keyframes up-bar-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+/* Stream dropped, upgrade still running on the host: purple, not red (nothing
+   has failed yet). Declared before ok/err so the final state wins. */
+.up-install-bar-wait { background: linear-gradient(90deg, var(--accent-purple), #7c3aed); background-size: 200% 100%; }
 .up-install-bar-ok { background: linear-gradient(90deg, #22c55e, #16a34a); animation: none; }
 .up-install-bar-err { background: linear-gradient(90deg, #ef4444, #b91c1c); animation: none; }
 .up-install-status { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
@@ -6744,6 +6747,23 @@ body.ultra .up-term .t-meter { flex-basis: 70px; height: 3px; }
 .up-install-result { margin-top: 10px; font-size: 14px; }
 .up-install-success { color: #22c55e; font-weight: 700; }
 .up-install-fail { color: #ef4444; font-weight: 700; }
+/* Upgrade card: waiting for RaPiSys after the stream dropped, and the notes
+   and actions shown once the result was read back from the host. */
+.up-install-wait { display: flex; gap: 10px; align-items: flex-start; margin: 2px 0 10px; padding: 10px 12px;
+  border: 1px solid rgba(168,85,247,0.35); border-radius: var(--radius-sm); background: rgba(168,85,247,0.08);
+  font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.up-install-wait svg { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--accent-purple); }
+.up-install-wait b { color: var(--text-primary); font-weight: 600; }
+.up-install-wait-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.up-install-note { margin-top: 6px; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.up-install-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+body.compact .up-install-wait { padding: 8px 10px; font-size: 11.5px; margin-bottom: 8px; }
+body.compact .up-install-actions .set-btn { padding: 7px 13px; font-size: 12px; }
+body.ultra .up-install-wait { padding: 6px 8px; font-size: 11px; gap: 8px; margin-bottom: 6px; }
+body.ultra .up-install-wait svg { width: 14px; height: 14px; }
+body.ultra .up-install-note { font-size: 11px; }
+body.ultra .up-install-actions { gap: 8px; margin-top: 8px; }
+body.ultra .up-install-actions .set-btn { padding: 5px 10px; font-size: 11.5px; }
 
 /* ── In-browser remote access (SSH terminal + VNC desktop) ───────────────── */
 .rt-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }

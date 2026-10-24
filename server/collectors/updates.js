@@ -485,10 +485,17 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
   }
 
   // Streaming upgrade: onLine receives each output line for SSE relay.
-  async function upgrade({ packages = null, full = false, simulate = false }, onLine) {
+  async function upgrade({ packages = null, full = false, simulate = false, runId = null }, onLine) {
     if (!agentConfigured()) throw new Error('host agent required');
     const params = full ? { full: true, simulate } : { packages, simulate };
+    if (runId && !simulate) params.runId = runId;
     return agentCall('apt.upgrade', params, onLine, 1800000); // up to 30 min
+  }
+
+  // The agent's record of an upgrade run: state plus the output after line `after`.
+  async function upgradeStatus(runId, after = 0) {
+    if (!agentConfigured()) throw new Error('host agent required');
+    return agentCall('apt.upgradeStatus', { runId, after }, null, 10000);
   }
 
   // Describe a simulated plan for the confirm card. Best effort: a failure
@@ -516,5 +523,5 @@ export function createUpdatesCollector({ updatesRepo } = {}) {
     return agentCall('eeprom.update', {}, onLine, 300000);
   }
 
-  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, planDetails, about, firmwareUpdate };
+  return { refresh, cached, list, changelog, changelogFull, securityScan, tagSecurityFromChangelog, firmware, upgrade, upgradeStatus, planDetails, about, firmwareUpdate };
 }

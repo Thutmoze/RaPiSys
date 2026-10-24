@@ -249,7 +249,7 @@ All legacy endpoints (`/api/stats`, `/api/settings`, `/api/v1/system`, …) are 
 | `/api/storage/backup` | database backups to the NAS: `GET` status/schedule/files, `POST /config` `{enabled, frequency, retain}`, `GET /run/stream` (SSE, run now) |
 | `/api/alerts/*` · `/api/sessions/*` | alert rules/active/history; `GET /api/alerts/containers` (live containers, health, which rules watch them) and `POST /api/alerts/containers/:slug/watch` `{watch}` (Containers card bell) · live sessions + login history |
 | `/api/network` · `/api/network/dns/*` | network snapshot · Pi-hole config/test/detect/install/blocking/update/system-resolver/backup 🔒 |
-| `/api/reports/*` · `/api/inventory/*` · `/api/updates/*` | report aggregation/export · package/service/container inventory · update detection & execution, `about/:pkg` (package facts), `reboot-status` and `reboot` 🔒 |
+| `/api/reports/*` · `/api/inventory/*` · `/api/updates/*` | report aggregation/export · package/service/container inventory · update detection & execution, `about/:pkg` (package facts), `run/:id` (state and missed output of an upgrade whose stream dropped, e.g. when upgrading Docker restarts RaPiSys; one upgrade runs at a time), `reboot-status` and `reboot` 🔒 |
 | `/api/layouts/*` | dashboards registry, per-dashboard layouts, reorder 🔒 |
 | `/api/pironman/*` | Case controller: status/detect/config/settings, install & update over SSE, restart 🔒 |
 | `/api/nodes/*` · `GET /api/v1/node-summary` | peer CRUD, connection test, LAN scan 🔒 · compact snapshot read by peers (API-key gated) |

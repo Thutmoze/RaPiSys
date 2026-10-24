@@ -170,7 +170,86 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
     } catch (err) { res.status(502).json({ error: err.message, plan: out }); }
   });
 
-  // SSE-streamed upgrade. Query: ?full=1 or ?packages=a,b,c
+  // Snapshot of the upgradable list before a run: apt pulls in dependencies
+  // beyond the requested packages, so the diff against the list afterwards is
+  // what actually got upgraded, with each package's from-version and summary.
+  const upgradableMap = () => {
+    const m = {};
+    try { for (const u of (updates.cached?.()?.updates || [])) m[u.package] = u; } catch { /* best-effort */ }
+    return m;
+  };
+
+  // History, cache and event for a finished run. Shared by the live stream and
+  // by the recovery path for a run whose stream died with the container.
+  async function recordRun({ packages, full, beforeMap, code, logBuf }) {
+    const ok = code === 0;
+
+    // Re-list upgradable packages (cheap: no apt-get update) to learn the true
+    // post-upgrade state. Anything that was upgradable before and is now gone
+    // (or moved to a newer installed version) actually got upgraded — this
+    // captures dependencies, not just the explicitly requested packages.
+    // Re-listed on failure too: a failed or interrupted run can still have
+    // installed some packages, and the cached list would keep showing them.
+    let afterMap = {};
+    try {
+      const after = await updates.list();
+      if (after.available) {
+        for (const u of (after.updates || [])) afterMap[u.package] = u;
+        // persist the fresh list as the cache so the UI drops upgraded packages
+        updatesRepo.saveCache(after.updates || []);
+      }
+    } catch { /* if re-list fails, fall back to requested-package history */ }
+
+    // Build history entries from the real diff when we have it, else fall back
+    // to the requested package list.
+    let entries;
+    if (ok && Object.keys(beforeMap).length) {
+      const changed = Object.values(beforeMap).filter((b) => {
+        const a = afterMap[b.package];
+        return !a || a.installed !== b.installed;   // gone, or installed version advanced
+      });
+      const list = changed.length ? changed : (full ? [] : (packages || []).map((p) => beforeMap[p]).filter(Boolean));
+      entries = list.map((b) => ({
+        ts: Date.now(), packageName: b.package,
+        fromV: b.installed || null, toV: b.candidate || null,
+        description: b.description || null, origin: b.origin || null,
+        result: 'success', log: logBuf.slice(0, 4000),
+      }));
+      if (!entries.length) {
+        entries = full
+          ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: 'success', log: logBuf }]
+          : (packages || []).map((p) => ({ ts: Date.now(), packageName: p, result: 'success', log: logBuf.slice(0, 4000) }));
+      }
+    } else {
+      entries = full
+        ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: ok ? 'success' : 'failed', log: logBuf }]
+        : (packages || []).map((p) => {
+            const b = beforeMap[p];
+            return { ts: Date.now(), packageName: p, fromV: b?.installed || null, toV: b?.candidate || null,
+                     description: b?.description || null, origin: b?.origin || null,
+                     result: ok ? 'success' : 'failed', log: logBuf.slice(0, 4000) };
+          });
+    }
+    updatesRepo.recordBatch(entries);
+    events?.add('updates.applied', ok ? 'info' : 'warning', { full, packages, ok });
+    // Re-read the host so the page can say right away whether this install
+    // left something waiting on a reboot. A failure here never fails the run.
+    return rebootStatus ? await rebootStatus.get({ force: true }).catch(() => null) : null;
+  }
+
+  // Run ids this process is streaming or has recorded. The recovery path
+  // records a run only when its id is absent: then the process that streamed
+  // it is gone (the container restarted) and nobody else will.
+  const runsSeen = new Map();
+  const RUN_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+  const markRun = (id, state) => {
+    if (!id) return;
+    runsSeen.set(id, state);
+    if (runsSeen.size > 100) runsSeen.delete(runsSeen.keys().next().value);
+  };
+
+  // SSE-streamed upgrade. Query: ?full=1 or ?packages=a,b,c, plus ?run=<id>
+  // (the page's id for this run, used to recover the result if the stream drops).
   r.get('/stream', requireControl, async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -179,6 +258,7 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
 
     const full = req.query.full === '1';
     const packages = req.query.packages ? String(req.query.packages).split(',').filter(Boolean) : null;
+    const runId = RUN_ID_RE.test(String(req.query.run || '')) ? String(req.query.run) : null;
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
     if (!full && (!packages || !packages.length)) {
@@ -188,86 +268,53 @@ export function updatesRouter({ updates, updateScheduler, updatesRepo, requireCo
 
     const startTs = Date.now();
     let logBuf = '';
+    markRun(runId, 'live');
     send('start', { full, packages, ts: startTs });
     try {
-      // snapshot the pre-upgrade upgradable list so we can compute what actually
-      // changed (apt pulls in dependencies beyond the requested packages) and
-      // recover each package's from-version + description for the history rows.
-      let beforeMap = {};
-      try {
-        const c = updates.cached?.();
-        for (const u of (c?.updates || [])) beforeMap[u.package] = u;
-      } catch { /* best-effort */ }
-
-      const result = await updates.upgrade({ packages, full }, (line) => {
+      const beforeMap = upgradableMap();
+      const result = await updates.upgrade({ packages, full, runId }, (line) => {
         logBuf += line + '\n';
         send('line', { line });
       });
-      const ok = result.code === 0;
-
-      // Re-list upgradable packages (cheap: no apt-get update) to learn the true
-      // post-upgrade state. Anything that was upgradable before and is now gone
-      // (or moved to a newer installed version) actually got upgraded — this
-      // captures dependencies, not just the explicitly requested packages.
-      // Re-listed on failure too: a failed or interrupted run can still have
-      // installed some packages, and the cached list would keep showing them.
-      let afterMap = {};
-      try {
-        const after = await updates.list();
-        if (after.available) {
-          for (const u of (after.updates || [])) afterMap[u.package] = u;
-          // persist the fresh list as the cache so the UI drops upgraded packages
-          updatesRepo.saveCache(after.updates || []);
-        }
-      } catch { /* if re-list fails, fall back to requested-package history */ }
-
-      // Build history entries from the real diff when we have it, else fall back
-      // to the requested package list.
-      let entries;
-      if (ok && Object.keys(beforeMap).length) {
-        const changed = Object.values(beforeMap).filter((b) => {
-          const a = afterMap[b.package];
-          return !a || a.installed !== b.installed;   // gone, or installed version advanced
-        });
-        const list = changed.length ? changed : (full ? [] : (packages || []).map((p) => beforeMap[p]).filter(Boolean));
-        entries = list.map((b) => ({
-          ts: Date.now(), packageName: b.package,
-          fromV: b.installed || null, toV: b.candidate || null,
-          description: b.description || null, origin: b.origin || null,
-          result: 'success', log: logBuf.slice(0, 4000),
-        }));
-        if (!entries.length) {
-          entries = full
-            ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: 'success', log: logBuf }]
-            : (packages || []).map((p) => ({ ts: Date.now(), packageName: p, result: 'success', log: logBuf.slice(0, 4000) }));
-        }
-      } else {
-        entries = full
-          ? [{ ts: Date.now(), packageName: 'dist-upgrade', result: ok ? 'success' : 'failed', log: logBuf }]
-          : (packages || []).map((p) => {
-              const b = beforeMap[p];
-              return { ts: Date.now(), packageName: p, fromV: b?.installed || null, toV: b?.candidate || null,
-                       description: b?.description || null, origin: b?.origin || null,
-                       result: ok ? 'success' : 'failed', log: logBuf.slice(0, 4000) };
-            });
-      }
-      updatesRepo.recordBatch(entries);
-      events?.add('updates.applied', ok ? 'info' : 'warning', { full, packages, ok });
-      // Re-read the host so the page can say right away whether this install
-      // left something waiting on a reboot. A failure here never fails the run.
-      const reboot = rebootStatus ? await rebootStatus.get({ force: true }).catch(() => null) : null;
-      send('done', { ok, code: result.code, reboot });
+      const reboot = await recordRun({ packages, full, beforeMap, code: result.code, logBuf });
+      markRun(runId, 'recorded');
+      send('done', { ok: result.code === 0, code: result.code, reboot });
     } catch (err) {
-      updatesRepo.record({ ts: Date.now(), packageName: full ? 'dist-upgrade' : (packages || []).join(','), result: 'error', log: logBuf + '\n' + err.message });
-      // The run may have died part-way (agent restart, killed dpkg) after
-      // installing something; resync the cached list with the host.
-      try {
-        const after = await updates.list();
-        if (after.available) updatesRepo.saveCache(after.updates || []);
-      } catch { /* best-effort */ }
+      markRun(runId, 'recorded');
+      // Refused because another upgrade is running: nothing ran, nothing to record.
+      if (!/already running/.test(err.message)) {
+        updatesRepo.record({ ts: Date.now(), packageName: full ? 'dist-upgrade' : (packages || []).join(','), result: 'error', log: logBuf + '\n' + err.message });
+        // The run may have died part-way (agent restart, killed dpkg) after
+        // installing something; resync the cached list with the host.
+        try {
+          const after = await updates.list();
+          if (after.available) updatesRepo.saveCache(after.updates || []);
+        } catch { /* best-effort */ }
+      }
       send('failed', { message: err.message });
     }
     res.end();
+  });
+
+  // State of an upgrade run whose stream dropped, and the output after line
+  // `after`. When it finished and no live stream recorded it (the container
+  // restarted mid-run, e.g. upgrading docker-ce), its History is written here.
+  r.get('/run/:id', requireControl, async (req, res) => {
+    const runId = String(req.params.id);
+    if (!RUN_ID_RE.test(runId)) return res.status(400).json({ error: 'invalid run id' });
+    const after = Math.max(0, Math.floor(Number(req.query.after) || 0));
+    let st;
+    try { st = await updates.upgradeStatus(runId, after); }
+    catch (err) { return res.status(502).json({ error: err.message }); }
+    if (!st?.found || st.running || runsSeen.has(runId)) return res.json(st || { found: false });
+    markRun(runId, 'recorded');
+    // The whole retained output for History, not just the part this page missed.
+    let full = st;
+    if (after > 0) { try { full = await updates.upgradeStatus(runId, 0); } catch { /* use what we have */ } }
+    const code = st.code ?? 1;
+    const reboot = await recordRun({ packages: st.packages, full: st.full, beforeMap: upgradableMap(),
+      code, logBuf: (full.lines || []).join('\n') + '\n' }).catch(() => null);
+    res.json({ ...st, recorded: true, reboot });
   });
 
   // Firmware update (SSE).

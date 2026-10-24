@@ -7676,10 +7676,25 @@ pageRenderers.updates = (() => {
       }
     };
 
-    const qs = full ? 'full=1' : `packages=${encodeURIComponent(pkgList.join(','))}`;
+    // The page's id for this run: if the stream drops, the agent's record of
+    // the run (looked up by this id) says how it ended and what we missed.
+    const runId = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    let received = 0;   // output lines shown so far
+    // apt.done for the stream and the recovery path alike.
+    const complete = (d) => {
+      if (onComplete && d.ok) {
+        term.note('firmware packages updated', 'ok');
+        statusEl.textContent = 'Flashing bootloader EEPROM…';
+        onComplete(host, { card, term, barEl, statusEl, resultEl, closeBtn, finalize });
+        return;
+      }
+      finalize(d.ok, d);
+    };
+    const qs = (full ? 'full=1' : `packages=${encodeURIComponent(pkgList.join(','))}`) + `&run=${runId}`;
     const ev = new EventSource(`/api/updates/stream?${qs}`);
     ev.addEventListener('line', (e) => {
       const line = JSON.parse(e.data).line;
+      received++;
       term.line(line);
       if (/^(Get:|Fetched|Reading)/.test(line)) statusEl.textContent = 'Downloading packages…';
       else if (/Unpacking/.test(line)) statusEl.textContent = 'Unpacking…';
@@ -7688,26 +7703,19 @@ pageRenderers.updates = (() => {
       bump();
     });
     ev.addEventListener('done', (e) => {
-      const d = JSON.parse(e.data);
       ev.close();
-      // If a follow-up phase is queued (e.g. bootloader EEPROM flash) and the apt
-      // phase succeeded, continue in the SAME card instead of finalizing.
-      if (onComplete && d.ok) {
-        term.note('— firmware packages updated —', 'ok');
-        statusEl.textContent = 'Flashing bootloader EEPROM…';
-        onComplete(host, { card, term, barEl, statusEl, resultEl, closeBtn, finalize });
-        return;
-      }
-      finalize(d.ok, d);
+      complete(JSON.parse(e.data));
     });
     ev.addEventListener('failed', (e) => {
       if (finished) return;
       let m = 'upgrade failed'; try { m = JSON.parse(e.data).message || m; } catch { /* */ }
       showLog(); term.note(`✗ ${m}`, 'err'); term.stop();
       card.querySelector('.up-spinner')?.remove();
+      barEl.style.width = '100%'; barEl.classList.add('up-install-bar-err');
       statusEl.textContent = 'Error';
       resultEl.removeAttribute('hidden');
-      resultEl.innerHTML = `<span class="up-install-fail">✗ ${esc(m)}</span>`;
+      resultEl.innerHTML = `<span class="up-install-fail">✗ ${esc(m)}</span>`
+        + (/already running/.test(m) ? '<div class="up-install-note">Nothing was changed. Wait for it to finish, then try again.</div>' : '');
       closeBtn.hidden = false; finished = true;
       ev.close(); streaming = false;
     });
@@ -7715,16 +7723,97 @@ pageRenderers.updates = (() => {
       // Native EventSource error also fires on normal connection close — if the
       // upgrade already finished (done/failed), this is just that close: ignore.
       if (finished) { ev.close(); return; }
-      if (ev.readyState === EventSource.CLOSED) {
-        showLog(); term.note('✗ connection lost', 'err'); term.stop();
-        card.querySelector('.up-spinner')?.remove();
-        statusEl.textContent = 'Error';
-        resultEl.removeAttribute('hidden');
-        resultEl.innerHTML = `<span class="up-install-fail">✗ connection lost during upgrade</span>`;
-        closeBtn.hidden = false; finished = true;
-        ev.close(); streaming = false;
-      }
+      // Never let EventSource reconnect: that re-sends the GET, which starts the
+      // same upgrade a second time. The run goes on at the host; ask about it.
+      ev.close();
+      if (!recovering) recover();
     });
+
+    // Upgrading the Docker engine restarts every container, RaPiSys included.
+    const dockerEngine = pkgList.some((p) => /^(docker-ce|containerd\.io)$/.test(p));
+    const WAIT_LIMIT_MS = 3 * 60 * 1000;
+    let recovering = false;
+    function recover(again = false) {
+      recovering = true;
+      showLog(); term.stop();
+      if (!again) term.note(dockerEngine ? '↻ Stream closed: Docker is restarting RaPiSys' : '↻ Stream closed: connection to RaPiSys lost', 'warn');
+      barEl.classList.add('up-install-bar-wait');
+      statusEl.textContent = 'Waiting for RaPiSys…';
+      const waitEl = el('div', 'up-install-wait');
+      waitEl.innerHTML = `${RESTART_ICON}<div>${dockerEngine
+        ? '<b>Docker restarted, so RaPiSys restarted with it.</b> The upgrade keeps running on the host. Waiting for RaPiSys to come back'
+        : '<b>Lost the connection to RaPiSys.</b> The upgrade keeps running on the host. Reconnecting'} <span class="up-install-wait-time">0s</span></div>`;
+      statusEl.after(waitEl);
+      const timeEl = waitEl.querySelector('.up-install-wait-time');
+      let since = Date.now();          // reset whenever the host answers
+      let reconnected = false;
+      const t0 = Date.now();
+      const tick = setInterval(() => { timeEl.textContent = `${Math.round((Date.now() - t0) / 1000)}s`; }, 1000);
+      const stop = () => { clearInterval(tick); waitEl.remove(); };
+
+      const poll = async () => {
+        if (!ov.isConnected) { stop(); return; }
+        let st = null;
+        try { st = await api(`/updates/run/${runId}?after=${received}`); } catch { /* still restarting */ }
+        if (st) {
+          since = Date.now();
+          if (!reconnected) {
+            reconnected = true;
+            waitEl.remove();
+            term.note('↻ Reconnected. Output from the host while disconnected:', 'info');
+          }
+          if (!st.found) { stop(); lost(); return; }
+          if (st.gap) term.note(`… ${st.gap} lines not kept by the host …`, 'info');
+          for (const l of st.lines || []) { term.line(l); bump(); }
+          received = (st.total ?? received);
+          if (!st.running) {
+            stop();
+            const ok = st.code === 0;
+            barEl.classList.remove('up-install-bar-wait');
+            complete({ ok, code: st.code ?? 1, reboot: st.reboot || null });
+            if (!(onComplete && ok)) resultEl.insertAdjacentHTML('beforeend', `<div class="up-install-note">${dockerEngine
+              ? 'RaPiSys restarted during the install because Docker was upgraded.'
+              : 'The connection dropped during the install. The result above was read from the host.'}</div>`);
+            return;
+          }
+          statusEl.textContent = 'Reconnected. The upgrade is still running on the host…';
+        }
+        if (Date.now() - since > WAIT_LIMIT_MS) { stop(); noAnswer(); return; }
+        setTimeout(poll, 3000);
+      };
+      setTimeout(poll, 3000);
+    }
+    // The host has no record of this run: the request never reached the agent.
+    function lost() {
+      term.note('✗ connection lost', 'err');
+      card.querySelector('.up-spinner')?.remove();
+      barEl.classList.remove('up-install-bar-wait'); barEl.style.width = '100%'; barEl.classList.add('up-install-bar-err');
+      statusEl.textContent = 'Error';
+      resultEl.removeAttribute('hidden');
+      resultEl.innerHTML = '<span class="up-install-fail">✗ connection lost during upgrade</span>';
+      closeBtn.hidden = false; finished = true; streaming = false;
+    }
+    // RaPiSys did not answer in time: say so, and let the user ask again.
+    function noAnswer() {
+      term.note('✗ No answer from RaPiSys after 3 minutes', 'err');
+      barEl.classList.remove('up-install-bar-wait'); barEl.style.width = '100%'; barEl.classList.add('up-install-bar-err');
+      statusEl.textContent = 'RaPiSys has not come back';
+      resultEl.removeAttribute('hidden');
+      resultEl.innerHTML = `<span class="up-install-fail">✗ Could not confirm the result</span>
+        <div class="up-install-note">The upgrade may still be running on the host. Check again once RaPiSys is back, or open Updates later: History records the result.</div>
+        <div class="up-install-actions">
+          <button class="set-btn set-btn-detect" data-up="recheck">${DETECT_ICON}<span>Check again</span></button>
+          <button class="set-btn set-btn-cancel" data-up="dismiss">${CANCEL_ICON}<span>Close</span></button>
+        </div>`;
+      closeBtn.hidden = false; finished = true; streaming = false;
+      resultEl.querySelector('[data-up=dismiss]').onclick = closeAndRefresh;
+      resultEl.querySelector('[data-up=recheck]').onclick = () => {
+        resultEl.setAttribute('hidden', ''); resultEl.innerHTML = '';
+        barEl.classList.remove('up-install-bar-err');
+        closeBtn.hidden = true; finished = false; streaming = true;
+        recover(true);
+      };
+    }
   }
 
   // The "Update Firmware" action button folds both firmware paths: it upgrades

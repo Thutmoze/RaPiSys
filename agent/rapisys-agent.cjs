@@ -166,6 +166,48 @@ const ALLOWED_NFS_OPTS = new Set(['ro', 'rw', 'vers=3', 'vers=4', 'vers=4.1', 'v
 
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
 
+// ---- One apt upgrade at a time ----------------------------------------------
+// A second upgrade started while one runs fails on the dpkg lock (exit 100)
+// after printing the first one's plan, which reads like the first one failed.
+// That happened when a browser replayed the upgrade request on reconnect. The
+// agent refuses it up front instead, and remembers the last run (outcome plus
+// the end of its output) so a page that lost its stream can read the result.
+const RUN_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+const APT_RUN_TAIL = 1000;
+let aptRun = null;
+
+function beginAptRun({ runId, packages, full }, now = Date.now()) {
+  if (aptRun && aptRun.finishedAt == null) {
+    const what = aptRun.full ? 'full upgrade' : aptRun.packages.join(', ');
+    const at = new Date(aptRun.startedAt).toTimeString().slice(0, 8);
+    throw new Error(`another upgrade is already running on this host (${what}, started ${at})`);
+  }
+  const run = { runId, packages, full, startedAt: now, finishedAt: null, code: undefined, total: 0, tail: [] };
+  aptRun = run;
+  return {
+    push(line) {
+      run.total++;
+      run.tail.push(line);
+      if (run.tail.length > APT_RUN_TAIL) run.tail.shift();
+    },
+    end(code) { run.code = code; run.finishedAt = Date.now(); },
+    get code() { return run.code; },
+  };
+}
+
+/** The run's state and the lines numbered above `after` (1-based count of lines already seen). */
+function aptRunStatus(runId, after = 0) {
+  const run = aptRun;
+  if (!run || run.runId !== runId) return { found: false };
+  const first = run.total - run.tail.length;           // lines dropped from the tail
+  const from = Math.max(0, Math.min(run.tail.length, (Number(after) || 0) - first));
+  return {
+    found: true, running: run.finishedAt == null, code: run.code ?? null,
+    packages: run.packages, full: run.full, startedAt: run.startedAt, finishedAt: run.finishedAt,
+    total: run.total, gap: Math.max(0, first - (Number(after) || 0)), lines: run.tail.slice(from),
+  };
+}
+
 /** Shell-quote a single argument for use inside `sh -c` strings. */
 function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 
@@ -3200,7 +3242,7 @@ WantedBy=multi-user.target
       candidateVersion,
     };
   },
-  async 'apt.upgrade'({ packages, simulate = false, full = false }, send) {
+  async 'apt.upgrade'({ packages, simulate = false, full = false, runId = null }, send) {
     let args;
     const env = { DEBIAN_FRONTEND: 'noninteractive' };
     if (full) {
@@ -3212,8 +3254,23 @@ WantedBy=multi-user.target
       for (const p of packages) assert(PKG_RE.test(p), `invalid package name: ${p}`);
       args = ['install', '--only-upgrade', '-y', ...(simulate ? ['-s'] : []), ...packages];
     }
-    const r = await runStreaming('apt-get', args, env, send);
-    return { code: r.code, simulated: simulate };
+    if (simulate) {
+      const r = await runStreaming('apt-get', args, env, send);
+      return { code: r.code, simulated: true };
+    }
+    assert(runId == null || RUN_ID_RE.test(runId), 'invalid run id');
+    const run = beginAptRun({ runId, packages: full ? [] : packages, full });
+    const r = await runStreaming('apt-get', args, env, (line) => { run.push(line); send(line); })
+      .finally(() => { if (run.code === undefined) run.end(null); });
+    run.end(r.code);
+    return { code: r.code, simulated: false };
+  },
+  // The current or last real upgrade, for a page whose stream dropped while
+  // it ran (an upgrade of docker-ce restarts the dashboard container). Lines
+  // after `after` are the output that page missed. Read-only.
+  async 'apt.upgradeStatus'({ runId, after = 0 }) {
+    assert(RUN_ID_RE.test(runId), 'invalid run id');
+    return aptRunStatus(runId, after);
   },
   // Candidate package records for an upgrade plan (summary + dependency
   // fields), so the confirm card can describe each package and say why a
@@ -3692,4 +3749,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { beginAptRun, aptRunStatus, AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
