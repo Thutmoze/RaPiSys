@@ -83,6 +83,24 @@ export function githubError(res, repo) {
   return `GitHub answered ${res.status} for pi-hole/${repo}`;
 }
 
+/**
+ * The saved update status after a check. A check that failed keeps what was
+ * known and says so (`checkError`), so the Updates tab shows the failure
+ * instead of quietly hiding Pi-hole as up to date. `failedCheck` marks that
+ * case for the caller, which then skips the release-notes lookup.
+ */
+export function nextPiholeStatus(prev = {}, res = null, now = Date.now()) {
+  if (res?.error && prev.installed) return { ...prev, checkedAt: now, checkError: res.error, failedCheck: true };
+  if (!res || !res.installed) return { checkedAt: now, updateAvailable: false, installed: false };
+  return {
+    checkedAt: now, installed: true, updateAvailable: !!res.updateAvailable,
+    method: res.method || null, currentVersion: res.currentVersion || null, latestVersion: res.latestVersion || null,
+    components: res.components || null, container: res.container || null,
+    advisories: 0, urgency: null, released: null, notesError: null,
+    checkError: res.registryUnreachable ? 'Docker Hub did not answer' : null,
+  };
+}
+
 const cleanBody = (b) => String(b || '').replace(/<!--[\s\S]*?-->/g, '').trim().slice(0, MAX_BODY);
 
 export function createPiholeReleases({ fetchImpl = globalThis.fetch, ttlMs = 6 * 3600e3, now = () => Date.now() } = {}) {

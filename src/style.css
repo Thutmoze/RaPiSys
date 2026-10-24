@@ -6805,6 +6805,8 @@ body.ultra .up-install-actions .set-btn { padding: 5px 10px; font-size: 11.5px; 
 .up-app-comps i { font-style: normal; color: #10b981; }
 .up-app-state-ok { color: var(--accent-green); font-weight: 600; }
 .up-app-state-avail { color: #e11d63; font-weight: 600; }
+.up-app-state-err { color: var(--accent-red, #ef4444); font-weight: 600; }
+.up-app-err-note { font-size: 11px; color: var(--text-muted); font-weight: 400; white-space: normal; }
 .up-app-acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .up-app-acts .set-btn { padding: 7px 13px; font-size: 12px; }
 .inv-table-fixed td:has(.up-app-acts) { overflow: visible; white-space: normal; }

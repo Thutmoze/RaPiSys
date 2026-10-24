@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createRequire } from 'module';
 import express from 'express';
 import request from 'supertest';
-import { cmpVer, notesBetween, summarizeNotes, createPiholeReleases, githubError } from '../server/services/pihole-releases.js';
+import { cmpVer, notesBetween, summarizeNotes, createPiholeReleases, githubError, nextPiholeStatus } from '../server/services/pihole-releases.js';
 import { releaseNotesHtml, inlineHtml } from '../src/modules/release-notes.js';
 import { networkRouter } from '../server/routes/network.js';
 
@@ -186,5 +186,24 @@ describe('Pi-hole routes', () => {
     const { a } = app();
     const r = await request(a).get('/api/network/dns/pihole/release-notes');
     expect(r.body.notes).toEqual([{ group: 'Core', tag: 'v6.5' }]);
+  });
+});
+
+describe('nextPiholeStatus', () => {
+  const prev = { installed: true, updateAvailable: true, method: 'docker', currentVersion: '2026.09.0', latestVersion: '2026.10.0' };
+  it('keeps what was known when the check fails, and says it failed', () => {
+    expect(nextPiholeStatus(prev, { installed: false, error: 'agent timed out' }, 5))
+      .toEqual({ ...prev, checkedAt: 5, checkError: 'agent timed out', failedCheck: true });
+  });
+  it('marks a Docker Hub outage as a failed check, not as up to date', () => {
+    expect(nextPiholeStatus({}, { installed: true, method: 'docker', updateAvailable: false, registryUnreachable: true }, 5))
+      .toMatchObject({ installed: true, updateAvailable: false, checkError: 'Docker Hub did not answer' });
+  });
+  it('clears an earlier failure on a good check', () => {
+    expect(nextPiholeStatus({ ...prev, checkError: 'x' }, { installed: true, method: 'docker', updateAvailable: false }, 5))
+      .toMatchObject({ updateAvailable: false, checkError: null });
+  });
+  it('reports Pi-hole gone when it is not installed', () => {
+    expect(nextPiholeStatus(prev, { installed: false }, 5)).toEqual({ checkedAt: 5, updateAvailable: false, installed: false });
   });
 });

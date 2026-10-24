@@ -29,7 +29,7 @@ import { createUpdatesRepo } from './repositories/updates.js';
 import { createNetTrafficRepo } from './repositories/net-traffic.js';
 import { createNetTraffic } from './services/net-traffic.js';
 import { createPiholeBackupJob } from './services/pihole-backup.js';
-import { createPiholeReleases, summarizeNotes } from './services/pihole-releases.js';
+import { createPiholeReleases, summarizeNotes, nextPiholeStatus } from './services/pihole-releases.js';
 import { agentCall, agentConfigured } from './core/agent-client.js';
 import { createPeersRepo } from './repositories/peers.js';
 import { createSampler } from './services/sampler.js';
@@ -336,13 +336,10 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     const piCfg = (await loadSettings()).rapisys?.pihole;
     if (!piCfg || !piCfg.enabled) return (globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false });
     let res;
-    try { res = await network.piholeCheckUpdate(); } catch (e) { return globalThis.__rapisysPiholeUpdate; }
-    if (!res || !res.installed) return (globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false });
+    try { res = await network.piholeCheckUpdate(); } catch (e) { res = { installed: false, error: e.message }; }
     const prev = globalThis.__rapisysPiholeUpdate || {};
-    const next = { checkedAt: Date.now(), installed: true, updateAvailable: !!res.updateAvailable,
-      method: res.method || null, currentVersion: res.currentVersion || null, latestVersion: res.latestVersion || null,
-      components: res.components || null, container: res.container || null,
-      advisories: 0, urgency: null, released: null, notesError: null };
+    const next = nextPiholeStatus(prev, res);
+    if (!next.installed || next.failedCheck) { delete next.failedCheck; return (globalThis.__rapisysPiholeUpdate = next); }
     // What the update brings: advisory count, worst severity and release date
     // from the GitHub release notes. A GitHub failure leaves the row without tags.
     if (next.updateAvailable) {

@@ -2272,7 +2272,10 @@ const OPS = {
     const { DOCKER: curImage, ...curComps } = comps.current;
     const { DOCKER: latImage, ...latComps } = comps.latest;
     return { installed: true, method: 'docker', updateAvailable: state.updateAvailable, pending: state.pending,
-      checked: state.checked, currentVersion: curImage || det.version || null,
+      checked: state.checked,
+      // Docker Hub was asked and did not answer: "no update" is only a guess.
+      registryUnreachable: !/^ghcr\.io\//.test(configImage) && !remoteDigest,
+      currentVersion: curImage || det.version || null,
       latestVersion: state.updateAvailable ? (latImage || null) : (curImage || null),
       components: { current: curComps, latest: latComps }, container: name };
   },

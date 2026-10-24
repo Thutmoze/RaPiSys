@@ -3462,6 +3462,7 @@ pageRenderers.settings = (() => {
         return `<div class="set-kv"><span>Updates</span><b class="set-warn">● Update available</b> (${ver}) <button class="net-toggle" data-pi="update">Update Pi-hole</button></div>`;
       }
       const when = upd.checkedAt ? new Date(upd.checkedAt).toLocaleString() : 'never';
+      if (upd.checkError) return `<div class="set-kv"><span>Updates</span><b class="set-err">● Check failed</b> <span class="net-dns-note" style="display:inline">${esc(upd.checkError)}, checked ${esc(when)}</span> <button class="net-toggle" data-pi="checkupd">Check now</button></div>`;
       return `<div class="set-kv"><span>Updates</span><b class="set-ok">● Up to date</b> <span class="net-dns-note" style="display:inline">checked ${esc(when)}</span> <button class="net-toggle" data-pi="checkupd">Check now</button></div>`;
     })() : '';
 
@@ -6852,8 +6853,9 @@ pageRenderers.updates = (() => {
   }
 
   // ---- Applications updated outside apt (Pi-hole) ----------------------------
-  // One row per app above the package table, with its own Check now / Update
-  // and a changelog built from the app's GitHub release notes.
+  // One row per app above the package table, shown only while it needs
+  // attention (an update, or a failed check), like a pending package. Check
+  // for updates checks it too; a failed check keeps its own Check now.
   const PIHOLE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><circle cx="12" cy="11" r="3"/></svg>';
   const PIHOLE_PARTS = [['CORE', 'Core'], ['WEB', 'Web'], ['FTL', 'FTL']];
   let piholeChecking = false;
@@ -6869,17 +6871,21 @@ pageRenderers.updates = (() => {
     return comps.CORE ? `Core ${vtag(comps.CORE)}` : (side === 'current' ? p.currentVersion : p.latestVersion);
   };
 
+  const piholeNeedsRow = (p) => !!(p && p.installed && (p.updateAvailable || p.checkError));
+
   function renderApps(host) {
     const box = $('[data-up=apps]', host);
     if (!box) return;
     const p = piholeUpd;
-    if (!p || !p.installed) { box.innerHTML = ''; return; }
+    if (!piholeNeedsRow(p)) { box.innerHTML = ''; return; }
+    const failed = !!p.checkError && !p.updateAvailable;
     const cur = p.components?.current || null;
     const lat = p.components?.latest || null;
     const installLine = p.method === 'docker' ? `Docker container${p.container ? ` · ${esc(p.container)}` : ''}` : 'Host install';
     const installed = `<div class="up-app-vers"><span>${esc(piholeMain(p, 'current') || '—')}</span>${cur ? `<span class="up-app-comps">${piholeParts(cur)}</span>` : ''}</div>`;
     let available;
     if (piholeChecking) available = '<span class="inv-dim"><span class="up-spinner-sm"></span> Checking…</span>';
+    else if (failed) available = `<div class="up-app-vers"><span class="up-app-state-err">Check failed</span><span class="up-app-err-note">${esc(p.checkError)}</span></div>`;
     else if (p.updateAvailable) {
       const main = piholeMain(p, 'latest');
       available = `<div class="up-app-vers">${main ? `<span class="up-new">${esc(main)}</span>` : '<span class="up-app-state-avail">Newer image available</span>'}${lat ? `<span class="up-app-comps">${piholeParts(lat, cur)}</span>` : ''}</div>`;
@@ -6903,13 +6909,14 @@ pageRenderers.updates = (() => {
             <td>${p.updateAvailable ? '<button class="up-link" data-up="pinotes">view</button>' : ''}</td>
             <td class="inv-dim c-checked">${p.checkedAt ? fmtChecked(p.checkedAt) : 'never'}</td>
             <td><div class="up-app-acts">
-              <button class="set-btn set-btn-detect" data-up="picheck" ${piholeChecking ? 'disabled' : ''}>${DETECT_ICON}<span>Check now</span></button>
+              ${failed ? `<button class="set-btn set-btn-detect" data-up="picheck" ${piholeChecking ? 'disabled' : ''}>${DETECT_ICON}<span>Check now</span></button>` : ''}
               ${p.updateAvailable && !piholeChecking ? `<button class="set-btn set-btn-edit" data-up="piupdate">${INSTALL_ICON}<span>Update</span></button>` : ''}
             </div></td>
           </tr></tbody>
         </table></div>
       </div>`;
-    $('[data-up=picheck]', box).onclick = async () => {
+    const check = $('[data-up=picheck]', box);
+    if (check) check.onclick = async () => {
       piholeChecking = true; renderApps(host);
       try {
         piholeUpd = await api('/network/dns/pihole/update-check');
@@ -7115,7 +7122,9 @@ pageRenderers.updates = (() => {
       <div class="up-uptodate">
         <div class="up-uptodate-ring">${ICN.check || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'}</div>
         <div class="up-uptodate-title">${piholeUpd?.updateAvailable ? 'Packages are up to date' : 'System is up to date \u{1F389}'}</div>
-        <div class="up-uptodate-sub">No package, security, kernel, firmware, or Raspberry Pi updates are pending.${piholeUpd?.updateAvailable ? ' Pi-hole has an update above.' : ''}</div>
+        <div class="up-uptodate-sub">${piholeUpd?.updateAvailable ? 'No package, security, kernel, firmware, or Raspberry Pi updates are pending. Pi-hole has an update above.'
+          : piholeUpd?.installed && !piholeUpd.checkError ? 'No package, security, kernel, firmware, Raspberry Pi, or Pi-hole updates are pending.'
+          : 'No package, security, kernel, firmware, or Raspberry Pi updates are pending.'}</div>
         ${lastChecked ? `<div class="up-uptodate-meta">Last checked ${fmtChecked(lastChecked)}</div>` : ''}
       </div>`;
     wireTable(host);
@@ -7158,10 +7167,18 @@ pageRenderers.updates = (() => {
         else if (p.phase === 'scanning') setProg(`Scanning ${p.pkg || ''}`.trim(), p.done || 0, p.total || 0);
       });
       ev.addEventListener('done', async (e) => {
-        ev.close(); streaming = false; refresh.classList.remove('up-btn-glow');
+        ev.close();
         let unscanned = []; try { unscanned = JSON.parse(e.data).unscanned || []; } catch { /* */ }
+        // Pi-hole is updated outside apt; check it as the last step. A failure
+        // here is shown on its row, never fails the package check.
+        let pihole = null;
+        if (piholeUpd?.installed) {
+          setProg('Checking Pi-hole…');
+          pihole = await api('/network/dns/pihole/update-check').catch(() => null);
+        }
+        streaming = false; refresh.classList.remove('up-btn-glow');
         await load(host);
-        toast('success', 'Updates', 'Check complete');
+        toast('success', 'Updates', pihole?.updateAvailable ? 'Check complete: Pi-hole has an update' : 'Check complete');
         if (unscanned.length) promptLargeScan(host, unscanned);
       });
       ev.addEventListener('error', (e) => { let m = 'check failed'; try { m = JSON.parse(e.data).message; } catch { /* */ } ev.close(); streaming = false; refresh.classList.remove('up-btn-glow'); toast('error', 'Updates', m); render(host); });
