@@ -6765,6 +6765,69 @@ body.ultra .up-install-note { font-size: 11px; }
 body.ultra .up-install-actions { gap: 8px; margin-top: 8px; }
 body.ultra .up-install-actions .set-btn { padding: 5px 10px; font-size: 11.5px; }
 
+/* Updates: applications updated outside apt (Pi-hole). Its own section above
+   the package table: one row per app with Check now / Update buttons. */
+.up-apps { margin: 0 0 20px; }
+.up-apps-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.up-apps-h h4 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin: 0; }
+.up-apps-h span { font-size: 11px; color: var(--text-muted); }
+.up-apps-table td { padding: 10px; vertical-align: middle; }
+.up-app-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.up-app-ic { width: 30px; height: 30px; border-radius: 8px; flex: none; display: flex; align-items: center; justify-content: center;
+  color: #e11d63; background: rgba(225,29,99,0.1); border: 1px solid rgba(225,29,99,0.35); }
+.up-app-ic svg { width: 16px; height: 16px; }
+.up-app-name { min-width: 0; }
+.up-app-name b { display: block; color: var(--text-primary); }
+.up-app-name span { display: block; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.up-app-vers { display: flex; flex-direction: column; gap: 1px; font-variant-numeric: tabular-nums; }
+.up-app-comps { font-size: 11px; color: var(--text-muted); line-height: 1.5; font-weight: 400; }
+.up-app-comps i { font-style: normal; color: #10b981; }
+.up-app-state-ok { color: var(--accent-green); font-weight: 600; }
+.up-app-state-avail { color: #e11d63; font-weight: 600; }
+.up-app-acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.up-app-acts .set-btn { padding: 7px 13px; font-size: 12px; }
+.inv-table-fixed td:has(.up-app-acts) { overflow: visible; white-space: normal; }
+.up-app-row-flash { animation: up-app-flash 1.6s ease; }
+@keyframes up-app-flash { 0%, 40% { background: rgba(225,29,99,0.12); } 100% { background: transparent; } }
+/* Pi-hole changelog: GitHub release notes in the .up-cl-* viewer */
+.up-rn-group { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); padding: 10px 10px 4px; }
+.up-rn-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.up-rn-head b { font-size: 15px; color: var(--text-primary); }
+.up-rn-head span { font-size: 12px; color: var(--text-muted); }
+.up-rn-head a { font-size: 12px; color: var(--accent-cyan); margin-left: auto; }
+.up-rn { font-size: 13px; line-height: 1.6; color: var(--text-secondary); border-left: 2px solid var(--accent-cyan); padding-left: 14px; }
+.up-rn h5 { font-size: 13px; color: var(--text-primary); margin: 14px 0 6px; }
+.up-rn h5:first-child { margin-top: 0; }
+.up-rn p { margin: 0 0 8px; }
+.up-rn ul { padding-left: 18px; margin: 0 0 8px; }
+.up-rn li { margin: 3px 0; }
+.up-rn b { color: var(--text-primary); }
+.up-rn a { color: var(--accent-cyan); text-decoration: none; word-break: break-word; }
+.up-rn a:hover { text-decoration: underline; }
+.up-rn code { font-family: ui-monospace, monospace; font-size: 12px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; color: #e8e8f0; }
+.up-rn-sev { display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 999px; margin: 8px 0 4px; }
+.up-rn-sev-critical, .up-rn-sev-high { color: #ef4444; border: 1px solid rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }
+.up-rn-sev-medium { color: #f59e0b; border: 1px solid rgba(245,158,11,0.4); background: rgba(245,158,11,0.08); }
+.up-rn-sev-low { color: #3b82f6; border: 1px solid rgba(59,130,246,0.4); background: rgba(59,130,246,0.08); }
+.up-rn-src { font-size: 11px; color: var(--text-muted); margin-top: 14px; }
+body.compact .up-apps-table td { padding: 7px 8px; }
+body.compact .up-app-ic { width: 26px; height: 26px; }
+body.compact .up-app-acts .set-btn { padding: 6px 11px; font-size: 11.5px; }
+body.compact .up-rn { font-size: 12.5px; }
+body.ultra .up-apps { margin-bottom: 14px; }
+body.ultra .up-apps-table td { padding: 5px 6px; }
+body.ultra .up-app-ic { width: 22px; height: 22px; border-radius: 6px; }
+body.ultra .up-app-ic svg { width: 13px; height: 13px; }
+body.ultra .up-app-name span, body.ultra .up-app-comps { display: none; }
+body.ultra .up-app-acts { gap: 6px; }
+body.ultra .up-app-acts .set-btn { padding: 4px 9px; font-size: 11px; }
+body.ultra .up-rn { font-size: 12px; line-height: 1.5; }
+body.ultra .up-cl-nav { width: 160px; }
+@media (max-width: 640px) {
+  .up-apps-table .c-rel, .up-apps-table .c-checked { display: none; }
+  .up-cl-overlay .up-cl-nav { display: none; }
+}
+
 /* ── In-browser remote access (SSH terminal + VNC desktop) ───────────────── */
 .rt-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
 .rt-status { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px;

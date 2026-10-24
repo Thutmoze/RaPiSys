@@ -18,7 +18,7 @@ export function labelResolvers(servers = [], candidates = []) {
   }));
 }
 
-export function networkRouter({ network, metricsRepo, requireControl, loadSettings, saveSettings, withFileLock, secrets, refreshPiholeConfig, listPeers = () => [] }) {
+export function networkRouter({ network, metricsRepo, requireControl, loadSettings, saveSettings, withFileLock, secrets, refreshPiholeConfig, listPeers = () => [], piholeUpdateCheck = null, piholeReleases = null, updatesRepo = null }) {
   const r = express.Router();
 
   // Live snapshot (everything in one call for the page's first paint).
@@ -283,9 +283,21 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
   });
 
   // Check whether a Pi-hole update is available (method-aware).
+  // Through the daily job when wired, so the saved status (Updates tab row and
+  // chip) refreshes too; the response is that status.
   r.get('/dns/pihole/update-check', async (req, res) => {
-    try { res.json(await network.piholeCheckUpdate()); }
+    try { res.json(piholeUpdateCheck ? await piholeUpdateCheck() : await network.piholeCheckUpdate()); }
     catch (err) { res.status(500).json({ updateAvailable: false, error: err.message }); }
+  });
+
+  // Release notes for every Pi-hole part the pending update changes (GitHub).
+  r.get('/dns/pihole/release-notes', async (req, res) => {
+    const st = globalThis.__rapisysPiholeUpdate || {};
+    if (!piholeReleases || !st.installed) return res.json({ notes: [] });
+    try {
+      res.json({ method: st.method, currentVersion: st.currentVersion, latestVersion: st.latestVersion,
+        components: st.components || null, notes: await piholeReleases.notesFor(st) });
+    } catch (err) { res.status(502).json({ error: err.message, notes: [] }); }
   });
 
   // Apply a Pi-hole update, streamed (SSE). Admin-token gated. 'failed' event name.
@@ -295,11 +307,33 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
     res.flushHeaders?.();
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     send('start', {});
+    const before = globalThis.__rapisysPiholeUpdate || {};
+    const label = (st) => st?.method === 'docker' ? st.currentVersion : st?.components?.current?.CORE || st?.currentVersion || null;
+    let log = '';
+    // Pi-hole updates go into Update History next to the apt packages.
+    const record = (result, after) => {
+      try {
+        updatesRepo?.record({ ts: Date.now(), packageName: 'pihole', fromV: label(before),
+          toV: result === 'success' ? (label(after) || before.latestVersion || null) : (before.latestVersion || null),
+          description: before.method === 'docker' ? 'Pi-hole (Docker image)' : 'Pi-hole', result, log: log.slice(-4000) });
+      } catch { /* history is best-effort */ }
+    };
     try {
-      const result = await network.piholeUpdate((line) => send('line', { line }));
+      const result = await network.piholeUpdate((line) => { log += line + '\n'; send('line', { line }); });
       network.piholeResetSession();
-      send('done', result);
-    } catch (err) { send('failed', { message: err.message }); }
+      // Re-check so the Updates row and the chip show the new version at once.
+      let status = null;
+      if (piholeUpdateCheck) {
+        send('line', { line: 'Checking the installed version…' });
+        status = await piholeUpdateCheck().catch(() => null);
+      }
+      record('success', status);
+      send('done', { ...result, status });
+    } catch (err) {
+      log += err.message + '\n';
+      record('failed', null);
+      send('failed', { message: err.message });
+    }
     res.end();
   });
 

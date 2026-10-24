@@ -29,6 +29,7 @@ import { createUpdatesRepo } from './repositories/updates.js';
 import { createNetTrafficRepo } from './repositories/net-traffic.js';
 import { createNetTraffic } from './services/net-traffic.js';
 import { createPiholeBackupJob } from './services/pihole-backup.js';
+import { createPiholeReleases, summarizeNotes } from './services/pihole-releases.js';
 import { agentCall, agentConfigured } from './core/agent-client.js';
 import { createPeersRepo } from './repositories/peers.js';
 import { createSampler } from './services/sampler.js';
@@ -328,16 +329,26 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
 
   // Daily Pi-hole update check. Caches the result for the Update Center chip and
   // the DNS tab, and notifies (email/telegram) on a fresh available->true edge.
+  // Also run by "Check now" and after an update, so it returns the new status.
   globalThis.__rapisysPiholeUpdate = globalThis.__rapisysPiholeUpdate || { checkedAt: 0, updateAvailable: false, method: null, currentVersion: null, latestVersion: null };
+  const piholeReleases = createPiholeReleases();
   async function piholeUpdateCheckJob() {
     const piCfg = (await loadSettings()).rapisys?.pihole;
-    if (!piCfg || !piCfg.enabled) { globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false }; return; }
+    if (!piCfg || !piCfg.enabled) return (globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false });
     let res;
-    try { res = await network.piholeCheckUpdate(); } catch (e) { return; }
-    if (!res || !res.installed) { globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false }; return; }
+    try { res = await network.piholeCheckUpdate(); } catch (e) { return globalThis.__rapisysPiholeUpdate; }
+    if (!res || !res.installed) return (globalThis.__rapisysPiholeUpdate = { checkedAt: Date.now(), updateAvailable: false, installed: false });
     const prev = globalThis.__rapisysPiholeUpdate || {};
     const next = { checkedAt: Date.now(), installed: true, updateAvailable: !!res.updateAvailable,
-      method: res.method || null, currentVersion: res.currentVersion || null, latestVersion: res.latestVersion || null };
+      method: res.method || null, currentVersion: res.currentVersion || null, latestVersion: res.latestVersion || null,
+      components: res.components || null, container: res.container || null,
+      advisories: 0, urgency: null, released: null, notesError: null };
+    // What the update brings: advisory count, worst severity and release date
+    // from the GitHub release notes. A GitHub failure leaves the row without tags.
+    if (next.updateAvailable) {
+      try { Object.assign(next, summarizeNotes(await piholeReleases.notesFor(next))); }
+      catch (e) { next.notesError = e.message; }
+    }
     globalThis.__rapisysPiholeUpdate = next;
     // Notify only on a rising edge (became available since last check).
     if (next.updateAvailable && !prev.updateAvailable) {
@@ -348,6 +359,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
       try { const cfg = await loadSettings(); if (cfg.rapisys?.updates?.emailEnabled !== false) await mailer.send({ subject, text, html: `<p>${text}</p>` }); } catch { /* mailer not configured */ }
       try { await telegram.send({ text }); } catch { /* telegram not configured */ }
     }
+    return next;
   }
   // Tick hourly but only actually check once per ~24h (cheap guard inside).
   scheduler.register('pihole-update-check', 3600e3, async () => {
@@ -457,7 +469,8 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   app.use('/api/alerts', rc, alertsRouter({ alertsRepo: alertsFacade, metricsRepo: metricsFacade, requireAuth: auth.requireConfig, sampler, getSettings: loadSettings }));
   app.use('/api/sessions', rc, sessionsRouter({ sessions, sessionsRepo: sessionsRepoFacade, requireAuth: auth.requireConfig, requireControl: auth.requireControl }));
   app.use('/api/network', rc, networkRouter({ network, metricsRepo: metricsFacade, requireControl: auth.requireControl,
-    loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig, listPeers: () => peersFacade.list() }));
+    loadSettings, saveSettings, withFileLock, secrets: secretsFacade, refreshPiholeConfig, listPeers: () => peersFacade.list(),
+    piholeUpdateCheck: piholeUpdateCheckJob, piholeReleases, updatesRepo: new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) }) }));
   // ---- Pironman 5 Mini case-controller (gated; localhost pm_dashboard by default) ----
   let pironmanConfigCache = settings.rapisys?.pironman || null;
   const refreshPironmanConfig = async () => { pironmanConfigCache = (await loadSettings()).rapisys?.pironman || null; };

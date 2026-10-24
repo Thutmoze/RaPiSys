@@ -262,6 +262,22 @@ function pickPiholeContainer(text) {
  *   remoteDigest      the tag's index digest from the registry, if reachable
  *  `pending` means a newer image is already pulled but the container still
  *  runs the old one (needs a recreate, not another pull). */
+/**
+ * Pi-hole's version cache (/etc/pihole/versions): installed and latest-on-GitHub
+ * versions of Core, Web, FTL and, in the Docker image, the image itself.
+ * Versions keep their leading "v" off (6.5, 2026.10.0).
+ */
+function parsePiholeVersions(txt = '') {
+  const current = {}, latest = {};
+  for (const comp of ['CORE', 'WEB', 'FTL', 'DOCKER']) {
+    const c = String(txt).match(new RegExp(`^${comp}_VERSION=v?([\\w.-]+)`, 'm'));
+    const l = String(txt).match(new RegExp(`^GITHUB_${comp}_VERSION=v?([\\w.-]+)`, 'm'));
+    if (c && c[1] !== 'null') current[comp] = c[1];
+    if (l && l[1] !== 'null') latest[comp] = l[1];
+  }
+  return { current, latest };
+}
+
 function piholeDockerUpdateState({ containerImageId, runningDigests = [], tagImageId, remoteDigest } = {}) {
   const sha = (s) => (String(s || '').match(/sha256:[a-f0-9]{64}/) || [])[0] || null;
   const running = sha(containerImageId);
@@ -2205,14 +2221,7 @@ const OPS = {
       // Refresh Pi-hole's own version cache, then read it.
       await run('pihole', ['updatechecker'], 60000).catch(() => {});
       const ver = await run('sh', ['-c', 'cat /etc/pihole/versions 2>/dev/null'], 5000).catch(() => ({ stdout: '' }));
-      const txt = ver.stdout || '';
-      const cur = {}, lat = {};
-      for (const comp of ['CORE', 'WEB', 'FTL']) {
-        const c = txt.match(new RegExp(`${comp}_VERSION=v?([\\w.]+)`));
-        const l = txt.match(new RegExp(`GITHUB_${comp}_VERSION=v?([\\w.]+)`));
-        if (c) cur[comp] = c[1];
-        if (l) lat[comp] = l[1];
-      }
+      const { current: cur, latest: lat } = parsePiholeVersions(ver.stdout);
       // Fall back to `pihole -v` text if the versions file wasn't parseable.
       let updateAvailable = Object.keys(lat).some((k) => lat[k] && cur[k] && lat[k] !== cur[k]);
       if (!Object.keys(lat).length) {
@@ -2249,8 +2258,21 @@ const OPS = {
     }
     const state = piholeDockerUpdateState({ containerImageId, runningDigests: runningImg.digests,
       tagImageId: tagImg.id, remoteDigest });
+    // Versions come from Pi-hole's own cache inside the container: image
+    // (DOCKER) plus Core/Web/FTL, installed and latest on GitHub. Refreshing it
+    // only rewrites that file; whether to update is still the digest's call.
+    let comps = { current: {}, latest: {} };
+    if (CONTAINER_NAME_RE.test(name)) {
+      await run('docker', ['exec', name, 'pihole', 'updatechecker'], 60000).catch(() => {});
+      const v = await run('docker', ['exec', name, 'cat', '/etc/pihole/versions'], 8000).catch(() => ({ stdout: '' }));
+      comps = parsePiholeVersions(v.stdout);
+    }
+    const { DOCKER: curImage, ...curComps } = comps.current;
+    const { DOCKER: latImage, ...latComps } = comps.latest;
     return { installed: true, method: 'docker', updateAvailable: state.updateAvailable, pending: state.pending,
-      checked: state.checked, currentVersion: det.version || null, latestVersion: null, container: name };
+      checked: state.checked, currentVersion: curImage || det.version || null,
+      latestVersion: state.updateAvailable ? (latImage || null) : (curImage || null),
+      components: { current: curComps, latest: latComps }, container: name };
   },
 
   // Apply a Pi-hole update, method-aware, streamed.
@@ -3749,4 +3771,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { beginAptRun, aptRunStatus, AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState };
+module.exports = { beginAptRun, aptRunStatus, AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState, parsePiholeVersions };

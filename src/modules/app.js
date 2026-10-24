@@ -14,6 +14,7 @@ import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
 import { currentNode, isRemoteNode } from './node-context.js';
 import { createTermLog } from './term-log.js';
+import { releaseNotesHtml } from './release-notes.js';
 import { poll } from './poll.js';
 import { openModal, modalId } from './modal.js';
 
@@ -6639,6 +6640,7 @@ pageRenderers.updates = (() => {
     if (data.available) render(host);   // we have a cached scan (even if 0 updates)
     else {
       renderBanner(host);
+      renderApps(host);
       // never checked on this install
       $('[data-up=chips]', host).innerHTML = '<span class="up-chip">never checked</span>';
       $('[data-up=actions]', host).innerHTML = ACTION_BTN('refresh', ICN.refresh, 'Check for updates');
@@ -6849,6 +6851,207 @@ pageRenderers.updates = (() => {
     else toast('error', 'Updates', 'The Pi has not answered yet. Reload the page in a minute.');
   }
 
+  // ---- Applications updated outside apt (Pi-hole) ----------------------------
+  // One row per app above the package table, with its own Check now / Update
+  // and a changelog built from the app's GitHub release notes.
+  const PIHOLE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><circle cx="12" cy="11" r="3"/></svg>';
+  const PIHOLE_PARTS = [['CORE', 'Core'], ['WEB', 'Web'], ['FTL', 'FTL']];
+  let piholeChecking = false;
+  const vtag = (v) => (/^\d/.test(String(v)) && !/^\d{4}\./.test(String(v)) ? 'v' : '') + v;
+  // "Core v6.4.3 · Web v6.6 · FTL v6.7.1"; parts that differ from `other` in green.
+  const piholeParts = (comps, other) => PIHOLE_PARTS.filter(([k]) => comps?.[k])
+    .map(([k, name]) => (other && other[k] && other[k] !== comps[k]
+      ? `${name} <i>${esc(vtag(comps[k]))}</i>` : `${name} ${esc(vtag(comps[k]))}`)).join(' · ');
+  // Main version: the image for Docker installs, Core for host installs.
+  const piholeMain = (p, side) => {
+    const comps = p.components?.[side] || {};
+    if (p.method === 'docker') return side === 'current' ? p.currentVersion : p.latestVersion;
+    return comps.CORE ? `Core ${vtag(comps.CORE)}` : (side === 'current' ? p.currentVersion : p.latestVersion);
+  };
+
+  function renderApps(host) {
+    const box = $('[data-up=apps]', host);
+    if (!box) return;
+    const p = piholeUpd;
+    if (!p || !p.installed) { box.innerHTML = ''; return; }
+    const cur = p.components?.current || null;
+    const lat = p.components?.latest || null;
+    const installLine = p.method === 'docker' ? `Docker container${p.container ? ` · ${esc(p.container)}` : ''}` : 'Host install';
+    const installed = `<div class="up-app-vers"><span>${esc(piholeMain(p, 'current') || '—')}</span>${cur ? `<span class="up-app-comps">${piholeParts(cur)}</span>` : ''}</div>`;
+    let available;
+    if (piholeChecking) available = '<span class="inv-dim"><span class="up-spinner-sm"></span> Checking…</span>';
+    else if (p.updateAvailable) {
+      const main = piholeMain(p, 'latest');
+      available = `<div class="up-app-vers">${main ? `<span class="up-new">${esc(main)}</span>` : '<span class="up-app-state-avail">Newer image available</span>'}${lat ? `<span class="up-app-comps">${piholeParts(lat, cur)}</span>` : ''}</div>`;
+    } else available = '<span class="up-app-state-ok">Up to date</span>';
+    const tags = p.updateAvailable && p.advisories
+      ? `<div class="up-tags-stack"><span class="up-tag up-tag-sec">security</span><span class="up-tag up-tag-cve">${p.advisories} advisor${p.advisories > 1 ? 'ies' : 'y'}</span></div>` : '';
+    box.innerHTML = `
+      <div class="up-apps">
+        <div class="up-apps-h"><h4>Applications</h4><span>Updated outside apt, one at a time</span></div>
+        <div class="up-table-scroll">
+        <table class="inv-table inv-table-fixed up-apps-table">
+          <colgroup><col style="width:22%"><col style="width:17%"><col style="width:17%"><col class="c-rel" style="width:8%"><col style="width:11%"><col style="width:7%"><col style="width:6%"><col class="c-checked" style="width:7%"><col style="width:15%"></colgroup>
+          <thead><tr><th>Application</th><th>Installed</th><th>Available</th><th class="c-rel">Released</th><th>Tags</th><th>Urgency</th><th>View</th><th class="c-checked">Checked</th><th></th></tr></thead>
+          <tbody><tr data-up="pirow">
+            <td><div class="up-app-cell"><span class="up-app-ic">${PIHOLE_ICON}</span><div class="up-app-name"><b>Pi-hole</b><span>${installLine}</span></div></div></td>
+            <td class="inv-dim up-ver">${installed}</td>
+            <td class="up-ver">${available}</td>
+            <td class="inv-dim c-rel">${p.updateAvailable && p.released ? rapisysFmtDate(p.released) : '—'}</td>
+            <td class="up-tags-cell">${tags}</td>
+            <td>${p.updateAvailable ? urgBadge(p.urgency) : ''}</td>
+            <td>${p.updateAvailable ? '<button class="up-link" data-up="pinotes">view</button>' : ''}</td>
+            <td class="inv-dim c-checked">${p.checkedAt ? fmtChecked(p.checkedAt) : 'never'}</td>
+            <td><div class="up-app-acts">
+              <button class="set-btn set-btn-detect" data-up="picheck" ${piholeChecking ? 'disabled' : ''}>${DETECT_ICON}<span>Check now</span></button>
+              ${p.updateAvailable && !piholeChecking ? `<button class="set-btn set-btn-edit" data-up="piupdate">${INSTALL_ICON}<span>Update</span></button>` : ''}
+            </div></td>
+          </tr></tbody>
+        </table></div>
+      </div>`;
+    $('[data-up=picheck]', box).onclick = async () => {
+      piholeChecking = true; renderApps(host);
+      try {
+        piholeUpd = await api('/network/dns/pihole/update-check');
+        toast(piholeUpd.updateAvailable ? 'info' : 'success', 'Pi-hole', piholeUpd.updateAvailable ? 'Update available' : 'Up to date');
+      } catch (e) { toast('error', 'Pi-hole', e.message); }
+      piholeChecking = false;
+      render(host);
+    };
+    const upd = $('[data-up=piupdate]', box);
+    if (upd) upd.onclick = () => confirmPiholeUpdate(host);
+    const notes = $('[data-up=pinotes]', box);
+    if (notes) notes.onclick = () => showPiholeNotes(host);
+  }
+
+  async function confirmPiholeUpdate(host) {
+    if (streaming) { toast('info', 'Updates', 'An upgrade is already running'); return; }
+    const how = piholeUpd?.method === 'docker'
+      ? 'This pulls the latest Pi-hole image and recreates the container from its saved config.'
+      : 'This runs <b>pihole -up</b> on the host.';
+    if (!await rapisysConfirm(`Update Pi-hole now? ${how} DNS may pause for a few seconds while Pi-hole restarts.`,
+      { html: true, confirmLabel: 'Update Pi-hole', confirmIcon: INSTALL_ICON })) return;
+    startPiholeUpdate(host);
+  }
+
+  // Same install card as package upgrades, fed by the Pi-hole update stream.
+  function startPiholeUpdate(host) {
+    if (streaming) return;
+    streaming = true;
+    const docker = piholeUpd?.method === 'docker';
+    const ov = el('div', 'wizard-overlay up-install-overlay');
+    ov.innerHTML = `
+      <div class="up-install-card" role="dialog" aria-modal="true">
+        <div class="up-install-head">
+          <div class="up-install-title"><span class="up-spinner"></span><b>Updating Pi-hole</b></div>
+          <button class="up-install-close" data-up="close" hidden title="Close">✕</button>
+        </div>
+        <div class="up-install-bar"><div class="up-install-bar-fill" data-up="bar"></div></div>
+        <div class="up-install-status" data-up="status">Starting…</div>
+        <div class="up-install-log" data-up="log"></div>
+        <div class="up-install-result" data-up="result" hidden></div>
+      </div>`;
+    document.body.appendChild(ov);
+    const card = ov.querySelector('.up-install-card');
+    const nodeName = document.getElementById('hostname')?.textContent || currentNode()?.name || 'pi';
+    const term = createTermLog({ host: nodeName, cmd: docker ? 'docker compose pull && docker compose up -d' : 'pihole -up' });
+    card.querySelector('[data-up=log]').appendChild(term.el);
+    const barEl = card.querySelector('[data-up=bar]');
+    const statusEl = card.querySelector('[data-up=status]');
+    const resultEl = card.querySelector('[data-up=result]');
+    const closeBtn = card.querySelector('[data-up=close]');
+    let pct = 5; barEl.style.width = pct + '%';
+    let finished = false;
+    const closeAndRefresh = () => { ov.remove(); load(host); };
+    closeBtn.onclick = closeAndRefresh;
+    ov.addEventListener('click', (e) => { if (e.target === ov && finished) closeAndRefresh(); });
+    const finish = (ok, html) => {
+      finished = true; streaming = false;
+      card.querySelector('.up-spinner')?.remove();
+      term.exit(ok ? 0 : 1);
+      barEl.style.width = '100%'; barEl.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
+      statusEl.textContent = ok ? 'Done' : 'Finished with errors';
+      resultEl.removeAttribute('hidden'); resultEl.innerHTML = html;
+      closeBtn.hidden = false;
+      toast(ok ? 'success' : 'error', 'Pi-hole', ok ? 'Updated' : 'Update failed');
+    };
+    const es = new EventSource('/api/network/dns/pihole/update/stream');
+    es.addEventListener('line', (e) => {
+      let line = ''; try { line = JSON.parse(e.data).line; } catch { return; }
+      term.line(line);
+      if (/Pull/i.test(line)) statusEl.textContent = 'Pulling image…';
+      else if (/Recreat|Restart|Start/i.test(line)) statusEl.textContent = 'Restarting Pi-hole…';
+      else if (/Checking the installed version/.test(line)) statusEl.textContent = 'Checking the installed version…';
+      pct = Math.min(90, pct + 4); barEl.style.width = pct + '%';
+    });
+    es.addEventListener('done', (e) => {
+      es.close();
+      let r = {}; try { r = JSON.parse(e.data); } catch { /* */ }
+      if (r.status) piholeUpd = r.status;
+      const ver = r.status ? piholeMain(r.status, 'current') : (r.version ? `v${r.version}` : '');
+      finish(true, `<span class="up-install-success">✓ Pi-hole updated${ver ? ` to ${esc(ver)}` : ''}</span><div class="up-install-note">Recorded in Update History.</div>`);
+    });
+    es.addEventListener('failed', (e) => {
+      es.close();
+      let m = 'Update failed'; try { m = JSON.parse(e.data).message || m; } catch { /* */ }
+      term.note(`✗ ${m}`, 'err');
+      finish(false, `<span class="up-install-fail">✗ ${esc(m)}</span>`);
+    });
+    // Never reconnect: that would start the update again.
+    es.addEventListener('error', () => {
+      if (finished) { es.close(); return; }
+      es.close(); term.note('✗ connection lost', 'err');
+      finish(false, '<span class="up-install-fail">✗ Connection lost during the update</span><div class="up-install-note">Check now shows the version Pi-hole runs.</div>');
+    });
+  }
+
+  // Changelog viewer: one entry per release of each part the update changes.
+  async function showPiholeNotes(host) {
+    const p = piholeUpd || {};
+    const from = piholeMain(p, 'current');
+    const to = p.updateAvailable ? piholeMain(p, 'latest') : null;
+    const ov = el('div', 'wizard-overlay up-cl-overlay');
+    let notes = null, error = null, active = 0;
+    const close = () => ov.remove();
+    const draw = () => {
+      let body;
+      if (error) body = `<p class="up-cl-empty">${esc(error)}</p>`;
+      else if (!notes) body = '<p class="up-cl-empty"><span class="up-spinner-sm"></span> Loading release notes from GitHub…</p>';
+      else if (!notes.length) body = '<p class="up-cl-empty">No release notes found for this update.</p>';
+      else {
+        const n = notes[active];
+        body = `<div class="up-cl-layout">
+          <div class="up-cl-nav">${notes.map((x, i) => `${i === 0 || notes[i - 1].group !== x.group ? `<div class="up-rn-group">${esc(x.group)}</div>` : ''}
+            <button class="up-cl-navitem up-cl-nav-new ${i === active ? 'up-cl-nav-active' : ''}" data-i="${i}"><span class="up-cl-newdot">●</span> ${esc(x.tag)}</button>`).join('')}</div>
+          <div class="up-cl-content">
+            <div class="up-rn-head"><b>${esc(n.group)} ${esc(n.tag)}</b><span>${n.date ? esc(rapisysFmtDate(Date.parse(n.date))) : ''} · installed ${esc(vtag(n.installed || '?'))}</span>${n.url ? `<a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>` : ''}</div>
+            <div class="up-rn">${releaseNotesHtml(n.body) || '<p>No notes for this release.</p>'}</div>
+            <p class="up-rn-src">From the pi-hole/${esc(n.repo)} release notes on GitHub.</p>
+          </div></div>`;
+      }
+      ov.innerHTML = `<div class="card up-cl-modal" role="dialog" aria-modal="true">
+        <div class="up-cl-head">
+          <div><b>Pi-hole</b> <span class="up-cl-ver">${esc(from || '')}${to ? ` → ${esc(to)}` : ''}</span></div>
+          <div class="up-cl-head-actions">
+            ${to ? `<button class="up-btn up-act-fw" data-cl="update">${ICN.download}<span>Update</span></button>` : ''}
+            <button class="up-link" data-cl="close">close ✕</button>
+          </div>
+        </div>
+        <div class="up-cl-main">${body}</div>
+      </div>`;
+      ov.querySelectorAll('[data-i]').forEach((b) => { b.onclick = () => { active = +b.dataset.i; draw(); }; });
+      ov.querySelector('[data-cl=close]').onclick = close;
+      const u = ov.querySelector('[data-cl=update]');
+      if (u) u.onclick = () => { close(); confirmPiholeUpdate(host); };
+    };
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+    document.body.appendChild(ov);
+    draw();
+    try { notes = (await api('/network/dns/pihole/release-notes')).notes || []; }
+    catch (e) { error = `Could not load the release notes: ${e.message}`; }
+    if (ov.isConnected) draw();
+  }
+
   function render(host) {
     renderBanner(host);
     const sec = updates.filter((u) => u.security).length;
@@ -6870,8 +7073,15 @@ pageRenderers.updates = (() => {
       ${lastChecked ? `<span class="up-checked ${checkedFresh ? 'up-checked-fresh' : 'up-checked-stale'}">Checked ${fmtChecked(lastChecked)}</span>` : ''}
       ${autoCheck ? `<span class="up-checked up-autocheck" title="Last automatic background check: ${autoCheck.checked} updates, ${autoCheck.security} security">Auto-checked ${fmtChecked(autoCheck.ts)}</span>` : ''}`;
     wireFilters(host);
+    // The chip points at the Pi-hole row below.
     const piGo = $('[data-up=piholego]', host);
-    if (piGo) piGo.onclick = () => { window.location.hash = '#/settings?tab=dns'; };
+    if (piGo) piGo.onclick = () => {
+      const row = $('[data-up=pirow]', host);
+      if (!row) return;
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.classList.remove('up-app-row-flash'); void row.offsetWidth; row.classList.add('up-app-row-flash');
+    };
+    renderApps(host);
 
     $('[data-up=actions]', host).innerHTML =
       ACTION_BTN('refresh', ICN.refresh, 'Check for updates')
@@ -6904,8 +7114,8 @@ pageRenderers.updates = (() => {
       </table></div>` : `
       <div class="up-uptodate">
         <div class="up-uptodate-ring">${ICN.check || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'}</div>
-        <div class="up-uptodate-title">System is up to date \u{1F389}</div>
-        <div class="up-uptodate-sub">No package, security, kernel, firmware, or Raspberry Pi updates are pending.</div>
+        <div class="up-uptodate-title">${piholeUpd?.updateAvailable ? 'Packages are up to date' : 'System is up to date \u{1F389}'}</div>
+        <div class="up-uptodate-sub">No package, security, kernel, firmware, or Raspberry Pi updates are pending.${piholeUpd?.updateAvailable ? ' Pi-hole has an update above.' : ''}</div>
         ${lastChecked ? `<div class="up-uptodate-meta">Last checked ${fmtChecked(lastChecked)}</div>` : ''}
       </div>`;
     wireTable(host);
@@ -8203,6 +8413,7 @@ pageRenderers.updates = (() => {
             <div class="up-chips" data-up="chips"></div>
             <div class="up-actions" data-up="actions"></div>
             <div class="up-progress" data-up="progress" style="display:none"></div>
+            <div data-up="apps"></div>
             <div data-up="table"></div>
           </div>
           <div class="card-body" data-pane="history" style="display:none">
