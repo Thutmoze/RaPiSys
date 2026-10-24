@@ -78,6 +78,82 @@ export function termLineHtml(raw, st = {}) {
   return l;
 }
 
+// ---- Docker (compose pull / up, docker pull) ---------------------------------
+// In a terminal Docker redraws each image layer's progress in place; through
+// the agent every redraw is its own line, so a pull is dozens of near-identical
+// lines. They become one live row per layer, collapsed to a summary once the
+// image is pulled. Container events get the same tags as apt's steps.
+
+const LAYER_RE = /^([0-9a-f]{12}):? (Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete|Already exists)\b\s*(.*)$/;
+const SIZE_RE = /(\d+(?:\.\d+)?)\s*([kKMG]?B)\b/g;
+const LAYER_STATE = {
+  'Pulling fs layer': 'wait', Waiting: 'wait', Downloading: 'dl', 'Verifying Checksum': 'done',
+  'Download complete': 'done', Extracting: 'ex', 'Pull complete': 'ok', 'Already exists': 'have',
+};
+
+/**
+ * What a Docker output line is, or null for anything else (apt, scripts).
+ * step: a RaPiSys progress line ("Pulling latest image…").
+ */
+export function dockerEvent(raw) {
+  const l = String(raw).trim();
+  let m;
+  if (/^[A-Z][^:]*…$/.test(l)) return { type: 'step', text: l };
+  if ((m = l.match(/^Image (\S+) Pulling$/)) || (m = l.match(/^\S+: Pulling from (\S+)$/))) return { type: 'pullStart', image: m[1] };
+  if ((m = l.match(/^Image (\S+) Pulled$/)) || (m = l.match(/^Status: (?:Downloaded newer image|Image is up to date) for (\S+)$/))) {
+    return { type: 'pulled', image: m[1] };
+  }
+  if ((m = l.match(LAYER_RE))) {
+    // "1.2MB/12MB" (classic progress) gives a fraction; a bare size does not.
+    const sizes = [...(m[3] || '').matchAll(SIZE_RE)].map((x) => `${x[1]}${x[2]}`);
+    return { type: 'layer', id: m[1], state: LAYER_STATE[m[2]], size: sizes[0] || null, total: sizes[1] || null };
+  }
+  if ((m = l.match(/^Container (\S+)\s+(Recreate|Recreated|Create|Creating|Created|Starting|Started|Stopping|Stopped|Removing|Removed|Running|Healthy|Waiting)$/))) {
+    return { type: 'container', name: m[1], action: m[2] };
+  }
+  return null;
+}
+
+const toBytes = (s) => {
+  const m = String(s || '').match(/(\d+(?:\.\d+)?)\s*([kKMG]?)B/);
+  return m ? +m[1] * ({ '': 1, k: 1e3, K: 1e3, M: 1e6, G: 1e9 }[m[2]]) : 0;
+};
+const shortSize = (s) => {
+  const m = String(s || '').match(/(\d+(?:\.\d+)?)\s*([kKMG]?B)/);
+  return m ? `${(+m[1]).toFixed(+m[1] < 10 ? 1 : 0)} ${m[2].toUpperCase()}` : '';
+};
+
+/** Inner HTML of one layer row. */
+export function layerRowHtml(ev) {
+  const id = span('t-dim', ev.id.slice(0, 8));
+  if (ev.state === 'dl') {
+    const pct = ev.total ? Math.min(100, Math.round((toBytes(ev.size) / toBytes(ev.total)) * 100)) : null;
+    const meter = pct == null ? '<span class="t-meter t-indet"><i></i></span>' : `<span class="t-meter"><i style="width:${pct}%"></i></span>`;
+    return `${id}${meter}<span class="t-layer-st">${span('t-cyan', shortSize(ev.size) || 'downloading')}</span>`;
+  }
+  const [meter, label] = {
+    wait: ['', span('t-dim', 'waiting')],
+    done: [' t-full', span('t-dim', 'downloaded')],
+    ex: [' t-extract', span('t-purple', 'extracting')],
+    ok: [' t-full', span('t-green', '✓ done')],
+    have: [' t-full', span('t-dim', 'present')],
+  }[ev.state] || ['', ''];
+  return `${id}<span class="t-meter${meter}"><i></i></span><span class="t-layer-st">${label}</span>`;
+}
+
+/** The line a finished pull collapses to. */
+export function pulledHtml(image, layers, present) {
+  const got = layers - present;
+  const detail = layers ? `${got} layer${got === 1 ? '' : 's'} downloaded${present ? `, ${present} already present` : ''}` : 'up to date';
+  return `${span('t-green t-tag', 'Pulled')} ${span('t-b', image)} ${span('t-dim', detail)}${layers ? ' <span class="t-sum-k">▸ layers</span>' : ''}`;
+}
+
+/** A container event: in-progress actions yellow, finished ones green. */
+export function containerHtml(ev) {
+  const done = /(ed|Running|Healthy)$/.test(ev.action);
+  return `${span(done ? 't-green t-tag' : 't-yellow t-tag', ev.action)} ${span('t-b', ev.name)}`;
+}
+
 const ICON_TERM = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
@@ -99,12 +175,12 @@ async function copyText(txt) {
  * Terminal panel: `el` goes in the page; line() feeds streamed output, note()
  * adds a RaPiSys message (✓ / ✗ / ↻), exit() replaces the cursor with the code.
  */
-export function createTermLog({ host = 'pi', cmd = '' } = {}) {
+export function createTermLog({ host = 'pi', cmd = '', cwd = '~' } = {}) {
   const user = String(host).trim().replace(/[^\w.-]/g, '') || 'pi';
   const el = document.createElement('div');
   el.className = 'up-term';
   el.innerHTML = `
-    <div class="up-term-bar">${ICON_TERM}<span class="up-term-title">root@${esc(user)}: ~</span>
+    <div class="up-term-bar">${ICON_TERM}<span class="up-term-title">root@${esc(user)}: ${esc(cwd)}</span>
       <button type="button" class="up-term-copy" title="Copy log">${ICON_COPY}<span>Copy</span></button></div>
     <div class="up-term-body"></div>`;
   const body = el.querySelector('.up-term-body');
@@ -125,8 +201,48 @@ export function createTermLog({ host = 'pi', cmd = '' } = {}) {
   };
   const endProgress = () => { progEl?.remove(); progEl = null; };
 
+  // Docker pull in progress: the layer block and its rows by layer id.
+  let pull = null;
+  const docker = (ev) => {
+    if (ev.type === 'step') { add(span('t-step', ev.text)); return; }
+    if (ev.type === 'pullStart') {
+      const block = document.createElement('div');
+      block.className = 't-layers';
+      body.insertBefore(block, cursor);
+      pull = { block, rows: new Map(), present: 0 };
+      return;
+    }
+    if (ev.type === 'layer') {
+      if (!pull) { add(`${span('t-dim', ev.id)} ${esc(ev.state)}`); return; }
+      let row = pull.rows.get(ev.id);
+      if (!row) { row = document.createElement('div'); row.className = 't-layer'; pull.block.appendChild(row); pull.rows.set(ev.id, row); }
+      if (ev.state === 'have' && row.dataset.st !== 'have') pull.present++;
+      row.dataset.st = ev.state;
+      row.innerHTML = layerRowHtml(ev);
+      return;
+    }
+    if (ev.type === 'pulled') {
+      const sum = add(pulledHtml(ev.image, pull ? pull.rows.size : 0, pull ? pull.present : 0));
+      if (pull) {
+        // The summary goes where the rows were; click it to see them again.
+        const { block } = pull;
+        body.insertBefore(sum, block);
+        block.hidden = true;
+        sum.classList.add('t-sum');
+        sum.onclick = () => {
+          block.hidden = !block.hidden;
+          const k = sum.querySelector('.t-sum-k');
+          if (k) k.textContent = block.hidden ? '▸ layers' : '▾ layers';
+        };
+      }
+      pull = null;
+      return;
+    }
+    if (ev.type === 'container') add(containerHtml(ev));
+  };
+
   if (cmd) {
-    add(`<span class="t-prompt">root@${esc(user)}</span>:<span class="t-path">~</span># <span class="t-cmd">${esc(cmd)}</span>`);
+    add(`<span class="t-prompt">root@${esc(user)}</span>:<span class="t-path">${esc(cwd)}</span># <span class="t-cmd">${esc(cmd)}</span>`);
     plain += `# ${cmd}\n`;
   }
 
@@ -150,6 +266,8 @@ export function createTermLog({ host = 'pi', cmd = '' } = {}) {
       }
       endProgress();
       plain += raw + '\n';
+      const ev = dockerEvent(raw);
+      if (ev) { docker(ev); stick(); return; }
       const html = termLineHtml(raw, st);
       if (st.block) {
         if (!blockEl) { blockEl = document.createElement('div'); blockEl.className = 't-block'; body.insertBefore(blockEl, cursor); }

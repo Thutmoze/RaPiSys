@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createRequire } from 'module';
-import { termLineHtml, DB_PROGRESS_RE } from '../src/modules/term-log.js';
+import { termLineHtml, DB_PROGRESS_RE, dockerEvent, layerRowHtml, pulledHtml, containerHtml } from '../src/modules/term-log.js';
 
 const require = createRequire(import.meta.url);
 process.env.AGENT_SECRET = 'test-secret-not-used-for-any-real-hmac';
@@ -83,5 +83,39 @@ describe('terminal line colouring', () => {
     expect(h).toContain('<span class="t-cyan">Get:1</span>');
     expect(h).toContain('<span class="t-b">influxdb</span>');
     expect(h).toContain('<span class="t-green">1.13.1-1</span>');
+  });
+});
+
+describe('docker output', () => {
+  it('recognises compose pull, layer, container and RaPiSys step lines', () => {
+    expect(dockerEvent('Pulling latest image…')).toEqual({ type: 'step', text: 'Pulling latest image…' });
+    expect(dockerEvent(' Image pihole/pihole:latest Pulling ')).toEqual({ type: 'pullStart', image: 'pihole/pihole:latest' });
+    expect(dockerEvent(' 9efb78552436 Downloading 3.146MB')).toEqual({ type: 'layer', id: '9efb78552436', state: 'dl', size: '3.146MB', total: null });
+    expect(dockerEvent(' 9efb78552436 Pulling fs layer 0B')).toMatchObject({ state: 'wait' });
+    expect(dockerEvent(' 44136fa355b3 Already exists 0B')).toMatchObject({ state: 'have' });
+    expect(dockerEvent(' a9986cd6f37d Extracting 1B')).toMatchObject({ state: 'ex' });
+    expect(dockerEvent(' a9986cd6f37d Pull complete 0B')).toMatchObject({ state: 'ok' });
+    expect(dockerEvent(' Image pihole/pihole:latest Pulled ')).toEqual({ type: 'pulled', image: 'pihole/pihole:latest' });
+    expect(dockerEvent(' Container pihole Recreated ')).toEqual({ type: 'container', name: 'pihole', action: 'Recreated' });
+  });
+  it('recognises plain docker pull output, with its download fraction', () => {
+    expect(dockerEvent('latest: Pulling from pihole/pihole')).toEqual({ type: 'pullStart', image: 'pihole/pihole' });
+    expect(dockerEvent('9efb78552436: Downloading [=====>    ]  1.2MB/12MB')).toMatchObject({ state: 'dl', size: '1.2MB', total: '12MB' });
+    expect(dockerEvent('Status: Downloaded newer image for pihole/pihole:latest')).toEqual({ type: 'pulled', image: 'pihole/pihole:latest' });
+  });
+  it('leaves apt and dpkg lines alone', () => {
+    for (const l of ['Reading package lists...', 'Unpacking curl (8.14.1-2) over (8.14.1-1) ...', 'Setting up docker-ce (5:29.9.2-1~debian.13~trixie) ...', 'E: Could not get lock']) {
+      expect(dockerEvent(l)).toBeNull();
+    }
+  });
+  it('renders layer rows, the pull summary and container tags', () => {
+    expect(layerRowHtml({ id: '9efb78552436', state: 'dl', size: '11.53MB', total: null })).toContain('<span class="t-meter t-indet">');
+    expect(layerRowHtml({ id: '9efb78552436', state: 'dl', size: '1.2MB', total: '12MB' })).toContain('width:10%');
+    expect(layerRowHtml({ id: '9efb78552436', state: 'ok' })).toContain('✓ done');
+    expect(pulledHtml('pihole/pihole:latest', 14, 1)).toContain('13 layers downloaded, 1 already present');
+    expect(pulledHtml('x', 0, 0)).toContain('up to date');
+    expect(containerHtml({ name: 'pihole', action: 'Starting' })).toContain('t-yellow');
+    expect(containerHtml({ name: 'pihole', action: 'Started' })).toContain('t-green');
+    expect(containerHtml({ name: '<b>', action: 'Started' })).toContain('&lt;b&gt;');
   });
 });

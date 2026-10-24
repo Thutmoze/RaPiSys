@@ -6954,7 +6954,7 @@ pageRenderers.updates = (() => {
     document.body.appendChild(ov);
     const card = ov.querySelector('.up-install-card');
     const nodeName = document.getElementById('hostname')?.textContent || currentNode()?.name || 'pi';
-    const term = createTermLog({ host: nodeName, cmd: docker ? 'docker compose pull && docker compose up -d' : 'pihole -up' });
+    const term = createTermLog({ host: nodeName, cmd: docker ? 'docker compose pull && docker compose up -d' : 'pihole -up', cwd: docker ? '/opt/pihole-docker' : '~' });
     card.querySelector('[data-up=log]').appendChild(term.el);
     const barEl = card.querySelector('[data-up=bar]');
     const statusEl = card.querySelector('[data-up=status]');

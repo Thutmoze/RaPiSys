@@ -6743,7 +6743,28 @@ body.ultra .up-term-bar { padding: 3px 8px; font-size: 10px; }
 body.ultra .up-term-copy span { display: none; }
 body.ultra .up-term-body { font-size: 10.5px; line-height: 1.38; padding: 6px 8px; max-height: 200px; }
 body.ultra .up-term .t-meter { flex-basis: 70px; height: 3px; }
+/* RaPiSys step lines ("Pulling latest image…"): section markers in the log. */
+.up-term .t-step { color: var(--accent-cyan); font-weight: 600; }
+.up-term .t-step::before { content: '\203A  '; color: rgba(0,212,255,0.6); }
+/* Docker pull: one live row per image layer, updated in place, collapsed to a
+   "Pulled" summary when the image is in (click it to see the layers again). */
+.up-term .t-layers { margin: 2px 0 2px 2px; padding-left: 10px; border-left: 2px solid rgba(0,212,255,0.25); }
+.up-term .t-layer { display: grid; grid-template-columns: 10ch 1fr 11ch; gap: 10px; align-items: center; }
+.up-term .t-layer .t-meter { flex: none; width: 100%; }
+.up-term .t-layer .t-meter.t-indet i { width: 35%; animation: up-term-indet 1.1s ease-in-out infinite; }
+@keyframes up-term-indet { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.up-term .t-layer .t-meter.t-full i { width: 100%; background: #22c55e; }
+.up-term .t-layer .t-meter.t-extract i { width: 100%; background: #c084fc; animation: up-term-pulse 1s ease-in-out infinite; }
+@keyframes up-term-pulse { 50% { opacity: 0.45; } }
+.up-term .t-layer-st { text-align: right; }
+.up-term .t-sum { cursor: pointer; }
+.up-term .t-sum:hover .t-sum-k { text-decoration: underline; }
+.up-term .t-sum-k { color: var(--text-muted); }
+body.compact .up-term .t-layer { grid-template-columns: 9ch 1fr 10ch; gap: 8px; }
+body.ultra .up-term .t-layer { grid-template-columns: 9ch 1fr 9ch; gap: 6px; }
+body.ultra .up-term .t-layers { padding-left: 6px; }
 @media (max-width: 480px) { .up-term .t-meter { display: none; } }
+@media (max-width: 480px) { .up-term .t-layer { grid-template-columns: 9ch 1fr 9ch; } .up-term .t-layer .t-meter { display: block; } }
 .up-install-result { margin-top: 10px; font-size: 14px; }
 .up-install-success { color: #22c55e; font-weight: 700; }
 .up-install-fail { color: #ef4444; font-weight: 700; }
