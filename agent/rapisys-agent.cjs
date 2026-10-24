@@ -2259,11 +2259,13 @@ const OPS = {
     const state = piholeDockerUpdateState({ containerImageId, runningDigests: runningImg.digests,
       tagImageId: tagImg.id, remoteDigest });
     // Versions come from Pi-hole's own cache inside the container: image
-    // (DOCKER) plus Core/Web/FTL, installed and latest on GitHub. Refreshing it
-    // only rewrites that file; whether to update is still the digest's call.
+    // (DOCKER) plus Core/Web/FTL, installed and latest on GitHub. Read only:
+    // the container refreshes it on its own schedule, and running
+    // `pihole updatechecker` here spent GitHub API calls and, once GitHub's
+    // hourly limit was hit, blanked the latest versions. Whether to update is
+    // still the digest's call.
     let comps = { current: {}, latest: {} };
     if (CONTAINER_NAME_RE.test(name)) {
-      await run('docker', ['exec', name, 'pihole', 'updatechecker'], 60000).catch(() => {});
       const v = await run('docker', ['exec', name, 'cat', '/etc/pihole/versions'], 8000).catch(() => ({ stdout: '' }));
       comps = parsePiholeVersions(v.stdout);
     }

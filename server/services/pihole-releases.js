@@ -67,6 +67,20 @@ export function summarizeNotes(notes = []) {
   };
 }
 
+/**
+ * GitHub allows 60 unauthenticated API requests an hour per public IP, shared
+ * by every device behind it. Say so, with the reset time, instead of a bare 403.
+ */
+export function githubError(res, repo) {
+  const h = (k) => res.headers?.get?.(k);
+  if ((res.status === 403 || res.status === 429) && h('x-ratelimit-remaining') === '0') {
+    const reset = Number(h('x-ratelimit-reset')) * 1000;
+    const at = reset ? new Date(reset).toTimeString().slice(0, 5) : null;
+    return `GitHub's hourly limit for this network is used up${at ? `; try again after ${at}` : ''}`;
+  }
+  return `GitHub answered ${res.status} for pi-hole/${repo}`;
+}
+
 const cleanBody = (b) => String(b || '').replace(/<!--[\s\S]*?-->/g, '').trim().slice(0, MAX_BODY);
 
 export function createPiholeReleases({ fetchImpl = globalThis.fetch, ttlMs = 6 * 3600e3, now = () => Date.now() } = {}) {
@@ -80,7 +94,7 @@ export function createPiholeReleases({ fetchImpl = globalThis.fetch, ttlMs = 6 *
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'RaPiSys' },
         signal: AbortSignal.timeout(15000),
       });
-      if (!res.ok) throw new Error(`GitHub answered ${res.status} for pi-hole/${repo}`);
+      if (!res.ok) throw new Error(githubError(res, repo));
       const list = await res.json();
       if (!Array.isArray(list)) throw new Error(`unexpected GitHub response for pi-hole/${repo}`);
       cache.set(repo, { at: now(), list });

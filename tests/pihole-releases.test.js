@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createRequire } from 'module';
 import express from 'express';
 import request from 'supertest';
-import { cmpVer, notesBetween, summarizeNotes, createPiholeReleases } from '../server/services/pihole-releases.js';
+import { cmpVer, notesBetween, summarizeNotes, createPiholeReleases, githubError } from '../server/services/pihole-releases.js';
 import { releaseNotesHtml, inlineHtml } from '../src/modules/release-notes.js';
 import { networkRouter } from '../server/routes/network.js';
 
@@ -103,6 +103,18 @@ describe('notesFor', () => {
     await rel.notesFor(status);
     t = 100;
     expect(await rel.notesFor(status)).toHaveLength(4);
+  });
+});
+
+describe('githubError', () => {
+  const res = (status, headers) => ({ status, headers: new Headers(headers) });
+  it('names the hourly limit and when it resets', () => {
+    const reset = Date.UTC(2026, 9, 24, 15, 41) / 1000;
+    const msg = githubError(res(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) }), 'FTL');
+    expect(msg).toMatch(/^GitHub's hourly limit for this network is used up; try again after \d\d:\d\d$/);
+  });
+  it('keeps other failures plain', () => {
+    expect(githubError(res(404, {}), 'FTL')).toBe('GitHub answered 404 for pi-hole/FTL');
   });
 });
 
