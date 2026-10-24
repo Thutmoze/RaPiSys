@@ -53,7 +53,9 @@ export function summarizeNotes(notes = []) {
       if (head) { section = SEVERITY.indexOf(head[1].toLowerCase()); continue; }
       if (/^#/.test(line.trim())) section = -1;
       // "(…, duplicate [GHSA-x](…))" names a second id for the same advisory.
-      const found = line.replace(/duplicate\s+\[?GHSA(?:-[a-z0-9]{4}){3}/gi, '').match(/GHSA(?:-[a-z0-9]{4}){3}/gi);
+      // The whole reference goes, link URL included: the URL repeats the id.
+      const found = line.replace(/duplicate\s+(?:\[GHSA[^\]]*\]\([^)]*\)|GHSA(?:-[a-z0-9]{4}){3})/gi, '')
+        .match(/GHSA(?:-[a-z0-9]{4}){3}/gi);
       if (!found) continue;
       for (const id of found) ids.add(id.toUpperCase());
       const inline = line.match(/\((critical|high|medium|low)\)/i);

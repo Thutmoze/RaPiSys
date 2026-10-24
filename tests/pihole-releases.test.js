@@ -62,7 +62,9 @@ describe('summarizeNotes', () => {
     expect(summarizeNotes(notes)).toEqual({ advisories: 3, urgency: 'high', released: Date.parse('2026-10-17T10:00:00Z') });
   });
   it('does not count an advisory\'s duplicate id', () => {
-    const body = '**Medium**\n- [GHSA-v53r-4564-3449](https://x) (CVSS 6.5, duplicate [GHSA-846w-3j3v-2hx8](https://y)): read-only sessions';
+    // The real FTL v6.8 line: the duplicate's link URL repeats its id.
+    const body = '**Medium**\n- [GHSA-v53r-4564-3449](https://github.com/pi-hole/FTL/security/advisories/GHSA-v53r-4564-3449)'
+      + ' (CVSS 6.5, duplicate [GHSA-846w-3j3v-2hx8](https://github.com/pi-hole/FTL/security/advisories/GHSA-846w-3j3v-2hx8)): read-only sessions';
     expect(summarizeNotes([{ body }]).advisories).toBe(1);
   });
   it('has no urgency without advisories', () => {
