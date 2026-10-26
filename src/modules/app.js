@@ -14,6 +14,7 @@ import { eyeLogoImg } from './brand.js';
 import { initNodeSwitcher } from './node-switcher.js';
 import { currentNode, isRemoteNode } from './node-context.js';
 import { createTermLog } from './term-log.js';
+import { createAptProgress } from './apt-progress.js';
 import { releaseNotesHtml } from './release-notes.js';
 import { poll } from './poll.js';
 import { openModal, modalId } from './modal.js';
@@ -7854,7 +7855,7 @@ pageRenderers.updates = (() => {
           <button class="up-install-close" data-up="close" hidden title="Close">✕</button>
         </div>
         <div class="up-install-bar"><div class="up-install-bar-fill" data-up="bar"></div></div>
-        <div class="up-install-status" data-up="status">Starting…</div>
+        <div class="up-install-status"><span data-up="status">Starting…</span><span class="up-install-pct" data-up="pct" hidden></span></div>
         <button class="up-install-toggle" data-up="toggle">▸ Show details</button>
         <div class="up-install-log" data-up="log" hidden></div>
         <div class="up-install-result" data-up="result" hidden></div>
@@ -7873,6 +7874,7 @@ pageRenderers.updates = (() => {
     const showLog = () => { logEl.removeAttribute('hidden'); toggleEl.textContent = '▾ Hide details'; };
     const barEl = card.querySelector('[data-up=bar]');
     const statusEl = card.querySelector('[data-up=status]');
+    const pctEl = card.querySelector('[data-up=pct]');
     const toggleEl = card.querySelector('[data-up=toggle]');
     const resultEl = card.querySelector('[data-up=result]');
     const closeBtn = card.querySelector('[data-up=close]');
@@ -7882,10 +7884,25 @@ pageRenderers.updates = (() => {
       if (show) { logEl.removeAttribute('hidden'); toggleEl.textContent = '▾ Hide details'; }
       else { logEl.setAttribute('hidden', ''); toggleEl.textContent = '▸ Show details'; }
     };
-    // progress is indeterminate from apt, so advance a soft estimate as lines
-    // stream in (caps below 90% until 'done' snaps it to 100).
-    let pct = 5; barEl.style.width = pct + '%';
-    const bump = () => { pct = Math.min(90, pct + 1.5); barEl.style.width = pct + '%'; };
+    // Real progress from apt's own plan line and per-package steps. Without
+    // the plan line (lost to a reconnect gap), fall back to a soft estimate
+    // that only moves on package work, with no percent shown.
+    const progress = createAptProgress();
+    const PHASE_LABEL = { Downloading: 'Downloading', Unpacking: 'Unpacking', Configuring: 'Configuring', Removing: 'Removing', 'Finishing up': 'Finishing up…' };
+    let pct = 2; barEl.style.width = pct + '%';
+    const hidePct = () => { pctEl.hidden = true; };
+    const bump = (line) => {
+      const s = progress.line(line);
+      if (s.pct == null) {
+        if (/^(Get:|Unpacking |Setting up |Removing )/.test(line)) { pct = Math.min(90, pct + 1.5); barEl.style.width = pct + '%'; }
+        return false;
+      }
+      barEl.style.width = Math.max(2, s.pct) + '%';
+      pctEl.hidden = false; pctEl.textContent = `${s.pct}%`;
+      const label = PHASE_LABEL[s.phase];
+      if (label) statusEl.innerHTML = esc(label) + (s.of ? ` <span class="up-install-count">${s.done} of ${s.of}</span>` : '');
+      return true;
+    };
 
     let finished = false;
     const closeAndRefresh = () => { ov.remove(); load(host); };
@@ -7901,6 +7918,7 @@ pageRenderers.updates = (() => {
       term.exit(d.code ?? (ok ? 0 : 1));
       barEl.style.width = '100%';
       barEl.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
+      if (ok && !pctEl.hidden) { pctEl.textContent = '100%'; pctEl.classList.add('up-install-pct-ok'); } else hidePct();
       statusEl.textContent = ok ? 'Done' : `Finished with errors${d.code != null ? ` (code ${d.code})` : ''}`;
       resultEl.removeAttribute('hidden');
       resultEl.innerHTML = ok
@@ -7925,6 +7943,7 @@ pageRenderers.updates = (() => {
     // apt.done for the stream and the recovery path alike.
     const complete = (d) => {
       if (onComplete && d.ok) {
+        hidePct();
         term.note('firmware packages updated', 'ok');
         statusEl.textContent = 'Flashing bootloader EEPROM…';
         onComplete(host, { card, term, barEl, statusEl, resultEl, closeBtn, finalize });
@@ -7938,11 +7957,11 @@ pageRenderers.updates = (() => {
       const line = JSON.parse(e.data).line;
       received++;
       term.line(line);
+      if (bump(line)) return;
       if (/^(Get:|Fetched|Reading)/.test(line)) statusEl.textContent = 'Downloading packages…';
       else if (/Unpacking/.test(line)) statusEl.textContent = 'Unpacking…';
       else if (/Setting up|Preparing to/.test(line)) statusEl.textContent = 'Installing…';
       else if (/Processing triggers/.test(line)) statusEl.textContent = 'Finishing up…';
-      bump();
     });
     ev.addEventListener('done', (e) => {
       ev.close();
@@ -7951,7 +7970,7 @@ pageRenderers.updates = (() => {
     ev.addEventListener('failed', (e) => {
       if (finished) return;
       let m = 'upgrade failed'; try { m = JSON.parse(e.data).message || m; } catch { /* */ }
-      showLog(); term.note(`✗ ${m}`, 'err'); term.stop();
+      showLog(); term.note(`✗ ${m}`, 'err'); term.stop(); hidePct();
       card.querySelector('.up-spinner')?.remove();
       barEl.style.width = '100%'; barEl.classList.add('up-install-bar-err');
       statusEl.textContent = 'Error';
@@ -7985,7 +8004,7 @@ pageRenderers.updates = (() => {
       waitEl.innerHTML = `${RESTART_ICON}<div>${dockerEngine
         ? '<b>Docker restarted, so RaPiSys restarted with it.</b> The upgrade keeps running on the host. Waiting for RaPiSys to come back'
         : '<b>Lost the connection to RaPiSys.</b> The upgrade keeps running on the host. Reconnecting'} <span class="up-install-wait-time">0s</span></div>`;
-      statusEl.after(waitEl);
+      statusEl.parentElement.after(waitEl);
       const timeEl = waitEl.querySelector('.up-install-wait-time');
       let since = Date.now();          // reset whenever the host answers
       let reconnected = false;
@@ -8006,7 +8025,7 @@ pageRenderers.updates = (() => {
           }
           if (!st.found) { stop(); lost(); return; }
           if (st.gap) term.note(`… ${st.gap} lines not kept by the host …`, 'info');
-          for (const l of st.lines || []) { term.line(l); bump(); }
+          for (const l of st.lines || []) { term.line(l); bump(l); }
           received = (st.total ?? received);
           if (!st.running) {
             stop();
@@ -8027,7 +8046,7 @@ pageRenderers.updates = (() => {
     }
     // The host has no record of this run: the request never reached the agent.
     function lost() {
-      term.note('✗ connection lost', 'err');
+      term.note('✗ connection lost', 'err'); hidePct();
       card.querySelector('.up-spinner')?.remove();
       barEl.classList.remove('up-install-bar-wait'); barEl.style.width = '100%'; barEl.classList.add('up-install-bar-err');
       statusEl.textContent = 'Error';
@@ -8037,7 +8056,7 @@ pageRenderers.updates = (() => {
     }
     // RaPiSys did not answer in time: say so, and let the user ask again.
     function noAnswer() {
-      term.note('✗ No answer from RaPiSys after 3 minutes', 'err');
+      term.note('✗ No answer from RaPiSys after 3 minutes', 'err'); hidePct();
       barEl.classList.remove('up-install-bar-wait'); barEl.style.width = '100%'; barEl.classList.add('up-install-bar-err');
       statusEl.textContent = 'RaPiSys has not come back';
       resultEl.removeAttribute('hidden');
