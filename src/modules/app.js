@@ -6106,7 +6106,7 @@ pageRenderers.inventory = (() => {
     return new Promise((resolve) => {
       let settled = false;
       const finish = (fn, arg) => { if (settled) return; settled = true; es.close(); fn(arg); resolve(); };
-      const es = new EventSource(url);
+      const es = new EventSource(API + url);
       es.addEventListener('progress', (e) => { try { const d = JSON.parse(e.data); if (d.line != null) prog.appendLog(d.line); } catch { /* */ } });
       es.addEventListener('done', (e) => { let out = {}; try { out = JSON.parse(e.data); } catch { /* */ } finish(onDone, out); });
       // explicit server-sent failure (guard refusal, apt error) carries a message
