@@ -6548,7 +6548,12 @@ pageRenderers.disk = (() => {
 pageRenderers.updates = (() => {
   let updates = [], firmware = null, selected = new Set(), activeFilter = 'all', piholeUpd = null;
   // Reboot-required status from /updates/reboot-status (see services/reboot-status.js).
-  let reboot = null, rbProcsOpen = false, rebooting = false;
+  let reboot = null, rbProcsOpen = false, mountedHost = null;
+  // Reboots in flight, per node (the switcher can move to another node while
+  // one restarts), so only the node actually rebooting shows the banner.
+  const rebootingNodes = new Set();
+  const nodeKey = (n = currentNode()) => (n ? `peer:${n.id}` : 'local');
+  const rebooting = () => rebootingNodes.has(nodeKey());
   let hOffset = 0, hTotal = 0;
   const HIST_LIMIT = 50;
   let streaming = false, expandedLog = null, logCache = {}, editSchedule = false, schedPollHost = null;
@@ -6630,14 +6635,15 @@ pageRenderers.updates = (() => {
   let lastChecked = null, autoCheck = null;
   async function load(host) {
     let data;
-    try { data = await api('/updates'); } catch { return; }
+    // A node mid-reboot does not answer; still show its Rebooting banner.
+    try { data = await api('/updates'); } catch { if (rebooting()) renderBanner(host); return; }
     updates = data.updates || [];
     lastChecked = data.checkedAt || null;
     // pull the auto-check last-run summary so we can show "Auto-checked Xh ago"
     autoCheck = await api('/updates/schedule').then((c) => c.lastRun || null).catch(() => null);
     firmware = await api('/updates/firmware').catch(() => null);
     piholeUpd = await api('/network/dns/pihole/update-status').catch(() => null);
-    if (!rebooting) { reboot = await api('/updates/reboot-status').catch(() => reboot); setNavRebootDot(reboot); }
+    if (!rebooting()) { reboot = await api('/updates/reboot-status').catch(() => reboot); setNavRebootDot(reboot); }
     if (data.available) render(host);   // we have a cached scan (even if 0 updates)
     else {
       renderBanner(host);
@@ -6755,7 +6761,7 @@ pageRenderers.updates = (() => {
   }
 
   function rebootBannerHtml() {
-    if (rebooting) return `
+    if (rebooting()) return `
       <div class="up-banner up-banner-busy">
         <div class="up-banner-icon"><span class="up-spinner"></span></div>
         <div class="up-banner-text">
@@ -6832,24 +6838,33 @@ pageRenderers.updates = (() => {
   async function doReboot(host) {
     try { await api('/updates/reboot', { method: 'POST', body: {} }); }
     catch (e) { toast('error', 'Updates', 'Reboot request failed: ' + e.message); return; }
-    rebooting = true; setNavRebootDot(null); renderBanner(host);
-    toast('success', 'Updates', `Rebooting ${piName()}…`);
-    // Wait for the server to drop, then to answer again (3 min cap).
+    const node = currentNode(), key = nodeKey(node), name = piName();
+    // /api/health always answers from the serving node; a peer's goes through the relay.
+    const healthUrl = node ? `/api/nodes/${encodeURIComponent(node.id)}/proxy/health` : '/api/health';
+    rebootingNodes.add(key); setNavRebootDot(null); renderBanner(host);
+    toast('success', 'Updates', `Rebooting ${name}…`);
+    // Wait for the node to drop, then to answer again (3 min cap).
     const t0 = Date.now();
-    let wentDown = false;
+    let wentDown = false, back = false;
     while (Date.now() - t0 < 180000) {
       await new Promise((r) => setTimeout(r, 4000));
-      const up = await fetch('/api/health', { cache: 'no-store' }).then((r) => r.ok).catch(() => false);
+      const up = await fetch(healthUrl, { cache: 'no-store' }).then((r) => r.ok).catch(() => false);
       if (!up) wentDown = true;
-      else if (wentDown || Date.now() - t0 > 90000) break;
+      else if (wentDown || Date.now() - t0 > 90000) { back = true; break; }
     }
-    rebooting = false;
-    reboot = await api('/updates/reboot-status?force=1').catch(() => null);
-    setNavRebootDot(reboot);
-    if (host.isConnected) load(host);
-    if (reboot && reboot.level === 'none') toast('success', 'Updates', `Back online${reboot.kernel ? `, running kernel ${shortKernel(reboot.kernel)}` : ''}. Nothing else is waiting on a reboot.`);
-    else if (reboot) toast('info', 'Updates', 'Back online, but something is still waiting on a reboot.');
-    else toast('error', 'Updates', 'The Pi has not answered yet. Reload the page in a minute.');
+    rebootingNodes.delete(key);
+    // The switcher may have moved on: only touch the page if it still shows this node.
+    const here = nodeKey() === key;
+    const st = here ? await api('/updates/reboot-status?force=1').catch(() => null) : null;
+    if (here) {
+      reboot = st;
+      setNavRebootDot(st);
+      if (mountedHost?.isConnected) load(mountedHost);
+    }
+    if (!here) toast(back ? 'success' : 'error', 'Updates', back ? `${name} is back online.` : `${name} has not answered yet.`);
+    else if (st && st.level === 'none') toast('success', 'Updates', `${name} is back online${st.kernel ? `, running kernel ${shortKernel(st.kernel)}` : ''}. Nothing else is waiting on a reboot.`);
+    else if (st) toast('info', 'Updates', `${name} is back online, but something is still waiting on a reboot.`);
+    else toast('error', 'Updates', `${name} has not answered yet. Reload the page in a minute.`);
   }
 
   // ---- Applications updated outside apt (Pi-hole) ----------------------------
@@ -8420,6 +8435,7 @@ pageRenderers.updates = (() => {
 
   return {
     mount(host) {
+      mountedHost = host;
       host.innerHTML = `
       <div class="page-lead">${pageHeader('updates', 'Software Updates')}</div>
       <div class="rapisys-grid">
