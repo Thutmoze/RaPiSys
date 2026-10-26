@@ -27,6 +27,7 @@ import { createLayoutsRepo } from './repositories/layouts.js';
 import { createUpdatesCollector } from './collectors/updates.js';
 import { createUpdatesRepo } from './repositories/updates.js';
 import { createNetTrafficRepo } from './repositories/net-traffic.js';
+import { createDiskRepo } from './repositories/disk.js';
 import { createNetTraffic } from './services/net-traffic.js';
 import { createPiholeBackupJob } from './services/pihole-backup.js';
 import { createPiholeReleases, summarizeNotes, nextPiholeStatus } from './services/pihole-releases.js';
@@ -129,7 +130,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   }
 
   // ---- repositories (rebuilt when the DB is relocated) -----------------------
-  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo, layoutsRepo, peersRepo, netTrafficRepo;
+  let metricsRepo, eventsRepo, secrets, alertsRepo, sessionsRepo, reportsRepo, inventoryRepo, updatesRepo, layoutsRepo, peersRepo, netTrafficRepo, diskRepo;
   function rebuildRepos() {
     metricsRepo = createMetricsRepo(getDb());
     eventsRepo = createEventsRepo(getDb());
@@ -142,6 +143,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     updatesRepo = createUpdatesRepo(getDb());
     peersRepo = createPeersRepo(getDb(), { secrets });
     netTrafficRepo = createNetTrafficRepo(getDb());
+    diskRepo = createDiskRepo(getDb());
   }
   rebuildRepos();
 
@@ -251,6 +253,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
   const inventoryRepoFacade = new Proxy({}, { get: (_, m) => (...a) => inventoryRepo[m](...a) });
   const layoutsRepoFacade = new Proxy({}, { get: (_, m) => (...a) => layoutsRepo[m](...a) });
   const updatesRepoFacade = new Proxy({}, { get: (_, m) => (...a) => updatesRepo[m](...a) });
+  const diskRepoFacade = new Proxy({}, { get: (_, m) => (...a) => diskRepo[m](...a) });
   const updates = createUpdatesCollector({ updatesRepo: updatesRepoFacade });
   const updateScheduler = createUpdateScheduler({
     updates, mailer, telegram, loadSettings, saveSettings, withFileLock, events: eventsFacade,
@@ -427,6 +430,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
         eventsFacade.add('disk.autoclean', failed.length ? 'warning' : 'info', { mode: 'clean', categories: out.cleaned || cats, failed, reclaimedBytes: out.reclaimedBytes || 0 });
       } else {
         const scan = await disk.scan(cfg.journalTargetMB || 200);
+        diskRepoFacade.saveScan(scan);
         eventsFacade.add('disk.autoclean', 'info', { mode: 'scan', reclaimableBytes: scan.totalDefaultBytes || 0 });
       }
     } catch (e) {
@@ -565,7 +569,7 @@ export async function initRapisys({ app, loadSettings, saveSettings, withFileLoc
     loadSettings, saveSettings, withFileLock, refreshPironmanConfig }));
   app.use('/api/reports', rc, reportsRouter({ reports, reportsRepo: reportsFacade }));
   app.use('/api/inventory', rc, inventoryRouter({ inventory, inventoryRepo: inventoryRepoFacade, requireControl: auth.requireControl, events: eventsFacade }));
-  app.use('/api/disk', rc, diskRouter({ disk, requireControl: auth.requireControl, loadSettings, saveSettings, withFileLock, events: eventsFacade }));
+  app.use('/api/disk', rc, diskRouter({ disk, diskRepo: diskRepoFacade, requireControl: auth.requireControl, loadSettings, saveSettings, withFileLock, events: eventsFacade }));
   app.use('/api/updates', rc, updatesRouter({ updates, updateScheduler, updatesRepo: updatesRepoFacade, requireControl: auth.requireControl, events: eventsFacade, rebootStatus }));
   app.use('/api/remote', rc, remoteRouter({ remoteAccess, requireControl: auth.requireControl }));
   app.use('/api/tailscale', rc, tailscaleRouter({ requireControl: auth.requireControl }));

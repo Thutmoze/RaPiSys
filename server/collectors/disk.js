@@ -11,8 +11,11 @@ export function createDiskCollector() {
     /** df breakdown of `/`. */
     usage: () => agentCall('disk.usage', {}, null, 8000),
 
-    /** Read-only detection across all cleanup categories. */
-    scan: (journalTargetMB = 200) => agentCall('disk.scan', { journalTargetMB }, null, 60000),
+    /**
+     * Read-only detection across all cleanup categories. `onProgress` (optional)
+     * receives the agent's { step } and { category } messages as the scan runs.
+     */
+    scan: (journalTargetMB = 200, onProgress = null) => agentCall('disk.scan', { journalTargetMB }, onProgress, 60000),
 
     /**
      * Run cleanup for the given allow-listed category IDs. `onLine` (optional)

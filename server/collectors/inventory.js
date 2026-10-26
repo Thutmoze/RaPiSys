@@ -160,9 +160,14 @@ export function createInventoryCollector() {
    * each tagged with a reason + severity so the UI can explain *why* (we never
    * claim something is malware — only observable facts: orphaned, failed,
    * inactive, stopped, oversized-and-old).
+   * `onCheck` (optional) is called with each source's id (packages, services,
+   * containers, orphans) as it returns, for streamed progress.
    */
-  async function recommendations() {
-    const [pkgsR, svcsR, ctrsR, orphansR] = await Promise.allSettled([packages(), services(), containers(), autoremovable()]);
+  async function recommendations({ onCheck = null } = {}) {
+    const tick = (id, p) => p.finally(() => { try { onCheck?.(id); } catch { /* listener gone */ } });
+    const [pkgsR, svcsR, ctrsR, orphansR] = await Promise.allSettled([
+      tick('packages', packages()), tick('services', services()),
+      tick('containers', containers()), tick('orphans', autoremovable())]);
     const pkgs = pkgsR.status === 'fulfilled' ? pkgsR.value : [];
     const svcs = svcsR.status === 'fulfilled' ? svcsR.value : [];
     const ctrs = ctrsR.status === 'fulfilled' ? ctrsR.value : [];

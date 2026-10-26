@@ -933,6 +933,15 @@ async function nmRestoreDns() {
   try { fs.unlinkSync(PIHOLE_NM_STATE); } catch { /* none */ }
 }
 
+// disk.scan's categories in scan order, for its streamed step progress.
+const DISK_SCAN_STEPS = [
+  { id: 'apt-cache', name: 'APT package cache' }, { id: 'journal', name: 'Systemd journal' },
+  { id: 'logs-rotated', name: 'Rotated & compressed logs' }, { id: 'tmp-stale', name: 'Stale temp files' },
+  { id: 'apt-autoremove', name: 'Orphaned packages' }, { id: 'docker-prune', name: 'Docker dangling & build cache' },
+  { id: 'crash-dumps', name: 'Crash & core dumps' }, { id: 'user-cache', name: 'Trash & thumbnail cache' },
+  { id: 'user-old-files', name: 'Old user files' },
+];
+
 const OPS = {
 
   // ---- Pironman 5 Mini -----------------------------------------------------
@@ -1490,9 +1499,15 @@ const OPS = {
   // Read-only detection. Returns one descriptor per cleanup category with the
   // reclaimable byte total, a count, a small top-by-size sample (for the
   // "More details" modal), the exact command, and a plain-English rationale.
-  async 'disk.scan'({ journalTargetMB = 200 } = {}) {
+  async 'disk.scan'({ journalTargetMB = 200 } = {}, send) {
     const target = Math.min(2000, Math.max(50, Number(journalTargetMB) || 200));
     const cats = [];
+    // Streamed progress (optional): { step } as each category starts, then
+    // { category } once it is measured. The final result is unchanged.
+    const progress = (msg) => { if (typeof send === 'function') send(msg); };
+    const begin = (id) => { const index = DISK_SCAN_STEPS.findIndex((x) => x.id === id);
+      progress({ step: { id, name: DISK_SCAN_STEPS[index].name, index, total: DISK_SCAN_STEPS.length } }); };
+    const push = (c) => { cats.push(c); progress({ category: c }); };
 
     // run a `find ... -printf '%s\t%p\n'` and aggregate bytes/count/sample
     const sampleFind = async (args, desc = '', max = 60) => {
@@ -1508,16 +1523,18 @@ const OPS = {
       return { bytes, count, sample: sample.slice(0, max) };
     };
 
+    begin('apt-cache');
     // 1) APT package cache
     {
       const f = await sampleFind(['/var/cache/apt/archives', '-maxdepth', '1', '-type', 'f',
         '-name', '*.deb', '-printf', '%s\t%p\n'], 'Cached installer package, its software is already installed');
-      cats.push({ id: 'apt-cache', name: 'APT package cache', path: '/var/cache/apt/archives',
+      push({ id: 'apt-cache', name: 'APT package cache', path: '/var/cache/apt/archives',
         bytes: f.bytes, count: f.count, sample: f.sample, default: true, caution: false,
         cmd: 'apt-get clean', safe: 'Safe · apt-get clean',
         why: 'Installer .deb packages kept after their software was installed. Re-downloaded automatically if ever needed again.' });
     }
 
+    begin('journal');
     // 2) systemd journal beyond the kept size
     {
       const r = await run('journalctl', ['--disk-usage'], 6000).catch(() => ({ stdout: '' }));
@@ -1525,25 +1542,27 @@ const OPS = {
       const mult = { '': 1, K: 1024, M: 1048576, G: 1073741824, T: 1099511627776 };
       const cur = m ? Math.round(parseFloat(m[1]) * (mult[(m[2] || '').toUpperCase()] || 1)) : 0;
       const reclaim = Math.max(0, cur - target * 1048576);
-      cats.push({ id: 'journal', name: 'Systemd journal', path: `journalctl --vacuum-size=${target}M`,
+      push({ id: 'journal', name: 'Systemd journal', path: `journalctl --vacuum-size=${target}M`,
         bytes: reclaim, count: 1, single: true, default: true, caution: false,
         cmd: `journalctl --vacuum-size=${target}M`, safe: 'Safe · vacuum-size', journalTargetMB: target,
         sample: [{ path: `current ${(cur / 1048576).toFixed(0)} MB → keep ${target} MB`, bytes: reclaim, desc: 'Archived journal entries beyond the size you keep' }],
         why: 'Historical journal entries beyond the size you keep. The current boot and recent logs stay intact.' });
     }
 
+    begin('logs-rotated');
     // 3) rotated & compressed logs
     {
       const gz = await sampleFind(['/var/log', '-xdev', '-type', 'f', '-name', '*.gz', '-printf', '%s\t%p\n'], 'Rotated log archive (gzip), superseded by the current log');
       const rot = await sampleFind(['/var/log', '-xdev', '-type', 'f', '-regextype', 'posix-extended',
         '-regex', '.*\\.[0-9]+', '-printf', '%s\t%p\n'], 'Rotated log file, superseded by the current log');
       const sample = [...gz.sample, ...rot.sample].sort((a, b) => b.bytes - a.bytes).slice(0, 5);
-      cats.push({ id: 'logs-rotated', name: 'Rotated & compressed logs', path: '/var/log/*.gz, *.N',
+      push({ id: 'logs-rotated', name: 'Rotated & compressed logs', path: '/var/log/*.gz, *.N',
         bytes: gz.bytes + rot.bytes, count: gz.count + rot.count, sample, default: true, caution: false,
         cmd: "find /var/log -xdev -type f ( -name '*.gz' -o -regex '.*\\.[0-9]+' ) -delete", safe: 'Safe',
         why: 'Old logs already rotated out by logrotate. Active log files are never touched.' });
     }
 
+    begin('tmp-stale');
     // 4) stale temp files: neither read nor modified in > 7 days, not held open
     {
       const open = openFileInodes();
@@ -1555,12 +1574,13 @@ const OPS = {
         bytes += f.bytes; count += f.count; sample = sample.concat(f.sample);
       }
       sample.sort((a, b) => b.bytes - a.bytes);
-      cats.push({ id: 'tmp-stale', name: 'Stale temp files', path: '/tmp, /var/tmp (>7 days)',
+      push({ id: 'tmp-stale', name: 'Stale temp files', path: '/tmp, /var/tmp (>7 days)',
         bytes, count, sample: sample.slice(0, 60), default: true, caution: false,
         cmd: 'find /tmp /var/tmp -xdev -type f -atime +7 -mtime +7 -delete   # open files excluded', safe: 'Safe',
         why: 'Temporary files nobody has read or changed in over a week. Files a running process holds open are skipped.' });
     }
 
+    begin('apt-autoremove');
     // 5) orphaned packages (autoremove). Caution: every package is listed in
     //    More details, and the clean re-simulates before removing anything.
     {
@@ -1579,13 +1599,14 @@ const OPS = {
       }
       sample.sort((a, b) => b.bytes - a.bytes);
       const blocked = prot.size ? `apt would also remove protected package(s): ${[...prot].join(', ')}` : '';
-      cats.push({ id: 'apt-autoremove', name: 'Orphaned packages', path: 'apt-get autoremove',
+      push({ id: 'apt-autoremove', name: 'Orphaned packages', path: 'apt-get autoremove',
         bytes: kb * 1024, count: names.length, sample, default: !blocked, caution: true, blocked,
         cmd: 'apt-get autoremove   # re-simulated and checked before removal',
         safe: blocked ? 'Blocked · protected package' : 'Caution · review list',
         why: 'Dependencies no installed package needs anymore, such as libraries replaced by newer versions and old kernels. The running kernel, firmware and bootloader are never removed. More details lists every package.' });
     }
 
+    begin('docker-prune');
     // 6) Docker dangling images + build cache (named volumes excluded)
     {
       const present = await run('sh', ['-c', 'command -v docker >/dev/null 2>&1 && echo yes || echo no'], 4000)
@@ -1603,7 +1624,7 @@ const OPS = {
           const [type, recl] = line.split('\t');
           if (/Build Cache/i.test(type || '')) cache += parseDockerSize(recl);
         }
-        cats.push({ id: 'docker-prune', name: 'Docker dangling & build cache', path: 'docker image/builder prune',
+        push({ id: 'docker-prune', name: 'Docker dangling & build cache', path: 'docker image/builder prune',
           bytes: dangling.bytes + cache, count: dangling.count,
           sample: [
             { path: `${dangling.count} untagged image${dangling.count === 1 ? '' : 's'} (unused)`, bytes: dangling.bytes, desc: 'Old image layers no container uses and no tag points to' },
@@ -1615,15 +1636,17 @@ const OPS = {
       }
     }
 
+    begin('crash-dumps');
     // 7) crash & core dumps (off by default)
     {
       const f = await sampleFind(['/var/crash', '-xdev', '-type', 'f', '-printf', '%s\t%p\n'], 'Saved crash / core dump report');
-      cats.push({ id: 'crash-dumps', name: 'Crash & core dumps', path: '/var/crash',
+      push({ id: 'crash-dumps', name: 'Crash & core dumps', path: '/var/crash',
         bytes: f.bytes, count: f.count, sample: f.sample, default: false, caution: false,
         cmd: 'find /var/crash -xdev -type f -delete', safe: 'Optional',
         why: 'Saved crash reports. Off by default in case you still want to inspect a recent one.' });
     }
 
+    begin('user-cache');
     // 8) user trash & thumbnail cache (off by default)
     {
       let bytes = 0, count = 0, sample = [];
@@ -1633,18 +1656,19 @@ const OPS = {
         bytes += f.bytes; count += f.count; sample = sample.concat(f.sample);
       }
       sample.sort((a, b) => b.bytes - a.bytes);
-      cats.push({ id: 'user-cache', name: 'Trash & thumbnail cache', path: '~/.local/share/Trash, ~/.cache/thumbnails',
+      push({ id: 'user-cache', name: 'Trash & thumbnail cache', path: '~/.local/share/Trash, ~/.cache/thumbnails',
         bytes, count, sample: sample.slice(0, 5), default: false, caution: false,
         cmd: 'find ~/.local/share/Trash/{files,info} ~/.cache/thumbnails -xdev -mindepth 1 -delete', safe: 'Optional',
         why: 'User trash and regenerable thumbnail caches for each login.' });
     }
 
+    begin('user-old-files');
     // 9) old user files in Downloads / Desktop (off by default; user data, caution)
     {
       const f = await sampleFind(['/home', '-xdev', '-maxdepth', '4', '-type', 'f',
         '(', '-path', '*/Downloads/*', '-o', '-path', '*/Desktop/*', ')',
         '-mtime', '+90', '-printf', '%s\t%p\n'], 'Old file in Downloads/Desktop, not modified in 90+ days');
-      cats.push({ id: 'user-old-files', name: 'Old user files', path: '~/Downloads, ~/Desktop (>90 days)',
+      push({ id: 'user-old-files', name: 'Old user files', path: '~/Downloads, ~/Desktop (>90 days)',
         bytes: f.bytes, count: f.count, sample: f.sample, default: false, caution: true,
         cmd: "find /home -xdev -maxdepth 4 -type f ( -path '*/Downloads/*' -o -path '*/Desktop/*' ) -mtime +90 -delete",
         safe: 'Caution · review first',
@@ -3776,4 +3800,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => { server.close(); dockerRoServer.close(); process.exit(0); });
 }
 
-module.exports = { beginAptRun, aptRunStatus, AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState, parsePiholeVersions };
+module.exports = { DISK_SCAN_STEPS, beginAptRun, aptRunStatus, AGENT_SHA256, redactParams, verify, dispatch, onConnection, MAX_REQUEST_BYTES, underMountBase, UNIT_NAME_RE, TLS_DIR, rpiTag, isKernelPkg, nmcliFields, nmDnsTargets, firstNameserver, nameservers, piholeResolvers, dockerReadRoute, redactInspect, autoremoveProtected, parseDockerSize, dockerDangling, staleTmpArgs, createLineSplitter, parsePolicyOrigins, isRptRebuild, isRpiArchiveHost, newestKernel, parseDeletedLibs, classifyCgroup, parseListeners, containerIdFromCgroup, libOwnerPattern, libOwner, parseDpkgSearch, parseSystemctlShow, piholeImageTag, pickPiholeContainer, piholeDockerUpdateState, parsePiholeVersions };

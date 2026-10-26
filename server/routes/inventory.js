@@ -26,17 +26,35 @@ export function inventoryRouter({ inventory, inventoryRepo, requireControl, even
 
   // "Recommended to remove": orphaned packages, failed/inactive services,
   // stopped containers, large-and-old packages — each with a reason. Served from
-  // a stored snapshot; pass ?refresh=1 to re-analyze and persist.
+  // a stored snapshot; pass ?refresh=1 to re-analyze and persist. With
+  // ?cachedOnly=1 and no snapshot yet it answers { none: true } at once, so the
+  // page can stream the first analysis instead of waiting on this request.
   r.get('/recommendations', async (req, res) => {
     try {
       if (req.query.refresh !== '1') {
         const cached = inventoryRepo.getRecommendations();
         if (cached) return res.json({ ...cached, cached: true });
+        if (req.query.cachedOnly === '1') return res.json({ none: true });
       }
       const fresh = await inventory.recommendations();
       inventoryRepo.saveRecommendations(fresh);
       res.json({ ...fresh, cached: false });
     } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Fresh analysis, streamed (SSE): `check` as each source returns, then
+  // `done` with the result (also saved as the new snapshot).
+  r.get('/recommendations/stream', async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    try {
+      const fresh = await inventory.recommendations({ onCheck: (id) => send('check', { id }) });
+      inventoryRepo.saveRecommendations(fresh);
+      send('done', { ...fresh, cached: false });
+    } catch (err) { send('error', { message: err.message }); }
+    res.end();
   });
 
   // Preview a package removal (simulate; shows full cascade + protections).

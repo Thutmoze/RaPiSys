@@ -5821,7 +5821,7 @@ pageRenderers.inventory = (() => {
   // Reload whichever view is active after an action.
   function reloadActive(host) {
     loadSummary(host);
-    if (kind === 'cleanup') { recData = null; loadRecommendations(host, { refresh: true }); }
+    if (kind === 'cleanup') loadRecommendations(host, { refresh: true });
     else if (kind === 'history') loadActivityHistory(host);
     else loadRows(host);
   }
@@ -5837,33 +5837,78 @@ pageRenderers.inventory = (() => {
   let recFilter = 'all';        // 'all' | reason key
   let recSelected = new Set();   // `${kind}:${name}`
   let recData = null;            // last loaded snapshot
+  let recBusy = null;            // { first, done:Set } while an analysis streams
+  let recES = null;
 
+  // Every visit shows the saved snapshot at once. A fresh analysis (first run,
+  // Re-analyze, or after an action) streams in over it: the snapshot stays on
+  // screen, dimmed, under a box that ticks off each check as it returns.
   async function loadRecommendations(host, { refresh = false } = {}) {
     const tbl = $('[data-inv=table]', host);
     const pager = $('[data-inv=pager]', host);
     if (pager) pager.innerHTML = '';
-    // show an animated indeterminate progress bar while we wait (analysis runs
-    // server-side; on first run / re-analyze it can take a few seconds).
-    if (tbl && (!recData || refresh)) {
-      tbl.innerHTML = `
-        <div class="rec-loading">
-          <div class="rec-loading-head"><span class="up-spinner"></span><span>${refresh ? 'Re-analyzing installed software…' : 'Analyzing installed software…'}</span></div>
-          <div class="rec-progress"><div class="rec-progress-bar"></div></div>
-          <p class="up-sec-hint" style="margin-top:8px">Checking for orphaned packages, failed/inactive services and stopped containers.</p>
-        </div>`;
+    if (!refresh) {
+      let snap;
+      try { snap = await api('/inventory/recommendations?cachedOnly=1'); }
+      catch (e) { if (tbl) tbl.innerHTML = `<p class="sess-empty">Could not analyze: ${esc(e.message)}</p>`; return; }
+      if (kind !== 'cleanup') return;
+      if (!snap.none) { recData = snap; recSelected = new Set(); renderRecommendations(host); return; }
+      recData = null;   // never analyzed on this node
     }
-    try { recData = await api(`/inventory/recommendations${refresh ? '?refresh=1' : ''}`); }
-    catch (e) { if (tbl) tbl.innerHTML = `<p class="sess-empty">Could not analyze: ${esc(e.message)}</p>`; return; }
-    recSelected = new Set();   // selection resets on (re)load
-    renderRecommendations(host);
+    analyzeStreamed(host);
+  }
+
+  const REC_CHECKS = [['packages', 'Installed packages'], ['services', 'Services'], ['containers', 'Containers'], ['orphans', 'Orphaned packages (apt simulation)']];
+  function recBoxHtml() {
+    const spin = '<span class="up-spinner"></span>';
+    return `<div class="ld-status">${spin}<span>${recBusy.first ? 'Analyzing installed software' : 'Re-analyzing installed software'}</span><span class="ld-count">${recBusy.done.size} of ${REC_CHECKS.length} checks</span></div>
+      <div class="ld-strip"><div class="rec-progress"><div class="rec-progress-bar"></div></div></div>
+      <div class="ld-checks">${REC_CHECKS.map(([id, label]) => recBusy.done.has(id)
+        ? `<span class="ld-check done">${CHECK_ICON}${label}</span>` : `<span class="ld-check">${spin}${label}</span>`).join('')}</div>`;
+  }
+
+  function analyzeStreamed(host) {
+    recES?.close();
+    recBusy = { first: !recData, done: new Set() };
+    if (kind === 'cleanup') renderRecommendations(host);
+    let heard = false;
+    const es = new EventSource('/api/inventory/recommendations/stream');
+    recES = es;
+    const live = () => recES === es && document.body.contains(host);
+    const settle = (data) => {
+      recBusy = null; if (data) { recData = data; recSelected = new Set(); }
+      if (kind === 'cleanup') renderRecommendations(host);
+    };
+    es.addEventListener('check', (e) => {
+      heard = true; if (!live()) return;
+      recBusy.done.add(JSON.parse(e.data).id);
+      const box = $('[data-rec=box]', host); if (box) box.innerHTML = recBoxHtml();
+    });
+    es.addEventListener('done', (e) => { es.close(); if (!live()) return; recES = null; settle(JSON.parse(e.data)); });
+    es.addEventListener('error', async (e) => {
+      es.close(); if (recES !== es) return;
+      recES = null;
+      let msg = e.data ? JSON.parse(e.data).message : '';
+      if (!heard && !msg) {   // node does not stream (an older peer): plain request
+        try { const data = await api('/inventory/recommendations?refresh=1'); if (document.body.contains(host)) settle(data); return; }
+        catch (err) { msg = err.message; }
+      }
+      if (!document.body.contains(host)) return;
+      if (recData) { settle(null); toast('error', 'Inventory', msg || 'Analysis interrupted'); return; }
+      recBusy = null;
+      const tbl = $('[data-inv=table]', host);
+      if (tbl && kind === 'cleanup') tbl.innerHTML = `<p class="sess-empty">Could not analyze: ${esc(msg || 'connection lost')}</p>`;
+    });
   }
 
   function renderRecommendations(host) {
     const tbl = $('[data-inv=table]', host);
-    if (!tbl || !recData) return;
+    if (!tbl) return;
+    const box = recBusy ? `<div class="ld-box" data-rec="box">${recBoxHtml()}</div>` : '';
+    if (!recData) { tbl.innerHTML = box; return; }
     const all = recData.recommendations || [];
     if (!all.length) {
-      tbl.innerHTML = '<p class="sess-empty">Nothing to recommend — no orphaned packages, failed services, or stopped containers found.</p>';
+      tbl.innerHTML = `${box}<p class="sess-empty">Nothing to recommend — no orphaned packages, failed services, or stopped containers found.</p>`;
       return;
     }
     // counts per reason for the filter capsules
@@ -5888,7 +5933,9 @@ pageRenderers.inventory = (() => {
       return `<button class="inv-act inv-act-danger" data-rec-act="ctr" data-name="${esc(r.name)}" title="Remove container ${esc(r.name)}">${trash}</button>`;
     };
 
-    const age = recData.generatedAt ? `analyzed ${rapisysFmtTime(recData.generatedAt)}` : '';
+    const age = !recData.generatedAt ? ''
+      : recBusy ? `Showing the snapshot analyzed ${rapisysFmtTime(recData.generatedAt)} until the new one is ready`
+        : `analyzed ${rapisysFmtTime(recData.generatedAt)}`;
     const KIND_TITLE = { package: 'Packages', service: 'Services', container: 'Containers' };
     const groups = {};
     shown.forEach((r) => { (groups[r.kind] || (groups[r.kind] = [])).push(r); });
@@ -5931,25 +5978,25 @@ pageRenderers.inventory = (() => {
       </table></div>`;
     }).join('');
 
-    tbl.innerHTML = `
+    tbl.innerHTML = `${box}
       <div class="rec-toolbar">
         <div class="rec-filters">
           ${REASONS.map(([k, label, n]) => `<button class="rec-fchip ${recFilter === k ? 'active' : ''}" data-rec-filter="${k}">${label} <b>${n}</b></button>`).join('')}
         </div>
         <div class="rec-bulk">
           <span class="rec-age">${age}</span>
-          <button class="net-toggle" data-rec="reanalyze">↻ Re-analyze</button>
+          <button class="net-toggle" data-rec="reanalyze" ${recBusy ? 'disabled' : ''}>↻ Re-analyze</button>
           <button class="set-btn set-btn-danger" data-rec="removesel" disabled>Remove selected <span data-rec="selcount">(0)</span></button>
         </div>
       </div>
       <p class="up-sec-hint">Observations, not certainties — RaPiSys can't judge intent. "Orphaned"/"Stopped" are generally safe; "Failed"/"Inactive"/"Large &amp; old" deserve a look. Each removal still confirms and shows the dependency cascade.</p>
-      ${sections || '<p class="sess-empty">No items match this filter.</p>'}`;
+      <div class="${recBusy ? 'ld-dim' : ''}">${sections || '<p class="sess-empty">No items match this filter.</p>'}</div>`;
 
     // filter capsules
     host.querySelectorAll('[data-rec-filter]').forEach((b) => b.onclick = () => { recFilter = b.dataset.recFilter; renderRecommendations(host); });
     // re-analyze (force fresh)
     const reBtn = $('[data-rec=reanalyze]', host);
-    if (reBtn) reBtn.onclick = async () => { reBtn.textContent = 'Analyzing…'; reBtn.disabled = true; recData = null; await loadRecommendations(host, { refresh: true }); };
+    if (reBtn) reBtn.onclick = () => loadRecommendations(host, { refresh: true });
     // row checkboxes
     const updateSelCount = () => {
       const n = recSelected.size;
@@ -6014,7 +6061,7 @@ pageRenderers.inventory = (() => {
       ok: failed === 0,
       message: `${done} removed${failed ? `, ${failed} failed/skipped` : ''}.`,
       detail: failures.length ? `<span class="inv-dim">Skipped/failed:</span><br><span class="inv-cascade">${failures.map(esc).join('<br>')}</span>` : null,
-      onClose: () => { loadSummary(host); recData = null; loadRecommendations(host, { refresh: true }); },
+      onClose: () => { loadSummary(host); loadRecommendations(host, { refresh: true }); },
     });
   }
 
@@ -6248,7 +6295,7 @@ pageRenderers.inventory = (() => {
       };
       loadSummary(host); loadRows(host);
     },
-    unmount() { clearTimeout(searchTimer); },
+    unmount() { clearTimeout(searchTimer); recES?.close(); recES = null; recBusy = null; },
   };
 })();
 
@@ -6273,6 +6320,18 @@ pageRenderers.disk = (() => {
   let selected = new Set();
   let journalTargetMB = 200;
   let schedule = null;
+  // Scan state. The last saved scan shows at once; a fresh one streams in
+  // over it. rowState: id -> 'pending' (old value, re-checking), 'fresh'
+  // (updated this scan) or 'skel' (first scan ever, nothing to show yet).
+  let scanning = false, scanStep = null, scannedAt = null, scanES = null;
+  const rowState = new Map();
+  // Scan order, for placeholder rows on a first scan (mirrors the agent's DISK_SCAN_STEPS).
+  const SCAN_STEPS = [['apt-cache', 'APT package cache'], ['journal', 'Systemd journal'], ['logs-rotated', 'Rotated & compressed logs'],
+    ['tmp-stale', 'Stale temp files'], ['apt-autoremove', 'Orphaned packages'], ['docker-prune', 'Docker dangling & build cache'],
+    ['crash-dumps', 'Crash & core dumps'], ['user-cache', 'Trash & thumbnail cache'], ['user-old-files', 'Old user files']];
+  const SPIN = '<span class="up-spinner"></span>';
+  const ago = (ts) => { const m = Math.round((Date.now() - ts) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : rapisysFmtTime(ts, { dateOnly: true }); };
 
   // ---- modal shell (mirrors the app's wizard/ts-modal dialog) ----
   function openModal(title, innerHtml, onClose) {
@@ -6437,25 +6496,62 @@ pageRenderers.disk = (() => {
   // ---- render pieces ----
   function renderUsage(host, u) {
     const fs = (u?.filesystems || [])[0];
-    const wrap = $('[data-disk=usage]', host); if (!wrap || !fs) return;
+    const wrap = $('[data-disk=usage]', host); if (!wrap) return;
+    if (!fs) {   // still loading (or unreadable): a placeholder meter, never an empty card
+      wrap.innerHTML = '<div class="dk-meter"><div class="dk-lab"><span class="ld-skel"></span><span class="ld-skel ld-skel-sm"></span></div><div class="dk-bar"></div></div>';
+      return;
+    }
     const usedPct = fs.size ? Math.min(100, (fs.used / fs.size) * 100) : 0;
     wrap.innerHTML = `
       <div class="dk-meter"><div class="dk-lab"><span>Root filesystem (${esc(fs.fstype || fs.source || '/')})</span><span><b>${fmtB(fs.avail)}</b> free of ${fmtB(fs.size)}</span></div>
         <div class="dk-bar"><i style="width:${usedPct.toFixed(1)}%"></i></div>
-        <div class="dk-legend"><span><i class="dk-dot dk-dot-u"></i>Used ${fmtB(fs.used)}</span><span><i class="dk-dot dk-dot-f"></i>Free ${fmtB(fs.avail)}</span><span><i class="dk-dot dk-dot-r"></i>Reclaimable ${fmtB(reclaimable())}</span></div>
+        <div class="dk-legend"><span><i class="dk-dot dk-dot-u"></i>Used ${fmtB(fs.used)}</span><span><i class="dk-dot dk-dot-f"></i>Free ${fmtB(fs.avail)}</span><span><i class="dk-dot dk-dot-r"></i>Reclaimable ${catsData.length ? fmtB(reclaimable()) : 'scanning'}</span></div>
       </div>`;
   }
 
   function renderReclaim(host) {
     const r = $('[data-disk=reclaim]', host); if (!r) return;
     const n = catsData.filter((c) => selected.has(c.id)).length;
-    r.innerHTML = `<div class="dk-big">${fmtB(reclaimable())}</div><div class="dk-cap">reclaimable across ${n} selected categories</div>`;
+    const none = !catsData.length;
+    r.innerHTML = `${none ? '<span class="ld-skel ld-skel-big"></span>' : `<div class="dk-big">${fmtB(reclaimable())}</div>`}
+      <div class="dk-cap">${none ? 'reclaimable from the selected categories' : `reclaimable across ${n} selected categories`}</div>
+      ${scanning ? `<div class="ld-updating">${SPIN}<span>${none ? 'Scanning for the first time' : 'Updating as the scan runs'}</span></div>` : ''}`;
+  }
+
+  // Scan status under the card header, the progress strip, and the buttons
+  // that need current sizes (disabled until the scan finishes).
+  function renderScanState(host) {
+    const st = $('[data-disk=status]', host);
+    if (st) {
+      st.innerHTML = scanning
+        ? `${SPIN}<span>${scanStep ? `Scanning <b>${esc(scanStep.name)}</b>` : 'Starting scan'}</span>${scanStep ? `<span class="ld-count">${scanStep.index + 1} of ${scanStep.total}</span>` : ''}`
+        : scannedAt ? `<span class="rec-age">Scanned ${esc(ago(scannedAt))}</span>` : '';
+    }
+    const strip = $('[data-disk=strip]', host); if (strip) strip.hidden = !scanning;
+    ['rescan', 'scan', 'clean', 'purge'].forEach((k) => { const b = $(`[data-disk=${k}]`, host); if (b) b.disabled = scanning; });
+    const hint = $('[data-disk=clean-hint]', host);
+    if (hint) hint.textContent = scanning ? 'Available when the scan finishes, so sizes are current' : '';
   }
 
   function renderCats(host) {
     const wrap = $('[data-disk=cats]', host); if (!wrap) return;
+    const rowTag = (id) => {
+      const st = rowState.get(id);
+      if (st === 'pending') return `<div class="ld-rowstate">${SPIN}<span>checking</span></div>`;
+      if (st === 'fresh' && scanning) return `<div class="ld-rowstate ld-ok">${CHECK_ICON}<span>updated</span></div>`;
+      return '';
+    };
+    // First scan ever: placeholder rows for the categories not measured yet.
+    const skel = SCAN_STEPS.filter(([id]) => rowState.get(id) === 'skel' && !catsData.some((c) => c.id === id))
+      .map(([, name]) => `
+      <div class="dk-cat ld-skelrow">
+        <span class="dk-chk" aria-hidden="true"></span>
+        <div><div class="dk-name">${esc(name)}</div><div class="dk-why2"><span class="ld-skel ld-skel-line"></span></div></div>
+        <div class="dk-size"><span class="ld-skel"></span><div class="ld-rowstate">${SPIN}<span>checking</span></div></div>
+      </div>`).join('');
+    if (!catsData.length && !skel) { wrap.innerHTML = scanning ? '' : '<p class="dk-why2">Nothing to scan. The host agent returned no categories.</p>'; return; }
     wrap.innerHTML = catsData.map((c, i) => `
-      <div class="dk-cat ${selected.has(c.id) ? 'on' : ''} ${c.blocked ? 'blocked' : ''}" data-i="${i}">
+      <div class="dk-cat ${selected.has(c.id) ? 'on' : ''} ${c.blocked ? 'blocked' : ''} ${rowState.get(c.id) === 'pending' ? 'ld-pending' : ''}" data-i="${i}">
         <button class="dk-chk" data-dk-tog="${c.id}" aria-label="toggle" ${c.blocked ? 'disabled title="Blocked"' : ''}>${CHECK_ICON}</button>
         <div>
           <div class="dk-name">${esc(c.name)} <span class="dk-path">${esc(c.path)}</span></div>
@@ -6464,8 +6560,8 @@ pageRenderers.disk = (() => {
           <div class="dk-meta"><span class="dk-safe ${c.blocked ? 'blocked' : c.caution ? 'caution' : ''}">${c.blocked ? LOCK_ICON : CHECK_ICON}${esc(c.safe || 'Safe')}</span>
             <button class="dk-details" data-dk-det="${i}">More details ›</button></div>
         </div>
-        <div class="dk-size"><div class="dk-v">${fmtB(c.bytes)}</div><div class="dk-c">${esc(c.count != null ? (typeof c.count === 'number' ? `${c.count} item${c.count === 1 ? '' : 's'}` : c.count) : '')}</div></div>
-      </div>`).join('') || '<p class="dk-why2">Nothing to scan — the host agent returned no categories.</p>';
+        <div class="dk-size"><div class="dk-v">${fmtB(c.bytes)}</div><div class="dk-c">${esc(c.count != null ? (typeof c.count === 'number' ? `${c.count} item${c.count === 1 ? '' : 's'}` : c.count) : '')}</div>${rowTag(c.id)}</div>
+      </div>`).join('') + skel;
     wrap.querySelectorAll('[data-dk-tog]').forEach((b) => b.onclick = () => {
       if (b.disabled) return;
       const id = b.dataset.dkTog; selected.has(id) ? selected.delete(id) : selected.add(id);
@@ -6490,21 +6586,92 @@ pageRenderers.disk = (() => {
   }
 
   let lastUsage = null;
-  async function refresh() {
-    const host = document.querySelector('.rapisys-page'); if (!host) return;
-    try {
-      const [u, scan] = await Promise.all([api('/disk/usage').catch(() => null), api(`/disk/scan?journalTargetMB=${journalTargetMB}`)]);
-      lastUsage = u;
-      catsData = scan.categories || [];
-      selected = new Set(catsData.filter((c) => c.default && !c.blocked).map((c) => c.id));
-      renderUsage(host, u); renderReclaim(host); renderCats(host); renderSchedule();
-    } catch (e) { toast('error', 'Disk', e.message); }
+  const page = () => document.querySelector('.rapisys-page');
+  function renderAll(host) { renderUsage(host, lastUsage); renderReclaim(host); renderCats(host); renderScanState(host); }
+
+  // Adopt a category result. A category seen for the first time takes its
+  // default selection; the user's own toggles survive a re-scan.
+  function adoptCategory(c, known) {
+    const i = catsData.findIndex((x) => x.id === c.id);
+    if (i >= 0) catsData[i] = c;
+    else {   // keep the agent's scan order
+      const order = (id) => SCAN_STEPS.findIndex(([s]) => s === id);
+      const at = catsData.findIndex((x) => order(x.id) > order(c.id));
+      at < 0 ? catsData.push(c) : catsData.splice(at, 0, c);
+    }
+    if (!known.has(c.id) && c.default) selected.add(c.id);
+    if (c.blocked) selected.delete(c.id);
   }
 
-  async function rescanOnly() {
-    const big = document.querySelector('[data-disk=reclaim] .dk-big'); if (big) big.textContent = 'scanning…';
-    await refresh();
+  function finishScan(host, scan, known) {
+    for (const c of scan.categories || []) adoptCategory(c, known);
+    const ids = new Set((scan.categories || []).map((c) => c.id));
+    catsData = catsData.filter((c) => ids.has(c.id));   // e.g. Docker no longer installed
+    selected = new Set([...selected].filter((id) => ids.has(id)));
+    scannedAt = scan.scannedAt || Date.now();
+    scanning = false; scanStep = null;
+    renderAll(host); renderSchedule();
+    // let the "updated" ticks show briefly, then settle
+    setTimeout(() => { if (!scanning) { rowState.clear(); const h = page(); if (h) renderCats(h); } }, 1500);
   }
+
+  // Fresh scan, streamed over whatever is on screen. Falls back to the plain
+  // request when the node does not stream (an older peer).
+  function startScan() {
+    const host = page(); if (!host) return;
+    scanES?.close();
+    scanning = true; scanStep = null;
+    const known = new Set(catsData.map((c) => c.id));
+    rowState.clear();
+    if (catsData.length) catsData.forEach((c) => rowState.set(c.id, 'pending'));
+    else SCAN_STEPS.forEach(([id]) => rowState.set(id, 'skel'));
+    renderAll(host);
+    let heard = false;
+    const es = new EventSource(`/api/disk/scan/stream?journalTargetMB=${journalTargetMB}`);
+    scanES = es;
+    const live = () => scanES === es && page();
+    es.addEventListener('step', (e) => {
+      heard = true; const h = live(); if (!h) return;
+      scanStep = JSON.parse(e.data); renderScanState(h);
+    });
+    es.addEventListener('category', (e) => {
+      heard = true; const h = live(); if (!h) return;
+      const c = JSON.parse(e.data);
+      adoptCategory(c, known); rowState.set(c.id, 'fresh');
+      renderUsage(h, lastUsage); renderReclaim(h); renderCats(h);
+    });
+    es.addEventListener('done', (e) => {
+      es.close(); const h = live(); if (!h) return;
+      scanES = null; finishScan(h, JSON.parse(e.data), known);
+    });
+    es.addEventListener('error', async (e) => {
+      es.close(); if (scanES !== es) return;
+      scanES = null;
+      const msg = e.data ? JSON.parse(e.data).message : '';
+      if (!heard && !msg) {   // stream not available: plain scan
+        try { const scan = await api(`/disk/scan?journalTargetMB=${journalTargetMB}`); const h = page(); if (h) finishScan(h, scan, known); return; }
+        catch (err) { toast('error', 'Disk', err.message); }
+      } else toast('error', 'Disk', msg || 'Scan interrupted');
+      scanning = false; scanStep = null; rowState.clear();
+      const h = page(); if (h) renderAll(h);
+    });
+  }
+
+  // Page load: usage and the saved scan render as soon as each arrives, then
+  // a fresh scan starts over them.
+  async function refresh() {
+    const host = page(); if (!host) return;
+    api('/disk/usage').then((u) => { lastUsage = u; const h = page(); if (h) renderUsage(h, u); }).catch(() => {});
+    const last = await api('/disk/scan/last').then((r) => r.scan).catch(() => null);
+    if (last && !catsData.length) {
+      catsData = last.categories || [];
+      selected = new Set(catsData.filter((c) => c.default && !c.blocked).map((c) => c.id));
+      scannedAt = last.scannedAt || null;
+    }
+    startScan();
+  }
+
+  const rescanOnly = () => startScan();
 
   return {
     async mount(host) {
@@ -6518,11 +6685,14 @@ pageRenderers.disk = (() => {
         <div class="card dk-card">
           <div class="card-header dk-cathead"><div class="dk-ct">${trashIconSvg()}<span class="card-title">What can be cleaned</span></div>
             <button class="set-btn set-btn-detect dk-rescan" data-disk="rescan">${DETECT_ICON}<span>Re-scan</span></button></div>
-          <div data-disk="cats"><p class="dk-why2">Scanning…</p></div>
+          <div class="ld-status" data-disk="status"></div>
+          <div class="ld-strip" data-disk="strip" hidden><div class="rec-progress"><div class="rec-progress-bar"></div></div></div>
+          <div data-disk="cats"></div>
         </div>
         <div class="dk-actions">
           <button class="set-btn set-btn-clean" data-disk="clean">${BROOM}<span>Clean Selected</span></button>
           <button class="set-btn set-btn-detect" data-disk="scan">${DETECT_ICON}<span>Scan Again</span></button>
+          <span class="rec-age" data-disk="clean-hint"></span>
           <span class="dk-spacer"></span>
           <button class="set-btn dk-danger" data-disk="purge">${TRASH_ICON}<span>Purge All</span></button>
         </div>
@@ -6537,10 +6707,16 @@ pageRenderers.disk = (() => {
       $('[data-disk=clean]', host).onclick = () => { const ids = [...selected]; if (!ids.length) return toast('error', 'Disk', 'No categories selected'); runClean(ids, { purgeAll: false }); };
       $('[data-disk=purge]', host).onclick = openPurge;
       $('[data-disk=sched-edit]', host).onclick = openSchedule;
-      try { schedule = await api('/disk/schedule'); } catch { /* */ }
+      // Draw every card at once (placeholders until data lands); nothing waits on the scan.
+      catsData = []; selected = new Set(); scannedAt = null; scanning = false; rowState.clear();
+      renderAll(host);
+      api('/disk/schedule').then((s) => { schedule = s; renderSchedule(); }).catch(() => {});
       await refresh();
     },
-    unmount() { document.querySelectorAll('.dk-modal-overlay').forEach((m) => m.remove()); },
+    unmount() {
+      scanES?.close(); scanES = null; scanning = false;
+      document.querySelectorAll('.dk-modal-overlay').forEach((m) => m.remove());
+    },
   };
 
   // small inline glyph helpers (stroke icons, app style)

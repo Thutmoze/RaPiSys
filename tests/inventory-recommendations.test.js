@@ -40,6 +40,16 @@ describe('inventory recommendations', () => {
     expect(counts.safe).toBeGreaterThanOrEqual(1);
   });
 
+  it('reports each source to onCheck as it returns, failed ones included', async () => {
+    agentResponses['inventory.packages'] = { packages: [] };
+    agentResponses['inventory.services'] = { services: [] };
+    agentResponses['inventory.autoremovable'] = { packages: [] };
+    const seen = [];
+    const inv = createInventoryCollector();
+    await inv.recommendations({ onCheck: (id) => seen.push(id) });
+    expect(seen.sort()).toEqual(['containers', 'orphans', 'packages', 'services']);
+  });
+
   it('flags failed and inactive services for review', async () => {
     agentResponses['inventory.packages'] = { packages: [] };
     agentResponses['inventory.autoremovable'] = { packages: [] };

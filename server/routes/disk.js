@@ -32,7 +32,7 @@ function sanitizeSchedule(b = {}) {
   };
 }
 
-export function diskRouter({ disk, requireControl, loadSettings, saveSettings, withFileLock, events }) {
+export function diskRouter({ disk, diskRepo, requireControl, loadSettings, saveSettings, withFileLock, events }) {
   const r = express.Router();
 
   // Filesystem usage (df) for the storage card.
@@ -42,10 +42,35 @@ export function diskRouter({ disk, requireControl, loadSettings, saveSettings, w
   });
 
   // Read-only cleanup scan. journalTargetMB tunes the journal category estimate.
+  // Every finished scan is saved so the page can show it instantly next time.
   r.get('/scan', async (req, res) => {
     const target = Math.min(2000, Math.max(50, Number(req.query.journalTargetMB) || 200));
-    try { res.json(await disk.scan(target)); }
+    try { const scan = await disk.scan(target); diskRepo?.saveScan(scan); res.json(scan); }
     catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
+  // The last saved scan ({ scan: null } before the first one).
+  r.get('/scan/last', (req, res) => {
+    res.json({ scan: diskRepo?.lastScan() || null });
+  });
+
+  // The same scan, streamed (SSE): `step` as each category starts, `category`
+  // once it is measured, then `done` with the full result (also saved).
+  r.get('/scan/stream', async (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.flushHeaders?.();
+    const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    const target = Math.min(2000, Math.max(50, Number(req.query.journalTargetMB) || 200));
+    try {
+      const scan = await disk.scan(target, (msg) => {
+        if (msg?.step) send('step', msg.step);
+        else if (msg?.category) send('category', msg.category);
+      });
+      diskRepo?.saveScan(scan);
+      send('done', scan);
+    } catch (err) { send('error', { message: err.message }); }
+    res.end();
   });
 
   // Cleanup, streamed (SSE — EventSource is GET-only). categories=comma list;

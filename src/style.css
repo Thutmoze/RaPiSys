@@ -7008,6 +7008,50 @@ body.ultra .dk-pskip{font-size:11px;margin-bottom:9px;line-height:1.45}
 body.ultra .dk-warnpill{font-size:11.5px}
 body.ultra .dk-warnpill svg{width:13px;height:13px}
 
+/* ---- Instant load: last result on screen while a fresh scan/analysis streams ---- */
+.ld-status { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-secondary); min-height: 20px; }
+.ld-status b { color: var(--text-primary); font-weight: 600; }
+.ld-status .rec-age { font-size: 12px; }
+.ld-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.dk-cathead + .ld-status { margin-top: -12px; }
+.ld-strip { margin: 12px 0 4px; }
+.ld-strip[hidden] { display: none; }
+.dk-cat.ld-pending .dk-v, .dk-cat.ld-pending .dk-c { opacity: 0.45; }
+.ld-rowstate { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+.ld-rowstate .up-spinner { width: 11px; height: 11px; border-width: 1.5px; }
+.ld-ok { color: #34d399; }
+.ld-ok svg { width: 12px; height: 12px; }
+.ld-skel { display: inline-block; height: 12px; width: 64px; border-radius: 6px; vertical-align: middle;
+  background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.12), rgba(255,255,255,0.05));
+  background-size: 200% 100%; animation: ldSkel 1.4s linear infinite; }
+.ld-skel-sm { width: 40px; height: 10px; }
+.ld-skel-big { width: 150px; height: 30px; border-radius: 8px; }
+.ld-skel-line { width: min(320px, 70%); height: 10px; }
+@keyframes ldSkel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.ld-skelrow .dk-chk { cursor: default; opacity: 0.5; }
+.ld-updating { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+.ld-box { padding: 14px 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); margin-bottom: 12px; }
+.ld-box .ld-strip { margin: 12px 0 0; }
+.ld-checks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.ld-check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border-color); color: var(--text-muted); }
+.ld-check .up-spinner { width: 10px; height: 10px; border-width: 1.5px; }
+.ld-check.done { color: #34d399; border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.06); }
+.ld-check.done svg { width: 11px; height: 11px; }
+.ld-dim { opacity: 0.5; pointer-events: none; transition: opacity 0.25s; }
+body.compact .ld-status { font-size: 11.5px; }
+body.compact .ld-rowstate { font-size: 10.5px; }
+body.compact .ld-check { font-size: 11px; padding: 2px 9px; }
+body.compact .ld-box { padding: 11px 13px; }
+body.compact .ld-skel-big { height: 26px; }
+body.ultra .ld-status { font-size: 11px; gap: 7px; }
+body.ultra .ld-rowstate { font-size: 10px; margin-top: 3px; }
+body.ultra .ld-check { font-size: 10.5px; padding: 1px 8px; }
+body.ultra .ld-box { padding: 9px 11px; margin-bottom: 8px; }
+body.ultra .ld-strip { margin: 8px 0 2px; }
+body.ultra .ld-skel-big { height: 22px; width: 120px; }
+@media (prefers-reduced-motion: reduce) { .ld-skel { animation: none; } }
+
 .dk-page{max-width:1120px}
 
 /* ============================================================
