@@ -171,7 +171,7 @@ export function createInventoryCollector() {
     // init) even if apt lists them as autoremovable — removing the running or a
     // fallback kernel can make the Pi unbootable. The agent guard also refuses
     // these, but they shouldn't appear as suggestions at all.
-    const PROTECTED_RE = /^(linux-image|linux-headers|linux-kbuild|raspberrypi-kernel|raspberrypi-bootloader|rpi-eeprom|raspi-firmware|firmware-|systemd$|udev$|grub|initramfs-tools|raspberrypi-sys-mods|raspberrypi-ui-mods)/;
+    const PROTECTED_RE = /^(linux-image|linux-headers|linux-kbuild|linux-base-|raspberrypi-kernel|raspberrypi-bootloader|rpi-eeprom|raspi-firmware|firmware-|systemd$|udev$|grub|initramfs-tools|raspberrypi-sys-mods|raspberrypi-ui-mods)/;
     const isProtected = (n) => PROTECTED_RE.test(n);
     const orphanSet = new Set(orphans.filter((n) => !isProtected(n)));
     const safeOrphans = [...orphanSet];

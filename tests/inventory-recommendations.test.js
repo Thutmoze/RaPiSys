@@ -74,6 +74,18 @@ describe('inventory recommendations', () => {
     expect(names).toContain('oldlib');                                  // normal orphan still suggested
   });
 
+  it('hides a kernel linux-base package, which only goes with its image', async () => {
+    agentResponses['inventory.packages'] = { packages: [] };
+    agentResponses['inventory.services'] = { services: [] };
+    agentResponses['inventory.autoremovable'] = { packages: [
+      'linux-base-6.18.34+rpt-rpi-2712', 'linux-image-6.18.34+rpt-rpi-2712', 'libaml0t64'] };
+
+    const inv = createInventoryCollector();
+    const names = (await inv.recommendations()).recommendations.map((r) => r.name);
+    expect(names).not.toContain('linux-base-6.18.34+rpt-rpi-2712');
+    expect(names).toContain('libaml0t64');
+  });
+
   it('does not recommend essential/system packages even if large and old', async () => {
     const old = Date.now() - 400 * 86400e3;
     agentResponses['inventory.packages'] = { packages: [
