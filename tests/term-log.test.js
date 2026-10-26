@@ -78,6 +78,20 @@ describe('terminal line colouring', () => {
     expect(termLineHtml('<script>x</script>')).toBe('&lt;script&gt;x&lt;/script&gt;');
   });
 
+  it('colours Disk clean result lines from the agent', () => {
+    expect(termLineHtml('✓ apt-cache done')).toBe('<span class="t-green">✓ apt-cache done</span>');
+    expect(termLineHtml('✗ docker-prune: docker exited 1')).toContain('t-red');
+    expect(termLineHtml('Reclaimed ~512 MB.')).toContain('t-cyan t-b');
+    expect(termLineHtml('  removing: linux-image-6.18.34+rpt-rpi-2712, linux-base-6.18.34+rpt-rpi-v8')).toContain('t-dim');
+    expect(termLineHtml('  nothing to remove')).toContain('t-dim');
+  });
+
+  it('keeps package-list members ahead of the Disk clean detail rule', () => {
+    const st = {};
+    termLineHtml('The following packages will be REMOVED:', st);
+    expect(termLineHtml('  linux-image-6.18.34+rpt-rpi-2712 linux-kbuild-6.18.34+rpt', st)).toContain('t-pkg-rm');
+  });
+
   it('splits a Get: line into its parts', () => {
     const h = termLineHtml('Get:1 https://repos.influxdata.com/debian stable/main arm64 influxdb arm64 1.13.1-1 [47.2 MB]');
     expect(h).toContain('<span class="t-cyan">Get:1</span>');

@@ -6750,6 +6750,12 @@ body.ultra .up-term .t-meter { flex-basis: 70px; height: 3px; }
 /* RaPiSys step lines ("Pulling latest image…"): section markers in the log. */
 .up-term .t-step { color: var(--accent-cyan); font-weight: 600; }
 .up-term .t-step::before { content: '\203A  '; color: rgba(0,212,255,0.6); }
+/* Batch steps after the first (Inventory remove, Disk clean) get a little air
+   above their marker, like separate commands in a shell. */
+.up-term .t-step-gap { margin-top: 8px; }
+body.compact .up-term .t-step-gap { margin-top: 6px; }
+body.ultra .up-term .t-step-gap { margin-top: 4px; }
+.dk-term .up-term { margin-top: 0; }
 /* Docker pull: one live row per image layer, updated in place, collapsed to a
    "Pulled" summary when the image is in (click it to see the layers again). */
 .up-term .t-layers { margin: 2px 0 2px 2px; padding-left: 10px; border-left: 2px solid rgba(0,212,255,0.25); }
@@ -6961,7 +6967,6 @@ body.rapisys-popout .rt-vnc { height: calc(100vh - 70px); }
 .dk-more{padding:9px 13px;font-size:12px;color:var(--text-tertiary,#6b7280);background:rgba(255,255,255,.02)}
 .dk-mtot{display:flex;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);font-size:14px}.dk-mtot b{font-size:16px}
 .dk-mact{margin-top:18px;justify-content:flex-end}
-.dk-log{background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#cbd5e1;max-height:300px;overflow:auto;white-space:pre-wrap;margin:0}
 .dk-okpill{display:inline-flex;align-items:center;gap:6px;color:#34d399;font-size:13px;font-weight:600;margin-right:auto}
 .dk-okpill svg{width:15px;height:15px}
 .dk-purge-in{width:100%;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.18);border-radius:8px;color:var(--text-primary,#e7e9ee);font:inherit;font-size:14px;padding:10px 12px;letter-spacing:.1em}
@@ -6992,8 +6997,6 @@ body.rapisys-popout .rt-vnc { height: calc(100vh - 70px); }
 /* clean result with failures */
 .dk-warnpill{display:inline-flex;align-items:center;gap:6px;color:#fbbf24;font-size:13px;font-weight:600;margin-right:auto}
 .dk-warnpill svg{width:15px;height:15px}
-.dk-log .dk-lfail{color:#fca5a5}
-.dk-log .dk-lok{color:#34d399}
 body.compact .dk-blockmsg{font-size:11.5px;margin-top:6px}
 body.compact .dk-prow{padding:7px 11px;font-size:12px}
 body.compact .dk-pskip{font-size:11.5px;margin-bottom:11px}

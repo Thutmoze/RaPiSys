@@ -5992,7 +5992,7 @@ pageRenderers.inventory = (() => {
       const it = items[i];
       const verb = it.kind === 'package' ? 'Uninstalling' : it.kind === 'service' ? 'Stopping' : 'Removing';
       prog.setStatus(`(${i + 1}/${items.length}) ${verb} ${it.name}…`);
-      prog.appendLog(`\n=== (${i + 1}/${items.length}) ${verb} ${it.name} ===`);
+      prog.step(`(${i + 1}/${items.length}) ${verb} ${it.name}`, it.kind === 'package' ? `apt-get remove -y ${it.name}` : null);
       try {
         if (it.kind === 'package') {
           await new Promise((resolve, reject) => {
@@ -6002,13 +6002,13 @@ pageRenderers.inventory = (() => {
           });
         } else if (it.kind === 'service') {
           await api('/inventory/service/control', { method: 'POST', body: { name: it.name, action: 'stop' } });
-          prog.appendLog(`stopped ${it.name}`);
+          prog.note(`✓ stopped ${it.name}`, 'ok');
         } else {
           await api('/inventory/container/remove', { method: 'POST', body: { name: it.name } });
-          prog.appendLog(`removed container ${it.name}`);
+          prog.note(`✓ removed container ${it.name}`, 'ok');
         }
         done++;
-      } catch (e) { failed++; failures.push(`${it.name}: ${e.message}`); prog.appendLog(`! ${it.name}: ${e.message}`); }
+      } catch (e) { failed++; failures.push(`${it.name}: ${e.message}`); prog.note(`✗ ${it.name}: ${e.message}`, 'err'); }
     }
     prog.finish({
       ok: failed === 0,
@@ -6019,9 +6019,11 @@ pageRenderers.inventory = (() => {
   }
 
   // A progress overlay for removal/stop operations: spinner + animated bar +
-  // status, an expandable live log, then a completion state with a persistent
-  // close button. Returns { setStatus, appendLog, finish }.
-  function removalOverlay(title) {
+  // status, an expandable shell-style log (term-log.js, same as Updates), then
+  // a completion state with a persistent close button. `cmd` is the prompt of
+  // a single-command run; a batch calls step() per item instead.
+  // Returns { setStatus, appendLog, step, note, finish }.
+  function removalOverlay(title, cmd = '') {
     const ov = el('div', 'wizard-overlay up-install-overlay');
     ov.innerHTML = `
       <div class="up-install-card" role="dialog" aria-modal="true">
@@ -6032,13 +6034,15 @@ pageRenderers.inventory = (() => {
         <div class="up-install-bar"><div class="up-install-bar-fill" data-rmo="bar"></div></div>
         <div class="up-install-status" data-rmo="status">Starting…</div>
         <button class="up-install-toggle" data-rmo="toggle">▸ Show details</button>
-        <pre class="up-log up-install-log" data-rmo="log" hidden></pre>
+        <div class="up-install-log" data-rmo="log" hidden></div>
         <div class="up-install-result" data-rmo="result" hidden></div>
       </div>`;
     document.body.appendChild(ov);
     const q = (s) => ov.querySelector(`[data-rmo=${s}]`);
     const bar = q('bar'), status = q('status'), result = q('result'), closeBtn = q('close'), spin = q('spin'), titleEl = q('title');
     const toggle = q('toggle'), logEl = q('log');
+    const term = createTermLog({ host: document.getElementById('hostname')?.textContent || currentNode()?.name || 'pi', cmd });
+    logEl.appendChild(term.el);
     let pct = 8; bar.style.width = pct + '%';
     const tick = setInterval(() => { pct = Math.min(90, pct + 4); bar.style.width = pct + '%'; }, 350);
     let finished = false, closeCb = null;
@@ -6054,13 +6058,12 @@ pageRenderers.inventory = (() => {
     ov.addEventListener('click', (e) => { if (e.target === ov && finished) close(); });
     return {
       setStatus: (t) => { status.textContent = t; },
-      appendLog: (line) => {
-        const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 4;
-        logEl.textContent += (logEl.textContent ? '\n' : '') + line;
-        if (atBottom) logEl.scrollTop = logEl.scrollHeight;
-      },
+      appendLog: (line) => term.line(line),
+      step: (text, c) => term.step(text, c),
+      note: (text, kind) => term.note(text, kind),
       finish: ({ ok, message, detail, onClose }) => {
         clearInterval(tick); finished = true; closeCb = onClose;
+        term.exit(ok ? 0 : 1);
         bar.style.width = '100%';
         bar.classList.add(ok ? 'up-install-bar-ok' : 'up-install-bar-err');
         spin.remove();
@@ -6089,7 +6092,7 @@ pageRenderers.inventory = (() => {
       + (others.length ? `<br><br>This will also remove ${others.length} dependent package(s):<br><span class="inv-cascade">${others.map(esc).join(', ')}</span>` : '<br><br>No other packages are affected.');
     if (!await rapisysConfirm(msg, { danger: true, confirmLabel: `Uninstall ${others.length ? `(${others.length + 1})` : ''}`.trim(), html: true })) return;
     // progress overlay during the apt operation (can take many seconds)
-    const prog = removalOverlay(`Uninstalling ${name}`);
+    const prog = removalOverlay(`Uninstalling ${name}`, `apt-get remove -y ${name}`);
     prog.setStatus(others.length ? `Removing ${name} and ${others.length} dependent package(s)…` : `Removing ${name}…`);
     await streamRemoval(`/inventory/package/remove/stream?name=${encodeURIComponent(name)}&confirm=${encodeURIComponent(name)}`, prog, {
       onDone: (out) => {
@@ -6134,7 +6137,7 @@ pageRenderers.inventory = (() => {
   // progress overlay used for removal.
   async function pkgInstall(host, name) {
     if (!await rapisysConfirm(`Install <b>${esc(name)}</b>?<br><br>apt will fetch it and any dependencies it needs.`, { confirmLabel: 'Install', html: true })) return;
-    const prog = removalOverlay(`Installing ${name}`);
+    const prog = removalOverlay(`Installing ${name}`, `apt-get install -y ${name}`);
     prog.setStatus(`Installing ${name}…`);
     await streamRemoval(`/inventory/package/install/stream?name=${encodeURIComponent(name)}`, prog, {
       onDone: (out) => prog.finish({ ok: out?.ok !== false, message: out?.ok === false ? 'Install failed.' : `${name} installed.`,
@@ -6321,15 +6324,13 @@ pageRenderers.disk = (() => {
   function runClean(categories, { purgeAll = false, confirm = '' } = {}) {
     const m = openModal(purgeAll ? 'Purge all' : 'Clean', `
       <p class="dk-why">${purgeAll ? 'Purging the scanned, allow-listed categories.' : 'Cleaning the selected categories.'} Output streams below.</p>
-      <pre class="dk-log" data-dk="log"></pre>
+      <div class="dk-term" data-dk="log"></div>
       <div class="set-actions dk-mact" data-dk="foot"></div>`);
-    const log = m.body.querySelector('[data-dk=log]');
+    // Shell-style log (term-log.js): the agent's "› …" lines become step markers.
+    const term = createTermLog({ host: document.getElementById('hostname')?.textContent || currentNode()?.name || 'pi' });
+    m.body.querySelector('[data-dk=log]').appendChild(term.el);
     const foot = m.body.querySelector('[data-dk=foot]');
-    const append = (t) => {
-      const line = el('span', /^✗/.test(t) ? 'dk-lfail' : /^✓/.test(t) ? 'dk-lok' : '');
-      line.textContent = (log.childNodes.length ? '\n' : '') + t;
-      log.appendChild(line); log.scrollTop = log.scrollHeight;
-    };
+    const append = (t) => term.line(t);
     const params = new URLSearchParams({ categories: categories.join(','), journalTargetMB });
     if (purgeAll) { params.set('purgeAll', '1'); params.set('confirm', confirm); }
     const es = new EventSource(`/api/disk/clean/stream?${params}`);
@@ -6339,8 +6340,9 @@ pageRenderers.disk = (() => {
       let d = {}; try { d = JSON.parse(e.data); } catch { /* */ }
       const failed = d.failed || [];
       const freed = fmtB(d.reclaimedBytes || 0);
-      if (failed.length) append(`✗ ${failed.length} of ${categories.length} categories failed: ${failed.map((f) => f.id).join(', ')}`);
-      else append(`✓ Reclaimed ${freed}.`);
+      // The agent already logged each category's result and the total; the
+      // footer pill carries the summary.
+      term.exit(failed.length ? 1 : 0);
       const pill = failed.length
         ? `<span class="dk-warnpill">${WARN_ICON}<span>${failed.length} failed · ${freed} freed</span></span>`
         : `<span class="dk-okpill">${CHECK_ICON}<span>Done · ${freed} freed</span></span>`;
@@ -6352,7 +6354,8 @@ pageRenderers.disk = (() => {
     es.addEventListener('error', (e) => {
       es.close();
       let msg = 'Cleanup failed'; try { msg = JSON.parse(e.data).message || msg; } catch { /* */ }
-      append(`✗ ${msg}`);
+      term.note(`✗ ${msg}`, 'err');
+      term.exit(1);
       foot.innerHTML = `<button class="set-btn set-btn-cancel" data-dk="cancel">${CANCEL_ICON}<span>Close</span></button>`;
       foot.querySelector('[data-dk=cancel]').onclick = m.close;
     });

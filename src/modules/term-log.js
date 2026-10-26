@@ -1,5 +1,6 @@
 /**
- * RaPiSys — shell-style log for streamed apt output (Updates install card).
+ * RaPiSys — shell-style log for streamed apt output (Updates install card,
+ * Inventory install/remove, Disk clean).
  * ===========================================================================
  * apt-get prints no colour when it is not on a tty, so colour is derived from
  * the shape of each line, mirroring what a coloured shell would show. dpkg's
@@ -75,6 +76,11 @@ export function termLineHtml(raw, st = {}) {
   if (/^\s*(Failed|Unable|Error|ERROR|Fatal|FATAL|Could not|Cannot)\b/.test(raw) || /\b(error|failed|fatal):\s/i.test(raw)) return span('t-red', raw);
   if (/^W:/.test(raw)) return span('t-orange', raw);
   if (/^N:/.test(raw)) return span('t-cyan', raw);
+  // RaPiSys's own result lines (Disk clean) and their indented details.
+  if (/^✓ /.test(raw)) return span('t-green', raw);
+  if (/^✗ /.test(raw)) return span('t-red', raw);
+  if (/^Reclaimed /.test(raw)) return span('t-cyan t-b', raw);
+  if (/^\s{2}(removing:|nothing to )/.test(raw)) return span('t-dim', raw);
   return l;
 }
 
@@ -172,8 +178,9 @@ async function copyText(txt) {
 }
 
 /**
- * Terminal panel: `el` goes in the page; line() feeds streamed output, note()
- * adds a RaPiSys message (✓ / ✗ / ↻), exit() replaces the cursor with the code.
+ * Terminal panel: `el` goes in the page; line() feeds streamed output, step()
+ * starts a batch item (marker + optional command prompt), note() adds a
+ * RaPiSys message (✓ / ✗ / ↻), exit() replaces the cursor with the code.
  */
 export function createTermLog({ host = 'pi', cmd = '', cwd = '~' } = {}) {
   const user = String(host).trim().replace(/[^\w.-]/g, '') || 'pi';
@@ -241,10 +248,24 @@ export function createTermLog({ host = 'pi', cmd = '', cwd = '~' } = {}) {
     if (ev.type === 'container') add(containerHtml(ev));
   };
 
-  if (cmd) {
-    add(`<span class="t-prompt">root@${esc(user)}</span>:<span class="t-path">${esc(cwd)}</span># <span class="t-cmd">${esc(cmd)}</span>`);
-    plain += `# ${cmd}\n`;
-  }
+  const prompt = (c) => {
+    add(`<span class="t-prompt">root@${esc(user)}</span>:<span class="t-path">${esc(cwd)}</span># <span class="t-cmd">${esc(c)}</span>`);
+    plain += `# ${c}\n`;
+  };
+  if (cmd) prompt(cmd);
+
+  // A batch step: a cyan marker, then the command it runs as its own prompt.
+  // Steps after the first get a little space above, like separate commands.
+  let steps = 0;
+  const step = (text, c) => {
+    endProgress();
+    st.list = null;
+    plain += `› ${text}\n`;
+    const d = add(span('t-step', text));
+    if (steps++) d.classList.add('t-step-gap');
+    if (c) prompt(c);
+    stick();
+  };
 
   el.querySelector('.up-term-copy').onclick = async (e) => {
     const lbl = e.currentTarget.querySelector('span');
@@ -265,6 +286,9 @@ export function createTermLog({ host = 'pi', cmd = '', cwd = '~' } = {}) {
         return;
       }
       endProgress();
+      // The agent's "› Cleaning APT package cache…" lines (Disk clean).
+      const sm = String(raw).match(/^› (.+)$/);
+      if (sm) { step(sm[1]); return; }
       plain += raw + '\n';
       const ev = dockerEvent(raw);
       if (ev) { docker(ev); stick(); return; }
@@ -279,6 +303,7 @@ export function createTermLog({ host = 'pi', cmd = '', cwd = '~' } = {}) {
       }
       stick();
     },
+    step,
     note(text, kind = 'info') {
       endProgress();
       plain += text + '\n';
