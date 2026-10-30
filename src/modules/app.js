@@ -7560,12 +7560,22 @@ pageRenderers.updates = (() => {
       const rebuildNote = noNewEntries
         ? `<p class="up-cl-stubnote">No source changes: <b>${esc(data.candidateVersion || 'the new version')}</b> is a binary rebuild of the installed version. Every entry below is already installed.</p>`
         : '';
-      // expand the newest genuinely-new entry by default (or the first entry
-      // when nothing is new, so the modal never opens blank)
+      // expand every genuinely-new entry by default, since the CVE tag counts
+      // them all (or the first entry when nothing is new, so the modal never
+      // opens blank)
       if (activeIdx === null && sections.length) {
         const start = highlightIdx >= 0 ? highlightIdx : 0;
         activeIdx = start; expanded.add(start);
+        sections.forEach((s, i) => { if (isNewer(s)) expanded.add(i); });
       }
+      // Same unique count as the row's CVE tag. An update can span releases and
+      // the +rpt fork repeats its Debian entry, so the ids listed can repeat.
+      const newSections = sections.filter(isNewer);
+      const newCveIds = newSections.flatMap((s) => s.lines.join('\n').match(/CVE-\d{4}-\d+/g) || []);
+      const newCveCount = new Set(newCveIds).size;
+      const cveSummary = newCveCount
+        ? `<p class="up-cl-summary"><span class="up-tag up-tag-cve">${newCveCount} CVE${newCveCount > 1 ? 's' : ''}</span><span>across ${newSections.length} new entr${newSections.length > 1 ? 'ies' : 'y'}.${newCveIds.length > newCveCount ? ' Repeats are counted once.' : ''}</span></p>`
+        : '';
       const nav = sections.map((s, i) => {
         const isNewest = i === highlightIdx;   // only a genuinely-new entry is cyan
         const isActive = i === activeIdx;
@@ -7587,7 +7597,7 @@ pageRenderers.updates = (() => {
       }).join('');
       return `<div class="up-cl-layout">
           <div class="up-cl-nav">${nav || '<span class="up-cl-empty">No versions</span>'}</div>
-          <div class="up-cl-content" data-cl="content">${rebuildNote}${bodyHtml}${stubNote}</div>
+          <div class="up-cl-content" data-cl="content">${rebuildNote}${cveSummary}${bodyHtml}${stubNote}</div>
         </div>`;
     };
     const instTitle = installed ? ` <span class="up-cl-inst">(installed: ${esc(installed)})</span>` : '';
