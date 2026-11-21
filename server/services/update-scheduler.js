@@ -217,9 +217,11 @@ export function createUpdateScheduler({ updates, mailer, telegram, loadSettings,
     let telegrammed = false;
     if (cfg.telegramEnabled && telegram && (security.length > 0 || (!cfg.onlySecurity && finalList.length > 0))) {
       try {
-        await telegram.send({ text: buildTelegram(finalList) });
-        telegrammed = true;
-        events?.add?.('update.telegram', 'info', { security: security.length, total: finalList.length });
+        // null = Telegram is switched off in Settings: nothing was sent.
+        if (await telegram.send({ text: buildTelegram(finalList) })) {
+          telegrammed = true;
+          events?.add?.('update.telegram', 'info', { security: security.length, total: finalList.length });
+        }
       } catch (err) {
         events?.add?.('update.telegram.fail', 'warning', { error: err.message });
       }

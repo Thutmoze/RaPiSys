@@ -51,6 +51,20 @@ describe('telegram service', () => {
     expect(calls[0].text.split('\n')[0]).toBe('<b>YRPi</b>');
   });
 
+  it('sends nothing while Telegram is switched off in Settings', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) }));
+    const { tg } = fixture({ enabled: false });
+    expect(await tg.send({ text: 'x' })).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('the test button still sends while switched off', async () => {
+    stubFetch(async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 1 } }) }));
+    const { tg } = fixture({ enabled: false });
+    await tg.sendTest();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('throws and records an event when the API returns an error', async () => {
     stubFetch(async () => ({ ok: false, status: 403, json: async () => ({ ok: false, description: 'chat not found' }) }));
     const { tg, events } = fixture();

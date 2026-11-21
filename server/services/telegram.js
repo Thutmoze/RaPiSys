@@ -58,9 +58,12 @@ export function createTelegram({ getTelegramSettings, secrets, events, getNodeNa
   /**
    * Send a message. `text` supports a small subset of HTML (b/i/code/a) since
    * we call with parse_mode HTML. Falls back to the configured chat id.
+   * Returns null without sending while Telegram is switched off in Settings;
+   * `force` (the test button) sends anyway.
    */
-  async function send({ text, chatId, parseMode = 'HTML' }) {
+  async function send({ text, chatId, parseMode = 'HTML', force = false }) {
     const cfg = await getTelegramSettings();
+    if (!force && !cfg?.enabled) return null;
     const target = chatId || cfg?.chatId;
     if (!target) throw new Error('No Telegram chat id configured');
     let node;
@@ -85,6 +88,7 @@ export function createTelegram({ getTelegramSettings, secrets, events, getNodeNa
   async function sendTest(chatId) {
     return send({
       chatId,
+      force: true,
       text: '✅ <b>Test notification</b>\nThis is a test message from your RaPiSys dashboard. '
         + 'Telegram notifications are configured correctly. 🎉',
     });

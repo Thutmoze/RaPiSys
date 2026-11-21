@@ -91,7 +91,7 @@ export function createAlertEngine({ alertsRepo, metricsRepo, eventsRepo, mailer,
     if (channels.includes('telegram')) {
       try {
         const tg = await getSettings().then((s) => s.rapisys?.telegram);
-        if (tg?.chatId) {
+        if (tg?.enabled && tg?.chatId) {
           const icon = kind === 'fired' ? (rule.severity === 'critical' ? '🔴' : '🟠') : '🟢';
           await telegram.send({
             text: `${icon} <b>${esc(title)}</b>\n${esc(body)}`,
