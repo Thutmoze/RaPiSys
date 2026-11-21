@@ -7524,14 +7524,6 @@ pageRenderers.updates = (() => {
             <div class="up-cl-dlprog" data-cl="dlprog" style="display:none"></div>
           </div>`;
       }
-      if (data.needsFull) {
-        return `<div class="up-cl-needfull">
-            <p>This package is large, so the new-version changelog isn't cached yet. The notes below are the <b>installed</b> version. Download the new package to see what's changing?</p>
-            <button class="up-btn up-act-fw" data-cl="dl">${ICN.download}<span>Download New Changelog</span></button>
-            <div class="up-cl-dlprog" data-cl="dlprog" style="display:none"></div>
-            <pre class="up-cl-pre">${hlSec(data.changelog || '')}</pre>
-          </div>`;
-      }
       const candE = parseVerEpoch(data.candidateVersion);
       const instE = parseVerEpoch(installed);
       const de = candE != null ? candE : (instE != null ? instE : 0);
@@ -7557,7 +7549,9 @@ pageRenderers.updates = (() => {
       // With no installed version to compare against we can't tell, so fall
       // back to the old behaviour and treat the first entry as the newest.
       const highlightIdx = installed ? newestIdx : (sections.length ? 0 : -1);
-      const rebuildNote = noNewEntries
+      // A large package (needsFull) shows the INSTALLED changelog until the new
+      // one is downloaded, so "nothing newer" there is expected, not a rebuild.
+      const rebuildNote = noNewEntries && !data.needsFull
         ? `<p class="up-cl-stubnote">No source changes: <b>${esc(data.candidateVersion || 'the new version')}</b> is a binary rebuild of the installed version. Every entry below is already installed.</p>`
         : '';
       // expand every genuinely-new entry by default, since the CVE tag counts
@@ -7600,12 +7594,23 @@ pageRenderers.updates = (() => {
           <div class="up-cl-content" data-cl="content">${rebuildNote}${cveSummary}${bodyHtml}${stubNote}</div>
         </div>`;
     };
+    // Large package: the notice + download live in their own bar OUTSIDE
+    // [data-cl=main], so expanding a section or picking a version (which
+    // re-renders main) never wipes a download that is in progress.
+    const renderBar = () => (data.needsFull && !data.error
+      ? `<div class="up-cl-needfull-bar">
+          <p>Large package: the new version's changelog isn't cached yet. These are the notes for the <b>installed</b> version.</p>
+          <button class="up-btn up-act-fw" data-cl="dl">${ICN.download}<span>Download New Changelog</span></button>
+          <div class="up-cl-dlprog" data-cl="dlprog" style="display:none"></div>
+        </div>`
+      : '');
     const instTitle = installed ? ` <span class="up-cl-inst">(installed: ${esc(installed)})</span>` : '';
     ov.innerHTML = `<div class="wizard card up-cl-modal">
         <div class="up-cl-head">
           <div><b>${esc(pkg)}</b> <span class="inv-dim">changelog</span>${data.candidateVersion ? ` <span class="up-cl-ver">→ ${esc(decodeURIComponent(data.candidateVersion))}</span>` : ''}${instTitle}</div>
           <div class="up-cl-head-actions" data-cl="headactions">${headerActions()}</div>
         </div>
+        <div data-cl="bar">${renderBar()}</div>
         <div class="up-cl-main" data-cl="main">${data.changelog || data.needsFull || data.error ? renderBody() : '<div class="up-log-loading"><span class="up-spinner-sm"></span>Loading changelog…</div>'}</div>
       </div>`;
     document.body.appendChild(ov);
@@ -7639,6 +7644,7 @@ pageRenderers.updates = (() => {
     ov._rerender = (newData) => {
       Object.assign(data, newData); settled = true; activeIdx = null; expanded.clear();
       ov.querySelector('[data-cl=headactions]').innerHTML = headerActions();
+      ov.querySelector('[data-cl=bar]').innerHTML = renderBar();
       ov.querySelector('[data-cl=main]').innerHTML = renderBody();
       wire();
     };

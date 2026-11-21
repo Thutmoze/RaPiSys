@@ -5922,6 +5922,20 @@ body.ultra .up-cl-summary .up-tag { font-size: 9px; padding: 1px 6px; }
 .up-cl-needfull { padding: 16px 20px; }
 .up-cl-needfull p { font-size: 13px; color: var(--text-secondary); margin: 0 0 12px; }
 .up-cl-dlprog { margin: 12px 0; }
+/* large package: notice + download bar above the normal sectioned changelog */
+.up-cl-needfull-bar { flex-shrink: 0; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 20px; border-bottom: 1px solid var(--border-color); background: rgba(0,212,255,0.04); }
+.up-cl-needfull-bar p { flex: 1 1 320px; margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.up-cl-needfull-bar p b { color: var(--text-primary); }
+.up-cl-needfull-bar .up-cl-dlprog { flex-basis: 100%; margin: 0; }
+.up-cl-needfull-bar .up-cl-empty { padding: 0; text-align: left; }
+body.compact .up-cl-needfull-bar { padding: 10px 16px; gap: 12px; }
+body.compact .up-cl-needfull-bar p { font-size: 12px; }
+body.compact .up-cl-needfull-bar .up-btn { padding: 8px 14px; font-size: 12px; }
+body.ultra .up-cl-needfull-bar { padding: 8px 12px; gap: 10px; }
+body.ultra .up-cl-needfull-bar p { font-size: 11px; }
+body.ultra .up-cl-needfull-bar .up-btn { padding: 6px 10px; font-size: 11px; }
+body.ultra .up-cl-needfull-bar .up-btn svg { width: 14px; height: 14px; }
 /* stacked tags */
 .up-tags-stack { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 .up-tags-stack .up-tag { margin-right: 0; }
