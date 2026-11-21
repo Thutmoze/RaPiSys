@@ -3177,9 +3177,18 @@ WantedBy=multi-user.target
       return '';
     };
 
+    // Packages built from one source often share docs: the deb ships
+    // usr/share/doc/<pkg> as a symlink to a sibling's dir (dh --link-doc;
+    // parted -> libparted2t64). Remember the sibling so the fallback below
+    // fetches that deb first.
+    let linkDocPkg = null;
     if (ok) {
       await run('dpkg-deb', ['-x', debPath, path.join(tmp, 'x')], 60000).catch(() => {});
       text = extractChangelog(path.join(tmp, 'x'));
+      try {
+        const t = path.basename(fs.readlinkSync(path.join(tmp, 'x', 'usr', 'share', 'doc', pkg)));
+        if (PKG_RE.test(t) && t !== pkg) linkDocPkg = t;
+      } catch { /* a real dir, or no doc dir at all */ }
     }
 
     let usedSource = false;
@@ -3190,19 +3199,30 @@ WantedBy=multi-user.target
       try {
         const show = await run('apt-cache', ['show', pkg], 15000).catch(() => ({ stdout: '' }));
         // "Source: linux" (may include a version in parens, strip it)
+        // apt omits "Source:" when the source has the package's own name
+        // (parted is built from source parted), so that means "same name".
         const sm = (show.stdout || '').match(/^Source:\s*(\S+)/m);
-        const srcName = sm ? sm[1] : null;
+        const srcName = sm ? sm[1] : ((show.stdout || '').trim() ? pkg : null);
         if (srcName) {
           // find a binary .deb URI from the same source pool dir as our package
           // (the pool path is /pool/main/<x>/<source>/...), preferring the
           // versioned headers-common or image deb which ships the changelog.
           const poolDir = uri.slice(0, uri.lastIndexOf('/') + 1);
           const allUris = (piu.stdout || '').match(/'(https?:\/\/[^']+\.deb)'/g) || [];
-          const cands = allUris.map((s) => s.slice(1, -1))
+          const debOf = (u) => u.slice(u.lastIndexOf('/') + 1);
+          // The linked-docs sibling may already be up to date, so it is not in
+          // our --print-uris output: resolve its own URI.
+          if (linkDocPkg && !allUris.some((q) => debOf(q.slice(1, -1)).startsWith(linkDocPkg + '_'))) {
+            const lp = await run('apt-get', ['install', '--reinstall', '--print-uris', '-y', linkDocPkg], 20000).catch(() => ({ stdout: '' }));
+            allUris.push(...((lp.stdout || '').match(/'(https?:\/\/[^']+\.deb)'/g) || []));
+          }
+          const cands = [...new Set(allUris.map((s) => s.slice(1, -1)))]
             .filter((u) => u.startsWith(poolDir))
             .sort((a, b) => {
-              // prefer 'common' (arch-indep docs) then 'image' then anything
-              const score = (u) => /common/.test(u) ? 0 : /linux-image/.test(u) ? 1 : 2;
+              // the deb our doc dir links to, then 'common' (arch-indep docs),
+              // then 'image', then anything
+              const score = (u) => linkDocPkg && debOf(u).startsWith(linkDocPkg + '_') ? -1
+                : /common/.test(u) ? 0 : /linux-image/.test(u) ? 1 : 2;
               return score(a) - score(b);
             });
           for (const cu of cands) {
