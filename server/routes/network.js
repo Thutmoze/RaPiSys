@@ -3,6 +3,9 @@
 import express from 'express';
 
 const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+const IFACE_RE = /^[a-zA-Z0-9._@-]{1,32}$/;
+const COLOR_RE = /^#[0-9a-f]{6}$/;
+const MAX_IFACE_COLORS = 64;
 
 /** Enabled peers reachable by a LAN IPv4 (their base URL host): DNS fallback candidates. */
 export function peerDnsCandidates(peers = []) {
@@ -25,6 +28,40 @@ export function networkRouter({ network, metricsRepo, requireControl, loadSettin
   r.get('/', async (req, res) => {
     try { res.json(await network.snapshot()); }
     catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Interface colours the user picked on the Network page, kept per node in
+  // settings.rapisys.network.ifaceColors. Interfaces without one get an
+  // automatic colour in the browser.
+  r.get('/iface-colors', async (req, res) => {
+    try { res.json({ colors: (await loadSettings()).rapisys?.network?.ifaceColors || {} }); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Set one interface's colour, or clear it with color: null.
+  r.put('/iface-colors', requireControl, async (req, res) => {
+    const iface = String(req.body?.iface || '');
+    const color = req.body?.color == null ? null : String(req.body.color).toLowerCase();
+    if (!IFACE_RE.test(iface)) return res.status(400).json({ error: 'invalid interface name' });
+    if (color !== null && !COLOR_RE.test(color)) return res.status(400).json({ error: 'color must be #rrggbb' });
+    try {
+      let colors;
+      await withFileLock(async () => {
+        const s = await loadSettings();
+        s.rapisys = s.rapisys || {};
+        s.rapisys.network = s.rapisys.network || {};
+        colors = { ...(s.rapisys.network.ifaceColors || {}) };
+        if (color) {
+          if (!(iface in colors) && Object.keys(colors).length >= MAX_IFACE_COLORS) {
+            throw Object.assign(new Error(`at most ${MAX_IFACE_COLORS} custom colours`), { status: 400 });
+          }
+          colors[iface] = color;
+        } else delete colors[iface];
+        s.rapisys.network.ifaceColors = colors;
+        await saveSettings(s);
+      });
+      res.json({ colors });
+    } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
   });
 
   // Throughput only — cheap, for the live poll.

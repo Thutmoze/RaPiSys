@@ -17,6 +17,7 @@ import { createTermLog } from './term-log.js';
 import { createAptProgress } from './apt-progress.js';
 import { releaseNotesHtml } from './release-notes.js';
 import { poll } from './poll.js';
+import { NET_PALETTE, autoNetColors } from './net-colors.js';
 import { openModal, modalId } from './modal.js';
 
 const API = window.location.port === '5173' ? 'http://localhost:3001/api' : '/api';
@@ -4877,11 +4878,22 @@ pageRenderers.network = (() => {
   let nethogsLive = false, nethogsTimer = null;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // Distinct colors per interface, reused for both the line and its label.
-  const PALETTE = ['#00d4ff', '#a855f7', '#10b981', '#f97316', '#eab308', '#ec4899', '#38bdf8', '#84cc16'];
-  const ifaceColors = {};
-  let colorIdx = 0;
-  const colorFor = (iface) => (ifaceColors[iface] ||= PALETTE[colorIdx++ % PALETTE.length]);
+  // Distinct colors per interface, reused for the line, its label and the
+  // history bars. A colour the user picked (saved on the node) wins; the rest
+  // come from autoNetColors(), recomputed whenever the interface set changes.
+  const PALETTE = NET_PALETTE;
+  let customColors = {};
+  let autoColors = {};
+  let autoKey = '';
+  const colorFor = (iface) => customColors[iface] || autoColors[iface]
+    || (autoColors[iface] = PALETTE[Object.keys(autoColors).length % PALETTE.length]);
+  function syncAutoColors(list) {
+    const key = list.map((i) => `${i.name}:${i.kind}`).sort().join(',') + '|' + JSON.stringify(customColors);
+    if (key === autoKey) return;
+    autoKey = key;
+    autoColors = autoNetColors(list, customColors);
+    applyFocus();
+  }
 
   const fmtRate = (bps) => {
     const bits = bps * 8;
@@ -4927,6 +4939,7 @@ pageRenderers.network = (() => {
       .sort((a, b) => (b[1].rxRate + b[1].txRate) - (a[1].rxRate + a[1].txRate));
     // Bridges/docker are internal plumbing — hidden unless the user opts in.
     const showVirtual = pageRenderers.network._showVirtual;
+    syncAutoColors(allIfaces.map(([name, v]) => ({ name, kind: v.kind })));
     const ifaces = allIfaces.filter(([, v]) => showVirtual || v.kind !== 'bridge');
     const hiddenCount = allIfaces.length - ifaces.length;
     let totalRx = 0, totalTx = 0;
@@ -4946,13 +4959,14 @@ pageRenderers.network = (() => {
       const col = colorFor(name);
       const on = selected.size === 0 || selected.has(name);
       return `
-        <button class="net-iface ${on ? '' : 'net-iface-off'}" data-iface="${esc(name)}">
-          <span class="net-iface-dot" style="background:${col}"></span>
+        <div class="net-iface ${on ? '' : 'net-iface-off'}" role="button" tabindex="0" aria-pressed="${selected.has(name)}" data-iface="${esc(name)}">
+          <button class="net-iface-dot ${customColors[name] ? 'is-custom' : ''}" style="background:${col}" data-dot="${esc(name)}"
+            title="Change colour of ${esc(name)}" aria-label="Change colour of ${esc(name)}"></button>
           <span class="net-iface-name" style="color:${col}">${esc(name)}</span>
           <span class="net-iface-kind">${KIND_LABEL[v.kind] || ''}</span>
           <span class="net-iface-rates">▼ ${fmtRate(v.rxRate)} &nbsp; ▲ ${fmtRate(v.txRate)}</span>
           <span class="net-iface-total">${fmtBytes(v.rxBytes + v.txBytes)}</span>
-        </button>`;
+        </div>`;
     }).join('')
       + (hiddenCount > 0 || showVirtual
         ? `<button class="net-toggle net-virtual-toggle" data-net="togglevirt">${showVirtual ? 'Hide' : 'Show'} ${showVirtual ? '' : hiddenCount + ' '}virtual / bridge interfaces</button>`
@@ -4960,11 +4974,99 @@ pageRenderers.network = (() => {
     const tv = $('[data-net=togglevirt]', host);
     if (tv) tv.onclick = () => { pageRenderers.network._showVirtual = !showVirtual; refreshLive(host); };
 
-    $('[data-net=ifaces]', host).querySelectorAll('[data-iface]').forEach((b) => b.onclick = () => {
-      const n = b.dataset.iface;
+    const toggle = (n) => {
       if (selected.has(n)) selected.delete(n); else selected.add(n);
       applyFocus(); refreshLive(host);
+    };
+    $('[data-net=ifaces]', host).querySelectorAll('[data-iface]').forEach((b) => {
+      b.onclick = () => toggle(b.dataset.iface);
+      b.onkeydown = (e) => {
+        if (e.target === b && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle(b.dataset.iface); }
+      };
     });
+    $('[data-net=ifaces]', host).querySelectorAll('[data-dot]').forEach((d) => d.onclick = (e) => {
+      e.stopPropagation(); openColorPicker(d, host);
+    });
+  }
+
+  // ---- interface colour picker ----
+  let picker = null;
+  function closeColorPicker() {
+    if (!picker) return;
+    picker.remove(); picker = null;
+    document.removeEventListener('mousedown', onPickerOutside, true);
+    document.removeEventListener('keydown', onPickerKey, true);
+    window.removeEventListener('resize', closeColorPicker);
+    window.removeEventListener('scroll', closeColorPicker, true);
+  }
+  function onPickerOutside(e) {
+    if (picker && !picker.contains(e.target) && !e.target.closest?.('[data-dot]')) closeColorPicker();
+  }
+  function onPickerKey(e) { if (e.key === 'Escape') closeColorPicker(); }
+
+  async function saveIfaceColor(name, color, host) {
+    const prev = customColors;
+    customColors = { ...customColors };
+    if (color) customColors[name] = color; else delete customColors[name];
+    autoKey = ''; applyFocus(); refreshLive(host);
+    try {
+      const r = await api('/network/iface-colors', { method: 'PUT', body: { iface: name, color } });
+      customColors = r.colors || customColors;
+      toast('success', 'Network', color ? `${name} colour saved` : `${name} back to its automatic colour`);
+    } catch (err) {
+      customColors = prev;
+      toast('error', 'Network', `Could not save the colour: ${err.message}`);
+    }
+    autoKey = ''; applyFocus(); refreshLive(host); refreshHistory(host);
+  }
+
+  function openColorPicker(dot, host) {
+    const name = dot.dataset.dot;
+    if (picker?.dataset.for === name) { closeColorPicker(); return; }
+    closeColorPicker();
+    const cur = colorFor(name);
+    // "In use" = shown right now on another interface row.
+    const shown = [...document.querySelectorAll('[data-dot]')].map((d) => d.dataset.dot).filter((n) => n !== name);
+    const usedBy = (c) => shown.some((n) => colorFor(n) === c);
+    picker = document.createElement('div');
+    picker.className = 'net-cpick';
+    picker.dataset.for = name;
+    picker.setAttribute('role', 'dialog');
+    picker.setAttribute('aria-label', `Colour for ${name}`);
+    picker.innerHTML = `
+      <div class="net-cpick-head"><span class="net-cpick-cur" style="background:${cur}"></span>Colour for <b>${esc(name)}</b></div>
+      <div class="net-cpick-grid">${PALETTE.map((c) => `<button class="net-cpick-sw${c === cur ? ' is-sel' : ''}${usedBy(c) ? ' is-used' : ''}"
+        style="background:${c}" data-c="${c}" title="${c}${usedBy(c) ? ' (in use)' : ''}" aria-label="${c}${usedBy(c) ? ' (in use)' : ''}"></button>`).join('')}</div>
+      <div class="net-cpick-row">
+        <label class="net-cpick-custom"><input type="color" value="${cur}"> Custom</label>
+        <span class="net-cpick-hex">${cur}</span>
+        <button class="net-cpick-reset"${customColors[name] ? '' : ' disabled'}>Reset</button>
+      </div>
+      <div class="net-cpick-foot">Saved on this Pi. Automatic colour: ${autoColors[name] || cur}</div>`;
+    document.body.appendChild(picker);
+    const r = dot.getBoundingClientRect();
+    const left = Math.min(r.left - 8, window.innerWidth - picker.offsetWidth - 12);
+    const below = r.bottom + 10 + picker.offsetHeight < window.innerHeight;
+    picker.style.left = `${Math.max(12, left)}px`;
+    picker.style.top = `${below ? r.bottom + 10 : Math.max(12, r.top - picker.offsetHeight - 10)}px`;
+    const pick = (c) => { closeColorPicker(); if (c !== (customColors[name] || null)) saveIfaceColor(name, c, host); };
+    picker.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => pick(b.dataset.c));
+    const inp = picker.querySelector('input');
+    inp.oninput = () => { picker.querySelector('.net-cpick-hex').textContent = inp.value; };
+    inp.onchange = () => pick(inp.value.toLowerCase());
+    picker.querySelector('.net-cpick-reset').onclick = () => pick(null);
+    setTimeout(() => {
+      document.addEventListener('mousedown', onPickerOutside, true);
+      document.addEventListener('keydown', onPickerKey, true);
+      window.addEventListener('resize', closeColorPicker);
+      window.addEventListener('scroll', closeColorPicker, true);
+    });
+    picker.querySelector('.net-cpick-sw.is-sel, .net-cpick-sw')?.focus();
+  }
+
+  async function loadIfaceColors(host) {
+    try { customColors = (await api('/network/iface-colors')).colors || {}; } catch { customColors = {}; }
+    autoKey = ''; applyFocus(); refreshLive(host); refreshHistory(host);
   }
 
   // ---- bandwidth history with period filter ----
@@ -5213,7 +5315,7 @@ pageRenderers.network = (() => {
           </div>
           <div class="card-body">
             <canvas data-net="chart" class="net-chart"></canvas>
-            <p class="net-hint">Click an interface to focus (multi-select); others dim.</p>
+            <p class="net-hint">Click an interface to focus (multi-select); others dim. Click its dot to change its colour.</p>
             <div class="net-ifaces" data-net="ifaces"></div>
           </div>
         </div>
@@ -5242,7 +5344,9 @@ pageRenderers.network = (() => {
       initChart(host);
       $('[data-net=period]', host).addEventListener('change', (e) => { histPeriod = e.target.value; refreshHistory(host); });
       enhanceSelects(host);
+      customColors = {}; autoColors = {}; autoKey = '';
       refreshLive(host); refreshHistory(host); refreshProtocols(host); refreshDns(host);
+      loadIfaceColors(host);
       const cog = $('[data-net=picfg]', host);
       if (cog) cog.onclick = () => goToPiholeSettings();
       startProcs(host);
@@ -5251,6 +5355,7 @@ pageRenderers.network = (() => {
     },
     unmount() {
       clearInterval(liveTimer); clearInterval(slowTimer); clearInterval(nethogsTimer);
+      closeColorPicker();
       globalThis.__netPageActive = false;
       if (chart) { chart.stop(); chart = null; }
       for (const k of Object.keys(series)) delete series[k];

@@ -5317,6 +5317,49 @@ button.net-link { background: none; border: 0; padding: 0; font: inherit; cursor
 .net-iface:hover { background: var(--bg-secondary); }
 .net-iface-off { opacity: 0.4; }
 .net-iface-dot { width: 9px; height: 9px; border-radius: 50%; }
+.net-iface:focus-visible { outline: none; border-color: rgba(0,212,255,0.4); }
+/* The dot is a button that opens the colour picker; ::before widens the hit area. */
+button.net-iface-dot { padding: 0; border: 0; cursor: pointer; position: relative;
+  transition: box-shadow 0.15s, transform 0.15s; }
+button.net-iface-dot::before { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+button.net-iface-dot:hover, button.net-iface-dot:focus-visible { transform: scale(1.35);
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.14); outline: none; }
+/* Small white mark: a colour the user picked rather than the automatic one. */
+button.net-iface-dot.is-custom::after { content: ''; position: absolute; right: -3px; bottom: -3px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--text-primary); }
+.net-cpick { position: fixed; z-index: 1000; width: 236px; padding: 12px; border-radius: 12px;
+  background: rgba(17,17,17,0.96); border: 1px solid var(--border-color); backdrop-filter: blur(20px);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5); font-size: 12px; animation: netCpickIn 0.14s ease; }
+@keyframes netCpickIn { from { opacity: 0; transform: translateY(-4px); } }
+.net-cpick-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--text-secondary); }
+.net-cpick-head b { color: var(--text-primary); }
+.net-cpick-cur { width: 9px; height: 9px; border-radius: 50%; }
+.net-cpick-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.net-cpick-sw { aspect-ratio: 1; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
+  padding: 0; position: relative; transition: transform 0.12s; }
+.net-cpick-sw:hover, .net-cpick-sw:focus-visible { transform: scale(1.12); outline: none; }
+.net-cpick-sw.is-sel { border-color: var(--text-primary); box-shadow: 0 0 0 2px rgba(0,0,0,0.6) inset; }
+/* Darkened centre: another visible interface already uses this colour (still pickable). */
+.net-cpick-sw.is-used::after { content: ''; position: absolute; inset: 30%; border-radius: 50%;
+  background: rgba(0,0,0,0.45); }
+.net-cpick-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--border-color); }
+.net-cpick-custom { display: inline-flex; align-items: center; gap: 8px; color: var(--text-secondary); cursor: pointer; }
+.net-cpick-custom input { width: 26px; height: 22px; padding: 0; border: 1px solid var(--border-color);
+  border-radius: 6px; background: none; cursor: pointer; }
+.net-cpick-hex { font-family: 'SF Mono', 'Monaco', monospace; color: var(--text-muted); font-size: 11px; }
+.net-cpick-reset { margin-left: auto; background: none; border: 1px solid var(--border-color);
+  color: var(--text-secondary); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 11px; cursor: pointer; }
+.net-cpick-reset:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
+.net-cpick-reset:disabled { opacity: 0.4; cursor: default; }
+.net-cpick-foot { margin-top: 8px; font-size: 10px; color: var(--text-muted); }
+body.compact .net-cpick { width: 212px; padding: 10px; }
+body.compact .net-cpick-grid { gap: 6px; }
+body.ultra .net-iface-dot { width: 8px; height: 8px; }
+body.ultra .net-cpick { width: 188px; padding: 8px; font-size: 11px; }
+body.ultra .net-cpick-grid { gap: 5px; }
+body.ultra .net-cpick-row { margin-top: 8px; padding-top: 8px; }
+body.ultra .net-cpick-foot { display: none; }
 .net-iface-name { font-weight: 700; }
 .net-iface-kind { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
 .net-iface-rates { color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
